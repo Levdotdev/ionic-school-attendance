@@ -1,0 +1,7 @@
+{
+  "name": "ionic-school-attendance",
+  "type": "vue-vite",
+  "integrations": {
+    "capacitor": {}
+  }
+}
