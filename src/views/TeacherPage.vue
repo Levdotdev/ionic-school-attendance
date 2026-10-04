@@ -37,305 +37,310 @@
 
       <template v-else>
         <ion-card>
-        <ion-card-header>
-          <ion-card-title>Create a class</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <form class="form-grid" @submit.prevent="createClass">
-            <ion-input v-model="classForm.name" label="Class name" label-placement="stacked" fill="outline" required />
-            <ion-input v-model="classForm.section" label="Section" label-placement="stacked" fill="outline" />
-            <ion-input
-              v-model="classForm.default_latitude"
-              label="Default latitude"
-              label-placement="stacked"
-              fill="outline"
-              type="number"
-              step="any"
-              required
-            />
-            <ion-input
-              v-model="classForm.default_longitude"
-              label="Default longitude"
-              label-placement="stacked"
-              fill="outline"
-              type="number"
-              step="any"
-              required
-            />
-            <ion-input
-              v-model="classForm.default_radius_m"
-              label="Allowed radius (meters)"
-              label-placement="stacked"
-              fill="outline"
-              type="number"
-              min="10"
-              required
-            />
-            <ion-button type="submit" :disabled="savingClass">
-              <ion-spinner v-if="savingClass" name="crescent" />
-              <span v-else>Create class</span>
-            </ion-button>
-          </form>
-        </ion-card-content>
-        </ion-card>
-
-        <ion-card>
-        <ion-card-header>
-          <ion-card-title>My classes</ion-card-title>
-        </ion-card-header>
-        <ion-card-content>
-          <ion-spinner v-if="loadingClasses" name="crescent" />
-          <ion-note v-else-if="classes.length === 0">Create your first class above.</ion-note>
-          <ion-list v-else>
-            <ion-item>
-              <ion-select v-model="selectedClassId" label="Open class" label-placement="stacked">
-                <ion-select-option v-for="item in classes" :key="item.id" :value="item.id">
-                  {{ item.name }}{{ item.section ? ` - ${item.section}` : '' }} ({{ item.join_code }})
-                </ion-select-option>
-              </ion-select>
-            </ion-item>
-          </ion-list>
-
-          <div v-if="activeClass" class="summary">
-            <p><strong>Code:</strong> {{ activeClass.join_code }}</p>
-            <p>
-              <strong>Location:</strong>
-              {{ activeClass.default_latitude }}, {{ activeClass.default_longitude }}
-              within {{ activeClass.default_radius_m }} m
-            </p>
-          </div>
-        </ion-card-content>
-        </ion-card>
-
-        <template v-if="activeClass">
-        <ion-card>
           <ion-card-header>
-            <ion-card-title>Weekly schedule</ion-card-title>
+            <ion-card-title>{{ editingClassId ? 'Edit class' : 'Create a class' }}</ion-card-title>
           </ion-card-header>
           <ion-card-content>
-            <form class="form-grid" @submit.prevent="addSchedule">
-              <ion-select v-model="scheduleForm.day_of_week" label="Day" label-placement="stacked" fill="outline">
-                <ion-select-option v-for="day in weekdays" :key="day.value" :value="day.value">
-                  {{ day.label }}
-                </ion-select-option>
-              </ion-select>
-              <ion-input v-model="scheduleForm.starts_at" label="Starts" label-placement="stacked" fill="outline" type="time" required />
-              <ion-input v-model="scheduleForm.ends_at" label="Ends" label-placement="stacked" fill="outline" type="time" required />
-              <ion-input v-model="scheduleForm.room" label="Room (optional)" label-placement="stacked" fill="outline" />
-              <ion-button type="submit" :disabled="savingSchedule">Add schedule</ion-button>
+            <form class="form-grid" @submit.prevent="saveClass">
+              <ion-input v-model="classForm.name" label="Class name" label-placement="stacked" fill="outline" required />
+              <ion-input v-model="classForm.section" label="Section" label-placement="stacked" fill="outline" />
+              <ion-note class="full-row">
+                School location is set automatically: {{ SCHOOL_LATITUDE }}, {{ SCHOOL_LONGITUDE }} within
+                {{ SCHOOL_RADIUS_M }} meters.
+              </ion-note>
+              <div class="form-actions full-row">
+                <ion-button type="submit" :disabled="savingClass">
+                  <ion-spinner v-if="savingClass" name="crescent" />
+                  <span v-else>{{ editingClassId ? 'Save class' : 'Create class' }}</span>
+                </ion-button>
+                <ion-button v-if="editingClassId" type="button" fill="outline" :disabled="savingClass" @click="cancelClassEdit">
+                  Cancel
+                </ion-button>
+              </div>
             </form>
+          </ion-card-content>
+        </ion-card>
 
-            <ion-list v-if="schedules.length">
-              <ion-item v-for="schedule in schedules" :key="schedule.id">
-                <ion-label>
-                  <h3>{{ dayLabel(schedule.day_of_week) }}</h3>
-                  <p>
-                    {{ formatTime(schedule.starts_at) }} - {{ formatTime(schedule.ends_at) }}
-                    <span v-if="schedule.room"> · {{ schedule.room }}</span>
-                  </p>
-                </ion-label>
+        <ion-card>
+          <ion-card-header>
+            <ion-card-title>My classes</ion-card-title>
+          </ion-card-header>
+          <ion-card-content>
+            <ion-spinner v-if="loadingClasses" name="crescent" />
+            <ion-note v-else-if="classes.length === 0">Create your first class above.</ion-note>
+            <ion-list v-else>
+              <ion-item>
+                <ion-select v-model="selectedClassId" label="Open class" label-placement="stacked">
+                  <ion-select-option v-for="item in classes" :key="item.id" :value="item.id">
+                    {{ item.name }}{{ item.section ? ` - ${item.section}` : '' }} ({{ item.join_code }})
+                  </ion-select-option>
+                </ion-select>
               </ion-item>
             </ion-list>
-            <ion-note v-else>No weekly schedule has been added.</ion-note>
-          </ion-card-content>
-        </ion-card>
 
-        <ion-card>
-          <ion-card-header>
-            <ion-card-title>Create a meeting</ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
-            <form class="form-grid" @submit.prevent="createMeeting">
-              <ion-input v-model="meetingForm.title" label="Meeting title" label-placement="stacked" fill="outline" required />
-              <ion-select v-model="meetingForm.mode" label="Attendance mode" label-placement="stacked" fill="outline">
-                <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
-                <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
-                <ion-select-option value="self_event">Student self-check at an event</ion-select-option>
-                <ion-select-option value="self_online">Online class self-check</ion-select-option>
-              </ion-select>
-
-              <label class="native-field">
-                <span>Meeting starts</span>
-                <input v-model="meetingForm.starts_at" type="datetime-local" required />
-              </label>
-              <label class="native-field">
-                <span>Meeting ends</span>
-                <input v-model="meetingForm.ends_at" type="datetime-local" required />
-              </label>
-              <label class="native-field">
-                <span>Check-in opens</span>
-                <input v-model="meetingForm.check_in_opens_at" type="datetime-local" required />
-              </label>
-              <label class="native-field">
-                <span>Check-in closes</span>
-                <input v-model="meetingForm.check_in_closes_at" type="datetime-local" required />
-              </label>
-
-              <template v-if="meetingForm.mode !== 'self_online'">
-                <ion-input
-                  v-model="meetingForm.latitude"
-                  label="Required latitude"
-                  label-placement="stacked"
-                  fill="outline"
-                  type="number"
-                  step="any"
-                  required
-                />
-                <ion-input
-                  v-model="meetingForm.longitude"
-                  label="Required longitude"
-                  label-placement="stacked"
-                  fill="outline"
-                  type="number"
-                  step="any"
-                  required
-                />
-                <ion-input
-                  v-model="meetingForm.allowed_radius_m"
-                  label="Allowed radius (meters)"
-                  label-placement="stacked"
-                  fill="outline"
-                  type="number"
-                  min="10"
-                  required
-                />
-              </template>
-
-              <ion-note>
-                On-site and event self-checks require an ID scan, selfie, and location. Online self-checks require a selfie only.
-              </ion-note>
-              <ion-button type="submit" :disabled="savingMeeting">Create meeting</ion-button>
-            </form>
-          </ion-card-content>
-        </ion-card>
-
-        <ion-card>
-          <ion-card-header>
-            <ion-card-title>Meetings</ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
-            <ion-item v-if="meetings.length">
-              <ion-select v-model="selectedMeetingId" label="Attendance meeting" label-placement="stacked">
-                <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">
-                  {{ meeting.title }} - {{ formatDateTime(meeting.starts_at) }}
-                </ion-select-option>
-              </ion-select>
-            </ion-item>
-            <ion-note v-else>Create a meeting to record attendance.</ion-note>
-
-            <div v-if="selectedMeeting" class="meeting-actions">
-              <div>
-                <ion-badge :color="selectedMeeting.attendance_enabled ? 'success' : 'medium'">
-                  {{ selectedMeeting.attendance_enabled ? 'Attendance enabled' : 'Attendance disabled' }}
-                </ion-badge>
-                <ion-badge color="tertiary">{{ modeLabel(selectedMeeting.attendance_mode) }}</ion-badge>
+            <div v-if="activeClass" class="summary">
+              <p><strong>Code:</strong> {{ activeClass.join_code }}</p>
+              <p><strong>School boundary:</strong> {{ SCHOOL_RADIUS_M }} meters from the saved school center</p>
+              <div class="row-actions">
+                <ion-button size="small" fill="outline" @click="beginClassEdit(activeClass)">Edit class</ion-button>
+                <ion-button size="small" fill="outline" color="danger" :disabled="savingClass" @click="deleteClass(activeClass)">
+                  Delete class
+                </ion-button>
               </div>
-              <ion-button
-                color="warning"
-                fill="outline"
-                size="small"
-                :disabled="!selectedMeeting.attendance_enabled || updatingMeeting"
-                @click="disableAttendance(selectedMeeting)"
-              >
-                Disable attendance
-              </ion-button>
             </div>
           </ion-card-content>
         </ion-card>
 
-        <ion-card>
-          <ion-card-header>
-            <ion-card-title>Enrolled students</ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
-            <ion-spinner v-if="loadingDetails" name="crescent" />
-            <ion-list v-else-if="students.length">
-              <ion-item v-for="student in students" :key="student.id">
-                <ion-label>
-                  <h2>{{ student.full_name }}</h2>
-                  <p>{{ student.email }}</p>
-                  <ion-badge v-if="attendanceByStudent[student.id]" :color="statusColor(attendanceByStudent[student.id].status)">
-                    {{ attendanceByStudent[student.id].status }}
+        <template v-if="activeClass">
+          <ion-card>
+            <ion-card-header>
+              <ion-card-title>Weekly schedule</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-note>
+                {{ currentWeekLabel }}. Each active schedule automatically creates one meeting for this week.
+              </ion-note>
+
+              <form class="form-grid spaced-form" @submit.prevent="saveSchedule">
+                <ion-select v-model="scheduleForm.day_of_week" label="Day" label-placement="stacked" fill="outline">
+                  <ion-select-option v-for="day in weekdays" :key="day.value" :value="day.value">
+                    {{ day.label }}
+                  </ion-select-option>
+                </ion-select>
+                <ion-input v-model="scheduleForm.starts_at" label="Starts" label-placement="stacked" fill="outline" type="time" required />
+                <ion-input v-model="scheduleForm.ends_at" label="Ends" label-placement="stacked" fill="outline" type="time" required />
+                <ion-input v-model="scheduleForm.room" label="Room (optional)" label-placement="stacked" fill="outline" />
+                <div class="form-actions full-row">
+                  <ion-button type="submit" :disabled="savingSchedule">
+                    {{ editingScheduleId ? 'Save schedule' : 'Add schedule' }}
+                  </ion-button>
+                  <ion-button
+                    v-if="editingScheduleId"
+                    type="button"
+                    fill="outline"
+                    :disabled="savingSchedule"
+                    @click="cancelScheduleEdit"
+                  >
+                    Cancel
+                  </ion-button>
+                </div>
+              </form>
+
+              <ion-list v-if="schedules.length">
+                <ion-item v-for="schedule in schedules" :key="schedule.id">
+                  <ion-label>
+                    <h3>{{ dayLabel(schedule.day_of_week) }} - {{ scheduleDateLabel(schedule.day_of_week) }}</h3>
+                    <p>
+                      {{ formatTime(schedule.starts_at) }} - {{ formatTime(schedule.ends_at) }}
+                      <span v-if="schedule.room"> - {{ schedule.room }}</span>
+                    </p>
+                    <ion-badge v-if="!schedule.is_active" color="medium">Inactive</ion-badge>
+                  </ion-label>
+                  <div slot="end" class="item-actions">
+                    <ion-button size="small" fill="outline" @click="beginScheduleEdit(schedule)">Edit</ion-button>
+                    <ion-button size="small" fill="outline" color="danger" @click="deleteSchedule(schedule)">Delete</ion-button>
+                  </div>
+                </ion-item>
+              </ion-list>
+              <ion-note v-else>No weekly schedule has been added.</ion-note>
+            </ion-card-content>
+          </ion-card>
+
+          <ion-card>
+            <ion-card-header>
+              <ion-card-title>{{ editingMeetingId ? 'Edit meeting' : 'Create an additional meeting' }}</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <form class="form-grid" @submit.prevent="saveMeeting">
+                <ion-input v-model="meetingForm.title" label="Meeting title" label-placement="stacked" fill="outline" required />
+                <ion-select v-model="meetingForm.mode" label="Attendance mode" label-placement="stacked" fill="outline">
+                  <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
+                  <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
+                  <ion-select-option value="self_event">Student self-check at an event</ion-select-option>
+                  <ion-select-option value="self_online">Online class self-check</ion-select-option>
+                </ion-select>
+
+                <label class="native-field">
+                  <span>Meeting starts</span>
+                  <input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required />
+                </label>
+                <label class="native-field">
+                  <span>Meeting ends</span>
+                  <input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required />
+                </label>
+                <label class="native-field">
+                  <span>Check-in opens</span>
+                  <input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required />
+                </label>
+                <label class="native-field">
+                  <span>Check-in closes</span>
+                  <input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required />
+                </label>
+
+                <ion-note class="full-row">
+                  Additional meetings must be within {{ currentWeekLabel.toLowerCase() }}.
+                  Physical self-checks automatically use the school location and {{ SCHOOL_RADIUS_M }}-meter boundary.
+                  Online self-checks do not request location.
+                </ion-note>
+                <div class="form-actions full-row">
+                  <ion-button type="submit" :disabled="savingMeeting">
+                    {{ editingMeetingId ? 'Save meeting' : 'Create meeting' }}
+                  </ion-button>
+                  <ion-button
+                    v-if="editingMeetingId"
+                    type="button"
+                    fill="outline"
+                    :disabled="savingMeeting"
+                    @click="cancelMeetingEdit"
+                  >
+                    Cancel
+                  </ion-button>
+                </div>
+              </form>
+            </ion-card-content>
+          </ion-card>
+
+          <ion-card>
+            <ion-card-header>
+              <ion-card-title>This week's meetings</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-note>{{ currentWeekLabel }}. Older and future meetings are hidden here.</ion-note>
+              <ion-item v-if="meetings.length">
+                <ion-select v-model="selectedMeetingId" label="Attendance meeting" label-placement="stacked">
+                  <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">
+                    {{ meeting.title }} - {{ formatDateTime(meeting.starts_at) }}
+                  </ion-select-option>
+                </ion-select>
+              </ion-item>
+              <ion-note v-else>No meetings are scheduled for this week.</ion-note>
+
+              <div v-if="selectedMeeting" class="meeting-actions">
+                <div>
+                  <ion-badge :color="selectedMeeting.attendance_enabled ? 'success' : 'medium'">
+                    {{ selectedMeeting.attendance_enabled ? 'Attendance counts' : 'Attendance does not count' }}
                   </ion-badge>
-                </ion-label>
-                <div slot="end" class="attendance-buttons">
+                  <ion-badge color="tertiary">{{ modeLabel(selectedMeeting.attendance_mode) }}</ion-badge>
+                  <ion-badge v-if="selectedMeeting.schedule_id" color="primary">Weekly</ion-badge>
+                </div>
+                <ion-button
+                  :color="selectedMeeting.attendance_enabled ? 'warning' : 'success'"
+                  fill="outline"
+                  size="small"
+                  :disabled="updatingMeeting"
+                  @click="toggleAttendance(selectedMeeting)"
+                >
+                  {{ selectedMeeting.attendance_enabled ? 'Do not count this meeting' : 'Count this meeting' }}
+                </ion-button>
+                <ion-button size="small" fill="outline" :disabled="updatingMeeting" @click="beginMeetingEdit(selectedMeeting)">
+                  Edit meeting
+                </ion-button>
+                <ion-button
+                  size="small"
+                  fill="outline"
+                  color="danger"
+                  :disabled="updatingMeeting"
+                  @click="deleteMeeting(selectedMeeting)"
+                >
+                  Delete meeting
+                </ion-button>
+              </div>
+            </ion-card-content>
+          </ion-card>
+
+          <ion-card>
+            <ion-card-header>
+              <ion-card-title>Enrolled students</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-spinner v-if="loadingDetails" name="crescent" />
+              <ion-list v-else-if="students.length">
+                <ion-item v-for="student in students" :key="student.id">
+                  <ion-label>
+                    <h2>{{ student.full_name }}</h2>
+                    <p>{{ student.email }}</p>
+                    <ion-badge v-if="attendanceByStudent[student.id]" :color="statusColor(attendanceByStudent[student.id].status)">
+                      {{ attendanceByStudent[student.id].status }}
+                    </ion-badge>
+                  </ion-label>
+                  <div slot="end" class="attendance-buttons">
+                    <ion-button
+                      color="success"
+                      size="small"
+                      :disabled="!canMarkAttendance || markingStudentId === student.id"
+                      @click="markAttendance(student.id, 'present')"
+                    >
+                      Present
+                    </ion-button>
+                    <ion-button
+                      color="danger"
+                      fill="outline"
+                      size="small"
+                      :disabled="!canMarkAttendance || markingStudentId === student.id"
+                      @click="markAttendance(student.id, 'absent')"
+                    >
+                      Absent
+                    </ion-button>
+                  </div>
+                </ion-item>
+              </ion-list>
+              <ion-note v-else>No active students are enrolled in this class.</ion-note>
+              <ion-note v-if="!selectedMeetingId">Select or create a meeting before marking attendance.</ion-note>
+            </ion-card-content>
+          </ion-card>
+
+          <ion-card>
+            <ion-card-header>
+              <ion-card-title>Self-check verification</ion-card-title>
+            </ion-card-header>
+            <ion-card-content>
+              <ion-note v-if="evidenceRows.length === 0">No student self-check evidence for this meeting.</ion-note>
+              <div v-for="record in evidenceRows" :key="record.id" class="evidence-card">
+                <div class="evidence-main">
+                  <img v-if="record.selfie_url" :src="record.selfie_url" alt="Student self-check selfie" class="selfie" />
+                  <div class="evidence-copy">
+                    <h3>{{ studentName(record.student_id) }}</h3>
+                    <p>Status: {{ record.status }}</p>
+                    <p>Submitted: {{ formatDateTime(record.submitted_at || record.created_at) }}</p>
+                    <p v-if="record.latitude != null && record.longitude != null">
+                      Location: {{ record.latitude }}, {{ record.longitude }}
+                      <a :href="mapUrl(record.latitude, record.longitude)" target="_blank" rel="noopener">Open map</a>
+                    </p>
+                    <p v-if="record.distance_m != null">Distance: {{ Math.round(record.distance_m) }} m</p>
+                    <ion-badge :color="verificationColor(record.verification_status)">
+                      {{ record.verification_status }}
+                    </ion-badge>
+                  </div>
+                </div>
+                <ion-textarea
+                  v-model="record.review_note"
+                  label="Teacher note"
+                  label-placement="stacked"
+                  fill="outline"
+                  auto-grow
+                />
+                <div class="review-buttons">
                   <ion-button
                     color="success"
                     size="small"
-                    :disabled="!canMarkAttendance || markingStudentId === student.id"
-                    @click="markAttendance(student.id, 'present')"
+                    :disabled="reviewingRecordId === record.id"
+                    @click="reviewEvidence(record, 'approved')"
                   >
-                    Present
+                    Approve
                   </ion-button>
                   <ion-button
                     color="danger"
                     fill="outline"
                     size="small"
-                    :disabled="!canMarkAttendance || markingStudentId === student.id"
-                    @click="markAttendance(student.id, 'absent')"
+                    :disabled="reviewingRecordId === record.id"
+                    @click="reviewEvidence(record, 'rejected')"
                   >
-                    Absent
+                    Reject
                   </ion-button>
                 </div>
-              </ion-item>
-            </ion-list>
-            <ion-note v-else>No active students are enrolled in this class.</ion-note>
-            <ion-note v-if="!selectedMeetingId">Select or create a meeting before marking attendance.</ion-note>
-          </ion-card-content>
-        </ion-card>
-
-        <ion-card>
-          <ion-card-header>
-            <ion-card-title>Self-check verification</ion-card-title>
-          </ion-card-header>
-          <ion-card-content>
-            <ion-note v-if="evidenceRows.length === 0">No student self-check evidence for this meeting.</ion-note>
-            <div v-for="record in evidenceRows" :key="record.id" class="evidence-card">
-              <div class="evidence-main">
-                <img v-if="record.selfie_url" :src="record.selfie_url" alt="Student self-check selfie" class="selfie" />
-                <div class="evidence-copy">
-                  <h3>{{ studentName(record.student_id) }}</h3>
-                  <p>Status: {{ record.status }}</p>
-                  <p>Submitted: {{ formatDateTime(record.submitted_at || record.created_at) }}</p>
-                  <p v-if="record.latitude != null && record.longitude != null">
-                    Location: {{ record.latitude }}, {{ record.longitude }}
-                    <a :href="mapUrl(record.latitude, record.longitude)" target="_blank" rel="noopener">Open map</a>
-                  </p>
-                  <p v-if="record.distance_m != null">Distance: {{ Math.round(record.distance_m) }} m</p>
-                  <ion-badge :color="verificationColor(record.verification_status)">
-                    {{ record.verification_status }}
-                  </ion-badge>
-                </div>
               </div>
-              <ion-textarea
-                v-model="record.review_note"
-                label="Teacher note"
-                label-placement="stacked"
-                fill="outline"
-                auto-grow
-              />
-              <div class="review-buttons">
-                <ion-button
-                  color="success"
-                  size="small"
-                  :disabled="reviewingRecordId === record.id"
-                  @click="reviewEvidence(record, 'approved')"
-                >
-                  Approve
-                </ion-button>
-                <ion-button
-                  color="danger"
-                  fill="outline"
-                  size="small"
-                  :disabled="reviewingRecordId === record.id"
-                  @click="reviewEvidence(record, 'rejected')"
-                >
-                  Reject
-                </ion-button>
-              </div>
-            </div>
-          </ion-card-content>
-        </ion-card>
+            </ion-card-content>
+          </ion-card>
         </template>
       </template>
 
@@ -374,6 +379,7 @@ import {
 } from '@ionic/vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_event' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
@@ -405,6 +411,7 @@ interface ScheduleRow {
 interface MeetingRow {
   id: string
   class_id: string
+  schedule_id: string | null
   title: string
   starts_at: string
   ends_at: string
@@ -442,6 +449,11 @@ interface AttendanceRow {
   created_at: string
 }
 
+const SCHOOL_LATITUDE = 13.387419
+const SCHOOL_LONGITUDE = 121.162494
+const SCHOOL_RADIUS_M = 180
+const MANILA_TIME_ZONE = 'Asia/Manila'
+
 const weekdays = [
   { value: 1, label: 'Monday' },
   { value: 2, label: 'Tuesday' },
@@ -461,6 +473,9 @@ const students = ref<StudentRow[]>([])
 const attendanceRecords = ref<AttendanceRow[]>([])
 const selectedClassId = ref('')
 const selectedMeetingId = ref('')
+const editingClassId = ref('')
+const editingScheduleId = ref('')
+const editingMeetingId = ref('')
 const approvalLoading = ref(true)
 const loadingClasses = ref(true)
 const loadingDetails = ref(false)
@@ -474,16 +489,12 @@ const signingOut = ref(false)
 const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
 
-const classForm = reactive({
-  name: '',
-  section: '',
-  default_latitude: '',
-  default_longitude: '',
-  default_radius_m: '100',
-})
+const week = currentManilaWeek()
+const meetingInputMin = `${week.startDate}T00:00`
+const meetingInputMax = `${week.endDateInclusive}T23:59`
 
+const classForm = reactive({ name: '', section: '' })
 const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '' })
-
 const meetingForm = reactive({
   title: '',
   mode: 'teacher_manual' as MeetingMode,
@@ -491,9 +502,6 @@ const meetingForm = reactive({
   ends_at: '',
   check_in_opens_at: '',
   check_in_closes_at: '',
-  latitude: '',
-  longitude: '',
-  allowed_radius_m: '100',
 })
 
 const activeClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value) ?? null)
@@ -501,12 +509,8 @@ const selectedMeeting = computed(() => meetings.value.find((item) => item.id ===
 const attendanceByStudent = computed<Record<string, AttendanceRow>>(() =>
   Object.fromEntries(attendanceRecords.value.map((record) => [record.student_id, record])),
 )
-const evidenceRows = computed(() =>
-  attendanceRecords.value.filter((record) => record.source === 'self_check'),
-)
-const canMarkAttendance = computed(
-  () => Boolean(selectedMeeting.value?.attendance_enabled),
-)
+const evidenceRows = computed(() => attendanceRecords.value.filter((record) => record.source === 'self_check'))
+const canMarkAttendance = computed(() => Boolean(selectedMeeting.value?.attendance_enabled))
 const teacherApproved = computed(
   () => profile.value?.role === 'teacher' && profile.value.teacher_approval_status === 'approved',
 )
@@ -514,16 +518,14 @@ const teacherApprovalStatus = computed(() =>
   profile.value?.teacher_approval_status === 'rejected' ? 'rejected' : 'pending',
 )
 const teacherApprovalNote = computed(() => profile.value?.teacher_approval_note?.trim() || '')
+const currentWeekLabel = computed(() => `This week: ${displayDate(week.startDate)} to ${displayDate(week.endDateInclusive)}`)
 
 watch(selectedClassId, async (classId) => {
-  if (!classId) return
-  const selected = classes.value.find((item) => item.id === classId)
-  if (selected) {
-    meetingForm.latitude = selected.default_latitude == null ? '' : String(selected.default_latitude)
-    meetingForm.longitude = selected.default_longitude == null ? '' : String(selected.default_longitude)
-    meetingForm.allowed_radius_m = String(selected.default_radius_m)
-  }
-  await loadClassDetails(classId)
+  if (editingClassId.value && editingClassId.value !== classId) cancelClassEdit()
+  cancelScheduleEdit()
+  cancelMeetingEdit()
+  if (classId) await loadClassDetails(classId)
+  else clearClassDetails()
 })
 
 watch(selectedMeetingId, async (meetingId) => {
@@ -543,7 +545,7 @@ async function checkApprovalStatus() {
     const currentProfile = await refreshProfile()
     if (!currentProfile) throw new Error('Unable to load your teacher registration.')
 
-    if (currentProfile?.role === 'teacher' && currentProfile.teacher_approval_status === 'approved') {
+    if (currentProfile.role === 'teacher' && currentProfile.teacher_approval_status === 'approved') {
       await loadClasses()
     } else {
       loadingClasses.value = false
@@ -569,14 +571,15 @@ async function loadClasses() {
     const teacherId = await currentUserId()
     const { data, error } = await supabase
       .from('classes')
-      .select(
-        'id,teacher_id,join_code,name,section,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m',
-      )
+      .select('id,teacher_id,join_code,name,section,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
       .eq('teacher_id', teacherId)
       .order('created_at', { ascending: false })
     if (error) throw error
+
     classes.value = (data ?? []) as ClassRow[]
-    if (!selectedClassId.value && classes.value[0]) selectedClassId.value = classes.value[0].id
+    if (!classes.value.some((item) => item.id === selectedClassId.value)) {
+      selectedClassId.value = classes.value[0]?.id ?? ''
+    }
   } catch (error) {
     showError(error)
   } finally {
@@ -584,25 +587,42 @@ async function loadClasses() {
   }
 }
 
-async function createClass() {
+async function saveClass() {
   savingClass.value = true
   clearMessage()
   try {
+    const name = classForm.name.trim()
+    if (!name) throw new Error('Enter a class name.')
+
+    if (editingClassId.value) {
+      const { data, error } = await supabase
+        .from('classes')
+        .update({
+          name,
+          section: classForm.section.trim() || null,
+          timezone: MANILA_TIME_ZONE,
+        })
+        .eq('id', editingClassId.value)
+        .select('id,teacher_id,join_code,name,section,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
+        .single()
+      if (error) throw error
+      const index = classes.value.findIndex((item) => item.id === data.id)
+      if (index >= 0) classes.value[index] = data as ClassRow
+      cancelClassEdit()
+      showSuccess('Class updated.')
+      return
+    }
+
     const { data, error } = await supabase.rpc('create_class', {
-      p_name: classForm.name.trim(),
+      p_name: name,
       p_section: classForm.section.trim() || null,
-      p_timezone: 'Asia/Manila',
-      p_default_latitude: requiredNumber(classForm.default_latitude, 'latitude'),
-      p_default_longitude: requiredNumber(classForm.default_longitude, 'longitude'),
-      p_default_radius_m: requiredNumber(classForm.default_radius_m, 'radius'),
-      p_default_max_accuracy_m: 100,
+      p_timezone: MANILA_TIME_ZONE,
     })
     if (error) throw error
     const created = (Array.isArray(data) ? data[0] : data) as ClassRow | null
+    resetClassForm()
     await loadClasses()
     if (created?.id) selectedClassId.value = created.id
-    classForm.name = ''
-    classForm.section = ''
     showSuccess(
       created?.join_code
         ? `Class created. Students can join with code ${created.join_code}.`
@@ -615,48 +635,97 @@ async function createClass() {
   }
 }
 
-async function loadClassDetails(classId: string) {
-  loadingDetails.value = true
+function beginClassEdit(item: ClassRow) {
+  editingClassId.value = item.id
+  classForm.name = item.name
+  classForm.section = item.section ?? ''
+  window.scrollTo({ top: 0, behavior: 'smooth' })
+}
+
+function cancelClassEdit() {
+  editingClassId.value = ''
+  resetClassForm()
+}
+
+function resetClassForm() {
+  classForm.name = ''
+  classForm.section = ''
+}
+
+async function deleteClass(item: ClassRow) {
+  const confirmed = window.confirm(
+    `Delete "${item.name}"? Its schedules, meetings, and attendance records will also be removed. This cannot be undone.`,
+  )
+  if (!confirmed) return
+
+  savingClass.value = true
   clearMessage()
   try {
+    const { error } = await supabase.from('classes').delete().eq('id', item.id)
+    if (error) throw error
+    if (editingClassId.value === item.id) cancelClassEdit()
+    classes.value = classes.value.filter((entry) => entry.id !== item.id)
+    selectedClassId.value = classes.value[0]?.id ?? ''
+    showSuccess('Class deleted.')
+  } catch (error) {
+    showError(error)
+  } finally {
+    savingClass.value = false
+  }
+}
+
+async function loadClassDetails(classId: string) {
+  loadingDetails.value = true
+  try {
+    const { error: ensureError } = await supabase.rpc('ensure_current_week_meetings', { p_class_id: classId })
+    if (ensureError) throw ensureError
+
     const [scheduleResult, meetingResult, enrollmentResult] = await Promise.all([
       supabase
         .from('class_schedules')
         .select('id,class_id,day_of_week,starts_at,ends_at,room,is_active')
-        .eq('class_id', classId)
-        .eq('is_active', true)
-        .order('day_of_week')
-        .order('starts_at'),
+        .eq('class_id', classId),
       supabase
         .from('meetings')
-        .select(
-          'id,class_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m',
-        )
+        .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
         .eq('class_id', classId)
-        .order('starts_at', { ascending: false }),
+        .gte('starts_at', week.startIso)
+        .lt('starts_at', week.endIso)
+        .order('starts_at'),
       supabase.from('class_enrollments').select('student_id').eq('class_id', classId).eq('is_active', true),
     ])
     if (scheduleResult.error) throw scheduleResult.error
     if (meetingResult.error) throw meetingResult.error
     if (enrollmentResult.error) throw enrollmentResult.error
 
-    schedules.value = (scheduleResult.data ?? []) as ScheduleRow[]
+    schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[]).sort(
+      (a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at),
+    )
     meetings.value = (meetingResult.data ?? []) as MeetingRow[]
+    students.value = await loadStudents((enrollmentResult.data ?? []).map((row) => row.student_id))
 
-    const studentIds = (enrollmentResult.data ?? []).map((row) => row.student_id)
-    students.value = await loadStudents(studentIds)
-
-    selectedMeetingId.value = meetings.value[0]?.id ?? ''
-    if (!selectedMeetingId.value) attendanceRecords.value = []
+    const previousMeetingId = selectedMeetingId.value
+    const selectionStillExists = meetings.value.some((item) => item.id === previousMeetingId)
+    selectedMeetingId.value = selectionStillExists ? previousMeetingId : meetings.value[0]?.id ?? ''
+    if (selectedMeetingId.value && selectedMeetingId.value === previousMeetingId) {
+      await loadAttendance(selectedMeetingId.value)
+    } else if (!selectedMeetingId.value) {
+      attendanceRecords.value = []
+    }
   } catch (error) {
-    schedules.value = []
-    meetings.value = []
-    students.value = []
-    attendanceRecords.value = []
+    clearClassDetails()
     showError(error)
   } finally {
     loadingDetails.value = false
   }
+}
+
+function clearClassDetails() {
+  schedules.value = []
+  meetings.value = []
+  students.value = []
+  attendanceRecords.value = []
+  selectedMeetingId.value = ''
 }
 
 async function loadStudents(studentIds: string[]): Promise<StudentRow[]> {
@@ -664,35 +733,47 @@ async function loadStudents(studentIds: string[]): Promise<StudentRow[]> {
   const profileResult = await supabase.from('profiles').select('id,full_name,email').in('id', studentIds)
   if (profileResult.error) throw profileResult.error
   return (profileResult.data ?? [])
-    .map((profile) => ({
-      id: profile.id,
-      full_name: profile.full_name,
-      email: profile.email,
+    .map((studentProfile) => ({
+      id: studentProfile.id,
+      full_name: studentProfile.full_name,
+      email: studentProfile.email,
     }))
     .sort((a, b) => a.full_name.localeCompare(b.full_name))
 }
 
-async function addSchedule() {
+async function saveSchedule() {
   if (!selectedClassId.value) return
   savingSchedule.value = true
   clearMessage()
   try {
-    const { data, error } = await supabase
-      .from('class_schedules')
-      .insert({
-        class_id: selectedClassId.value,
-        day_of_week: scheduleForm.day_of_week,
-        starts_at: scheduleForm.starts_at,
-        ends_at: scheduleForm.ends_at,
-        room: scheduleForm.room.trim() || null,
-        is_active: true,
-      })
-      .select('id,class_id,day_of_week,starts_at,ends_at,room,is_active')
-      .single()
-    if (error) throw error
-    schedules.value.push(data as ScheduleRow)
-    schedules.value.sort((a, b) => a.day_of_week - b.day_of_week || a.starts_at.localeCompare(b.starts_at))
-    showSuccess('Weekly schedule added.')
+    if (scheduleForm.ends_at <= scheduleForm.starts_at) throw new Error('Schedule end must be after its start.')
+    const payload = {
+      class_id: selectedClassId.value,
+      day_of_week: scheduleForm.day_of_week,
+      starts_at: scheduleForm.starts_at,
+      ends_at: scheduleForm.ends_at,
+      room: scheduleForm.room.trim() || null,
+      is_active: editingScheduleId.value
+        ? schedules.value.find((item) => item.id === editingScheduleId.value)?.is_active ?? true
+        : true,
+    }
+
+    const wasEditing = Boolean(editingScheduleId.value)
+    if (wasEditing) {
+      const { error } = await supabase.from('class_schedules').update(payload).eq('id', editingScheduleId.value)
+      if (error) throw error
+    } else {
+      const { error } = await supabase.from('class_schedules').insert(payload)
+      if (error) throw error
+    }
+
+    cancelScheduleEdit()
+    await loadClassDetails(selectedClassId.value)
+    showSuccess(
+      wasEditing
+        ? "Weekly schedule updated. This week's generated meeting keeps any teacher edits already made."
+        : "Weekly schedule added and this week's meeting created.",
+    )
   } catch (error) {
     showError(error)
   } finally {
@@ -700,41 +781,114 @@ async function addSchedule() {
   }
 }
 
-async function createMeeting() {
+function beginScheduleEdit(schedule: ScheduleRow) {
+  editingScheduleId.value = schedule.id
+  scheduleForm.day_of_week = schedule.day_of_week
+  scheduleForm.starts_at = schedule.starts_at.slice(0, 5)
+  scheduleForm.ends_at = schedule.ends_at.slice(0, 5)
+  scheduleForm.room = schedule.room ?? ''
+}
+
+function cancelScheduleEdit() {
+  editingScheduleId.value = ''
+  scheduleForm.day_of_week = 1
+  scheduleForm.starts_at = '08:00'
+  scheduleForm.ends_at = '09:00'
+  scheduleForm.room = ''
+}
+
+async function deleteSchedule(schedule: ScheduleRow) {
+  const confirmed = window.confirm(
+    `Delete the ${dayLabel(schedule.day_of_week)} weekly schedule? It will stop creating future meetings. Meetings already created remain available and can be disabled or deleted separately.`,
+  )
+  if (!confirmed) return
+
+  savingSchedule.value = true
+  clearMessage()
+  try {
+    const { error } = await supabase.from('class_schedules').delete().eq('id', schedule.id)
+    if (error) throw error
+    if (editingScheduleId.value === schedule.id) cancelScheduleEdit()
+    schedules.value = schedules.value.filter((item) => item.id !== schedule.id)
+    meetings.value.forEach((meeting) => {
+      if (meeting.schedule_id === schedule.id) meeting.schedule_id = null
+    })
+    showSuccess('Weekly schedule deleted.')
+  } catch (error) {
+    showError(error)
+  } finally {
+    savingSchedule.value = false
+  }
+}
+
+async function saveMeeting() {
   if (!selectedClassId.value) return
   savingMeeting.value = true
   clearMessage()
   try {
     validateMeetingWindow()
     const isOnline = meetingForm.mode === 'self_online'
+    const payload = {
+      class_id: selectedClassId.value,
+      title: meetingForm.title.trim(),
+      meeting_date: meetingForm.starts_at.slice(0, 10),
+      starts_at: manilaInputToIso(meetingForm.starts_at),
+      ends_at: manilaInputToIso(meetingForm.ends_at),
+      attendance_mode: meetingForm.mode,
+      attendance_enabled: true,
+      attendance_opens_at: manilaInputToIso(meetingForm.check_in_opens_at),
+      attendance_closes_at: manilaInputToIso(meetingForm.check_in_closes_at),
+      latitude: isOnline ? null : SCHOOL_LATITUDE,
+      longitude: isOnline ? null : SCHOOL_LONGITUDE,
+      radius_m: SCHOOL_RADIUS_M,
+      max_accuracy_m: activeClass.value?.default_max_accuracy_m ?? 100,
+    }
+
+    if (editingMeetingId.value) {
+      const current = meetings.value.find((item) => item.id === editingMeetingId.value)
+      const { data, error } = await supabase
+        .from('meetings')
+        .update({ ...payload, attendance_enabled: current?.attendance_enabled ?? true })
+        .eq('id', editingMeetingId.value)
+        .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
+        .single()
+      if (error) throw error
+      const updated = data as MeetingRow
+      if (updated.starts_at >= week.startIso && updated.starts_at < week.endIso) {
+        const index = meetings.value.findIndex((item) => item.id === updated.id)
+        if (index >= 0) meetings.value[index] = updated
+        meetings.value.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+      } else {
+        meetings.value = meetings.value.filter((item) => item.id !== updated.id)
+        selectedMeetingId.value = meetings.value[0]?.id ?? ''
+      }
+      cancelMeetingEdit()
+      showSuccess(
+        updated.starts_at >= week.startIso && updated.starts_at < week.endIso
+          ? 'Meeting updated.'
+          : 'Meeting updated. It will appear in the list during its scheduled week.',
+      )
+      return
+    }
+
     const creatorId = await currentUserId()
     const { data, error } = await supabase
       .from('meetings')
-      .insert({
-        class_id: selectedClassId.value,
-        title: meetingForm.title.trim(),
-        meeting_date: meetingForm.starts_at.slice(0, 10),
-        starts_at: new Date(meetingForm.starts_at).toISOString(),
-        ends_at: new Date(meetingForm.ends_at).toISOString(),
-        attendance_mode: meetingForm.mode,
-        attendance_enabled: true,
-        attendance_opens_at: new Date(meetingForm.check_in_opens_at).toISOString(),
-        attendance_closes_at: new Date(meetingForm.check_in_closes_at).toISOString(),
-        latitude: isOnline ? null : requiredNumber(meetingForm.latitude, 'latitude'),
-        longitude: isOnline ? null : requiredNumber(meetingForm.longitude, 'longitude'),
-        radius_m: isOnline ? 100 : requiredNumber(meetingForm.allowed_radius_m, 'radius'),
-        max_accuracy_m: activeClass.value?.default_max_accuracy_m ?? 100,
-        created_by: creatorId,
-      })
-      .select(
-        'id,class_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m',
-      )
+      .insert({ ...payload, created_by: creatorId })
+      .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
       .single()
     if (error) throw error
-    meetings.value.unshift(data as MeetingRow)
-    selectedMeetingId.value = data.id
-    meetingForm.title = ''
-    showSuccess('Meeting and attendance window created.')
+
+    cancelMeetingEdit()
+    const created = data as MeetingRow
+    if (created.starts_at >= week.startIso && created.starts_at < week.endIso) {
+      meetings.value.push(created)
+      meetings.value.sort((a, b) => a.starts_at.localeCompare(b.starts_at))
+      selectedMeetingId.value = created.id
+      showSuccess('Meeting and attendance window created.')
+    } else {
+      showSuccess('Meeting created. It will appear in the list during its scheduled week.')
+    }
   } catch (error) {
     showError(error)
   } finally {
@@ -742,17 +896,57 @@ async function createMeeting() {
   }
 }
 
-async function disableAttendance(meeting: MeetingRow) {
+function beginMeetingEdit(meeting: MeetingRow) {
+  editingMeetingId.value = meeting.id
+  meetingForm.title = meeting.title
+  meetingForm.mode = meeting.attendance_mode
+  meetingForm.starts_at = isoToManilaInput(meeting.starts_at)
+  meetingForm.ends_at = isoToManilaInput(meeting.ends_at)
+  meetingForm.check_in_opens_at = isoToManilaInput(meeting.attendance_opens_at)
+  meetingForm.check_in_closes_at = isoToManilaInput(meeting.attendance_closes_at)
+}
+
+function cancelMeetingEdit() {
+  editingMeetingId.value = ''
+  meetingForm.title = ''
+  meetingForm.mode = 'teacher_manual'
+  meetingForm.starts_at = ''
+  meetingForm.ends_at = ''
+  meetingForm.check_in_opens_at = ''
+  meetingForm.check_in_closes_at = ''
+}
+
+async function toggleAttendance(meeting: MeetingRow) {
   updatingMeeting.value = true
   clearMessage()
   try {
-    const { error } = await supabase
-      .from('meetings')
-      .update({ attendance_enabled: false })
-      .eq('id', meeting.id)
+    const attendanceEnabled = !meeting.attendance_enabled
+    const { error } = await supabase.from('meetings').update({ attendance_enabled: attendanceEnabled }).eq('id', meeting.id)
     if (error) throw error
-    meeting.attendance_enabled = false
-    showSuccess('Attendance checking is disabled for this meeting.')
+    meeting.attendance_enabled = attendanceEnabled
+    showSuccess(attendanceEnabled ? 'Attendance will count for this meeting.' : 'Attendance will not count for this meeting.')
+  } catch (error) {
+    showError(error)
+  } finally {
+    updatingMeeting.value = false
+  }
+}
+
+async function deleteMeeting(meeting: MeetingRow) {
+  const confirmed = window.confirm(
+    `Delete "${meeting.title}"? Its attendance records will also be removed. This cannot be undone.`,
+  )
+  if (!confirmed) return
+
+  updatingMeeting.value = true
+  clearMessage()
+  try {
+    const { error } = await supabase.from('meetings').delete().eq('id', meeting.id)
+    if (error) throw error
+    if (editingMeetingId.value === meeting.id) cancelMeetingEdit()
+    meetings.value = meetings.value.filter((item) => item.id !== meeting.id)
+    selectedMeetingId.value = meetings.value[0]?.id ?? ''
+    showSuccess('Meeting deleted.')
   } catch (error) {
     showError(error)
   } finally {
@@ -764,9 +958,7 @@ async function loadAttendance(meetingId: string) {
   try {
     const { data, error } = await supabase
       .from('attendance_records')
-      .select(
-        'id,meeting_id,student_id,status,source,selfie_path,latitude,longitude,accuracy_m,distance_m,barcode_verified,verification_status,teacher_note,review_note,submitted_at,created_at',
-      )
+      .select('id,meeting_id,student_id,status,source,selfie_path,latitude,longitude,accuracy_m,distance_m,barcode_verified,verification_status,teacher_note,review_note,submitted_at,created_at')
       .eq('meeting_id', meetingId)
     if (error) throw error
     const records = (data ?? []) as AttendanceRow[]
@@ -826,19 +1018,97 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
 }
 
 function validateMeetingWindow() {
-  const starts = new Date(meetingForm.starts_at).getTime()
-  const ends = new Date(meetingForm.ends_at).getTime()
-  const opens = new Date(meetingForm.check_in_opens_at).getTime()
-  const closes = new Date(meetingForm.check_in_closes_at).getTime()
+  if (!meetingForm.title.trim()) throw new Error('Enter a meeting title.')
+  const starts = new Date(manilaInputToIso(meetingForm.starts_at)).getTime()
+  const ends = new Date(manilaInputToIso(meetingForm.ends_at)).getTime()
+  const opens = new Date(manilaInputToIso(meetingForm.check_in_opens_at)).getTime()
+  const closes = new Date(manilaInputToIso(meetingForm.check_in_closes_at)).getTime()
   if ([starts, ends, opens, closes].some(Number.isNaN)) throw new Error('Complete all meeting date and time fields.')
+  if (starts < new Date(week.startIso).getTime() || starts >= new Date(week.endIso).getTime()) {
+    throw new Error('Meetings created here must start within the current school week.')
+  }
   if (ends <= starts) throw new Error('Meeting end must be after its start.')
   if (closes <= opens) throw new Error('Check-in close must be after check-in open.')
 }
 
-function requiredNumber(value: string, label: string) {
-  const parsed = Number(value)
-  if (!Number.isFinite(parsed)) throw new Error(`Enter a valid ${label}.`)
-  return parsed
+function currentManilaWeek() {
+  const parts = datePartsInManila(new Date())
+  const today = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
+  const daysSinceMonday = (today.getUTCDay() + 6) % 7
+  const monday = new Date(today)
+  monday.setUTCDate(today.getUTCDate() - daysSinceMonday)
+  const nextMonday = new Date(monday)
+  nextMonday.setUTCDate(monday.getUTCDate() + 7)
+  const sunday = new Date(nextMonday)
+  sunday.setUTCDate(nextMonday.getUTCDate() - 1)
+  const startDate = dateKey(monday)
+  const endDate = dateKey(nextMonday)
+  return {
+    startDate,
+    endDateInclusive: dateKey(sunday),
+    startIso: new Date(`${startDate}T00:00:00+08:00`).toISOString(),
+    endIso: new Date(`${endDate}T00:00:00+08:00`).toISOString(),
+  }
+}
+
+function datePartsInManila(date: Date) {
+  const values = Object.fromEntries(
+    new Intl.DateTimeFormat('en-CA', {
+      timeZone: MANILA_TIME_ZONE,
+      year: 'numeric',
+      month: '2-digit',
+      day: '2-digit',
+    })
+      .formatToParts(date)
+      .filter((part) => part.type !== 'literal')
+      .map((part) => [part.type, Number(part.value)]),
+  )
+  return { year: values.year, month: values.month, day: values.day }
+}
+
+function dateKey(date: Date) {
+  return `${date.getUTCFullYear()}-${String(date.getUTCMonth() + 1).padStart(2, '0')}-${String(date.getUTCDate()).padStart(2, '0')}`
+}
+
+function scheduleDateLabel(dayOfWeek: number) {
+  const offsetFromMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1
+  const date = new Date(`${week.startDate}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + offsetFromMonday)
+  return displayDate(dateKey(date))
+}
+
+function displayDate(dateValue: string) {
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'UTC',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  }).format(new Date(`${dateValue}T00:00:00Z`))
+}
+
+function manilaInputToIso(value: string) {
+  if (!value) return ''
+  return new Date(`${value.length === 16 ? `${value}:00` : value}+08:00`).toISOString()
+}
+
+function isoToManilaInput(value: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: MANILA_TIME_ZONE,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    hourCycle: 'h23',
+  })
+    .formatToParts(new Date(value))
+    .filter((part) => part.type !== 'literal')
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]))
+  return `${values.year}-${values.month}-${values.day}T${values.hour}:${values.minute}`
+}
+
+function scheduleSortValue(schedule: ScheduleRow) {
+  return schedule.day_of_week === 0 ? 7 : schedule.day_of_week
 }
 
 function dayLabel(value: number) {
@@ -870,14 +1140,21 @@ function verificationColor(status: VerificationStatus | null) {
 
 function formatDateTime(value: string | null) {
   if (!value) return 'Not recorded'
-  return new Intl.DateTimeFormat(undefined, { dateStyle: 'medium', timeStyle: 'short' }).format(new Date(value))
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: MANILA_TIME_ZONE,
+    dateStyle: 'medium',
+    timeStyle: 'short',
+  }).format(new Date(value))
 }
 
 function formatTime(value: string) {
   const [hours = '0', minutes = '00'] = value.split(':')
-  const date = new Date()
-  date.setHours(Number(hours), Number(minutes), 0, 0)
-  return new Intl.DateTimeFormat(undefined, { hour: 'numeric', minute: '2-digit' }).format(date)
+  const date = new Date(Date.UTC(2000, 0, 1, Number(hours), Number(minutes)))
+  return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'UTC',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(date)
 }
 
 function mapUrl(latitude: number, longitude: number) {
@@ -886,7 +1163,7 @@ function mapUrl(latitude: number, longitude: number) {
 
 function showError(error: unknown) {
   messageKind.value = 'error'
-  message.value = error instanceof Error ? error.message : 'Something went wrong.'
+  message.value = toUserFacingErrorMessage(error)
 }
 
 function showSuccess(text: string) {
@@ -926,6 +1203,7 @@ async function logout() {
   gap: 12px;
 }
 
+.spaced-form,
 .summary {
   margin-top: 16px;
 }
@@ -947,12 +1225,18 @@ async function logout() {
   font: inherit;
 }
 
+.form-actions,
+.row-actions,
+.item-actions,
 .meeting-actions,
 .review-buttons {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   align-items: center;
+}
+
+.meeting-actions {
   margin-top: 14px;
 }
 
@@ -994,13 +1278,20 @@ async function logout() {
   background: var(--ion-color-light);
 }
 
+@media (max-width: 560px) {
+  .item-actions,
+  .attendance-buttons {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
 @media (min-width: 720px) {
   .form-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .form-grid > ion-note,
-  .form-grid > ion-button {
+  .full-row {
     grid-column: 1 / -1;
   }
 }

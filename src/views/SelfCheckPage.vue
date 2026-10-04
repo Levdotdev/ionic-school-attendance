@@ -154,6 +154,7 @@ import {
   uploadAttendanceSelfie,
   type CapturedSelfie,
 } from '@/services/selfie'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 type SelfAttendanceMode = 'self_on_site' | 'self_event' | 'self_online'
 
@@ -198,7 +199,7 @@ const canSubmit = computed(() => {
 })
 
 function showError(error: unknown) {
-  message.value = error instanceof Error ? error.message : String(error)
+  message.value = toUserFacingErrorMessage(error)
 }
 
 function acceptBarcode(value: string) {

@@ -7,7 +7,8 @@ An Ionic Vue attendance app backed by Supabase Auth, PostgreSQL, Row Level Secur
 - Student, parent, and teacher email/password registration. New teachers remain pending until an administrator approves them.
 - Student registration with either a wide camera scanner for long 1D barcodes or an armed, hidden USB/dongle barcode input.
 - Raw barcode values are never stored in the browser or public tables; PostgreSQL stores a one-way hash in a private schema.
-- Teacher-created classes, join codes, weekly schedules, and individual meetings.
+- Teacher-created classes, join codes, weekly schedules, and individual meetings. Classes, schedules, and meetings can be edited or deleted.
+- Each active weekly schedule automatically creates one persisted meeting for the current Manila week. Teachers can edit, disable, or delete a single occurrence without changing the recurring schedule.
 - Four attendance modes:
   - teacher manually marks present or absent;
   - on-site student self-check with ID barcode, a newly captured selfie, and location;
@@ -17,6 +18,7 @@ An Ionic Vue attendance app backed by Supabase Auth, PostgreSQL, Row Level Secur
 - Private selfie storage with short-lived viewing links for the approved class teacher and the student's verified linked parent.
 - Teacher approval/rejection of self-check evidence and the ability to disable attendance for one meeting.
 - Parent view for linked students' attendance, submitted location, and check-in photos.
+- The school geofence is fixed by the database at `13.387419, 121.162494` with a `180` meter radius, so teachers do not enter coordinates.
 
 ## Local setup
 
@@ -49,7 +51,7 @@ pnpm exec supabase link --project-ref your-project-ref
 pnpm exec supabase db push
 ```
 
-The connected `School Attendance Project` already has these migrations applied.
+The connected `School Attendance Project` already has these migrations applied. Supabase Cron creates the new week's scheduled meetings shortly after midnight every Monday in Manila; opening the teacher dashboard also performs an idempotent recovery check.
 
 ### Create the first administrator
 
@@ -100,4 +102,4 @@ Web software cannot reliably distinguish a hardware reader's paste event from a 
 
 ## MVP boundaries
 
-This version intentionally leaves out polished visual design, push/email alerts, Google Calendar cloud sync, automatic generation of every meeting from a recurring schedule, and production retention automation for selfies/location. Before a real deployment, define consent and retention rules for minors' photos and location data, then add automatic deletion and school-approved notification providers.
+This version intentionally leaves out polished visual design, push/email alerts, Google Calendar cloud sync, and production retention automation for selfies/location. Before a real deployment, define consent and retention rules for minors' photos and location data, then add automatic deletion and school-approved notification providers.

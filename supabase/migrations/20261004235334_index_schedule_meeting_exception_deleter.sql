@@ -1,0 +1,2 @@
+create index schedule_meeting_exceptions_deleted_by_idx
+on private.schedule_meeting_exceptions (deleted_by);
