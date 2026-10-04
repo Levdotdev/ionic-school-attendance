@@ -29,6 +29,11 @@ const routes = [
     meta: { roles: ['teacher'] satisfies AppRole[] },
   },
   {
+    path: '/admin',
+    component: () => import('@/views/AdminPage.vue'),
+    meta: { roles: ['admin'] satisfies AppRole[] },
+  },
+  {
     path: '/parent',
     component: () => import('@/views/ParentPage.vue'),
     meta: { roles: ['parent'] satisfies AppRole[] },
@@ -45,6 +50,7 @@ const router = createRouter({
 })
 
 const roleDestination = (role?: AppRole | null): RouteLocationRaw => {
+  if (role === 'admin') return '/admin'
   if (role === 'teacher') return '/teacher'
   if (role === 'parent') return '/parent'
   return '/student'

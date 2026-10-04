@@ -1,4 +1,5 @@
-export type AppRole = 'teacher' | 'student' | 'parent'
+export type AppRole = 'admin' | 'teacher' | 'student' | 'parent'
+export type TeacherApprovalStatus = 'pending' | 'approved' | 'rejected'
 
 export type AttendanceMode =
   | 'teacher_manual'
@@ -15,6 +16,9 @@ export interface Profile {
   role: AppRole
   full_name: string
   email: string
+  teacher_approval_status: TeacherApprovalStatus | null
+  teacher_approval_note: string | null
+  teacher_approved_at: string | null
   created_at: string
   updated_at: string
 }

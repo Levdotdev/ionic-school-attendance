@@ -3,7 +3,7 @@
     <h3 id="barcode-reader-title">USB / dongle barcode reader</h3>
     <p>
       Select the button, then scan the physical student ID. Keyboard-wedge and paste-mode readers
-      are supported; the ID value always stays hidden.
+      are supported, including readers ending with Enter or Tab; the ID value always stays hidden.
     </p>
 
     <ion-button
@@ -23,6 +23,7 @@
       autocomplete="off"
       autocapitalize="off"
       spellcheck="false"
+      :maxlength="MAX_STUDENT_BARCODE_LENGTH"
       tabindex="-1"
       aria-hidden="true"
       @keydown="onKeydown"
@@ -37,9 +38,17 @@
 
 <script setup lang="ts">
 import { IonButton, IonNote } from '@ionic/vue'
-import { computed, nextTick, onBeforeUnmount, ref } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
-import { isLikelyHardwareScan, validateStudentBarcode } from '@/services/barcode'
+import {
+  DEFAULT_SCANNER_AVERAGE_INTERVAL_MS,
+  isLikelyHardwareScan,
+  MAX_STUDENT_BARCODE_LENGTH,
+  validateStudentBarcode,
+} from '@/services/barcode'
+
+const CAPTURE_TIMEOUT_MS = 30_000
+const MODIFIER_KEYS = new Set(['Shift', 'Control', 'Alt', 'Meta', 'CapsLock', 'NumLock'])
 
 const props = withDefaults(
   defineProps<{
@@ -48,7 +57,7 @@ const props = withDefaults(
   }>(),
   {
     disabled: false,
-    maxIntervalMs: 80,
+    maxIntervalMs: DEFAULT_SCANNER_AVERAGE_INTERVAL_MS,
   },
 )
 
@@ -81,6 +90,14 @@ function resetBuffer() {
   if (hiddenInput.value) hiddenInput.value.value = ''
 }
 
+function restartCaptureTimeout() {
+  clearCaptureTimeout()
+  captureTimeout = setTimeout(
+    () => fail('No barcode was received. Select the reader button and try again.'),
+    CAPTURE_TIMEOUT_MS,
+  )
+}
+
 function stopCapture() {
   clearCaptureTimeout()
   capturing.value = false
@@ -95,21 +112,33 @@ function fail(message: string) {
   stopCapture()
 }
 
+function rejectScanAndKeepArmed(message: string) {
+  invalid.value = true
+  status.value = `${message} The reader is still ready; scan again.`
+  emit('invalid', message)
+  resetBuffer()
+  restartCaptureTimeout()
+  queueMicrotask(() => hiddenInput.value?.focus({ preventScroll: true }))
+}
+
 async function beginCapture() {
   if (props.disabled) return
 
+  clearCaptureTimeout()
   resetBuffer()
   invalid.value = false
   status.value = 'Reader ready. Scan the barcode now.'
   capturing.value = true
-  captureTimeout = setTimeout(() => fail('No barcode was received. Select the reader button and try again.'), 12_000)
+  restartCaptureTimeout()
 
   await nextTick()
   hiddenInput.value?.focus({ preventScroll: true })
 }
 
 function rejectManualInput() {
-  if (capturing.value) fail('Dropped text is not accepted. Scan the physical ID barcode.')
+  if (capturing.value) {
+    rejectScanAndKeepArmed('Dropped text is not accepted. Scan the physical ID barcode.')
+  }
 }
 
 function onPaste(event: ClipboardEvent) {
@@ -122,7 +151,7 @@ function onPaste(event: ClipboardEvent) {
     emit('scan', barcode)
     stopCapture()
   } catch (error) {
-    fail(error instanceof Error ? error.message : 'The barcode is invalid.')
+    rejectScanAndKeepArmed(error instanceof Error ? error.message : 'The barcode is invalid.')
   }
 }
 
@@ -133,12 +162,12 @@ function onBlur() {
 
 function finishScan() {
   if (!characters) {
-    fail('No barcode was received. Please scan the ID again.')
+    rejectScanAndKeepArmed('No barcode was received. Please scan the ID again.')
     return
   }
 
   if (!isLikelyHardwareScan(characters.length, lastCharacterAt - startedAt, props.maxIntervalMs)) {
-    fail('Input was too slow to be a barcode scan. Manual typing is not accepted.')
+    rejectScanAndKeepArmed('Input was too slow to be a barcode scan. Manual typing is not accepted.')
     return
   }
 
@@ -149,7 +178,7 @@ function finishScan() {
     emit('scan', barcode)
     stopCapture()
   } catch (error) {
-    fail(error instanceof Error ? error.message : 'The barcode is invalid.')
+    rejectScanAndKeepArmed(error instanceof Error ? error.message : 'The barcode is invalid.')
   }
 }
 
@@ -160,10 +189,14 @@ function onKeydown(event: KeyboardEvent) {
   // handle it while the hidden reader is armed.
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'v') return
 
+  // Wedge scanners can emit Shift before uppercase letters or punctuation.
+  // Ignore modifier-only events and assess the complete scan at its suffix.
+  if (MODIFIER_KEYS.has(event.key)) return
+
   event.preventDefault()
   event.stopPropagation()
 
-  if (event.key === 'Enter') {
+  if (event.key === 'Enter' || event.key === 'Tab') {
     finishScan()
     return
   }
@@ -174,27 +207,29 @@ function onKeydown(event: KeyboardEvent) {
   }
 
   if (event.ctrlKey || event.metaKey || event.altKey || event.repeat || event.key.length !== 1) {
-    fail('Manual keyboard input is not accepted. Scan the physical ID barcode.')
+    rejectScanAndKeepArmed('Manual keyboard input is not accepted. Scan the physical ID barcode.')
     return
   }
 
   const now = performance.now()
 
-  if (lastCharacterAt && now - lastCharacterAt > props.maxIntervalMs) {
-    fail('Input was too slow to be a barcode scan. Manual typing is not accepted.')
-    return
-  }
-
   if (!startedAt) startedAt = now
   lastCharacterAt = now
   characters += event.key
 
-  if (characters.length > 64) {
-    fail('The scanned barcode is too long.')
+  if (characters.length > MAX_STUDENT_BARCODE_LENGTH) {
+    rejectScanAndKeepArmed('The scanned barcode is too long.')
   }
 }
 
 onBeforeUnmount(clearCaptureTimeout)
+
+watch(
+  () => props.disabled,
+  (disabled) => {
+    if (disabled && capturing.value) stopCapture()
+  },
+)
 </script>
 
 <style scoped>

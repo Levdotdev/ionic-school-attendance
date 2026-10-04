@@ -2,14 +2,18 @@ import type { Session, User } from '@supabase/supabase-js'
 import { computed, readonly, ref, shallowRef } from 'vue'
 
 import { supabase } from '@/lib/supabase'
+import type { AppRole, TeacherApprovalStatus } from '@/types/database'
 
-export type AppRole = 'student' | 'teacher' | 'parent'
+export type { AppRole } from '@/types/database'
 
 export interface AppProfile {
   id: string
   role: AppRole
   full_name: string
   email: string
+  teacher_approval_status: TeacherApprovalStatus | null
+  teacher_approval_note: string | null
+  teacher_approved_at: string | null
 }
 
 const session = shallowRef<Session | null>(null)
@@ -23,7 +27,11 @@ let initializePromise: Promise<void> | null = null
 let listenerInstalled = false
 
 function isAppRole(value: unknown): value is AppRole {
-  return value === 'student' || value === 'teacher' || value === 'parent'
+  return value === 'admin' || value === 'student' || value === 'teacher' || value === 'parent'
+}
+
+function isTeacherApprovalStatus(value: unknown): value is TeacherApprovalStatus {
+  return value === 'pending' || value === 'approved' || value === 'rejected'
 }
 
 export async function refreshProfile(): Promise<AppProfile | null> {
@@ -36,7 +44,9 @@ export async function refreshProfile(): Promise<AppProfile | null> {
 
   const { data, error } = await supabase
     .from('profiles')
-    .select('id, role, full_name, email')
+    .select(
+      'id,role,full_name,email,teacher_approval_status,teacher_approval_note,teacher_approved_at',
+    )
     .eq('id', currentUser.id)
     .maybeSingle()
 
@@ -55,6 +65,11 @@ export async function refreshProfile(): Promise<AppProfile | null> {
     role: data.role,
     full_name: data.full_name,
     email: data.email || currentUser.email || '',
+    teacher_approval_status: isTeacherApprovalStatus(data.teacher_approval_status)
+      ? data.teacher_approval_status
+      : null,
+    teacher_approval_note: data.teacher_approval_note ?? null,
+    teacher_approved_at: data.teacher_approved_at ?? null,
   }
   errorMessage.value = ''
   return profile.value

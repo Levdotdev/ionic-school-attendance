@@ -21,6 +21,7 @@
     "@ionic/vue": "9.0.6",
     "@ionic/vue-router": "9.0.6",
     "@supabase/supabase-js": "2.117.2",
+    "html5-qrcode": "2.3.8",
     "ionicons": "8.1.0",
     "vue": "3.5.43",
     "vue-router": "5.3.1"

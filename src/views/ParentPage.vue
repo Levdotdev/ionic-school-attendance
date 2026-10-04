@@ -18,7 +18,7 @@
         <div class="section-heading">
           <div>
             <h2>Linked students</h2>
-            <p>Attendance and submitted location are shown here. Student selfies remain visible only to teachers.</p>
+            <p>Attendance, submitted location, and check-in photos are shown only for your linked children.</p>
           </div>
           <ion-button fill="outline" size="small" :disabled="refreshing" @click="loadDashboard">
             Refresh
@@ -44,6 +44,13 @@
           <ion-card-content>
             <ion-list v-if="recordsForStudent(student.id).length">
               <ion-item v-for="record in recordsForStudent(student.id)" :key="record.id">
+                <img
+                  v-if="record.selfie_url"
+                  slot="start"
+                  :src="record.selfie_url"
+                  :alt="`${student.full_name}'s attendance check-in`"
+                  class="attendance-selfie"
+                />
                 <ion-label class="ion-text-wrap">
                   <h2>{{ record.class_name }} — {{ record.meeting_title }}</h2>
                   <p>{{ formatDateTime(record.meeting_starts_at) }}</p>
@@ -114,6 +121,8 @@ interface AttendanceDisplayRow {
   latitude: number | null
   longitude: number | null
   distance_m: number | null
+  selfie_path: string | null
+  selfie_url: string | null
   submitted_at: string
   meeting_title: string
   meeting_starts_at: string
@@ -156,10 +165,24 @@ async function loadDashboard() {
 
     const { data: records, error: recordsError } = await supabase
       .from('attendance_records')
-      .select('id,meeting_id,student_id,status,verification_status,latitude,longitude,distance_m,submitted_at')
+      .select(
+        'id,meeting_id,student_id,status,verification_status,latitude,longitude,distance_m,selfie_path,submitted_at',
+      )
       .in('student_id', studentIds)
       .order('submitted_at', { ascending: false })
     if (recordsError) throw recordsError
+
+    const selfieUrlByRecordId = new Map<string, string>()
+    await Promise.all(
+      (records ?? []).map(async (record) => {
+        if (!record.selfie_path) return
+
+        const { data: signed, error: signedError } = await supabase.storage
+          .from('attendance-selfies')
+          .createSignedUrl(record.selfie_path, 900)
+        if (!signedError && signed?.signedUrl) selfieUrlByRecordId.set(record.id, signed.signedUrl)
+      }),
+    )
 
     const meetingIds = [...new Set((records ?? []).map((record) => record.meeting_id))]
     if (!meetingIds.length) {
@@ -195,6 +218,8 @@ async function loadDashboard() {
         latitude: record.latitude,
         longitude: record.longitude,
         distance_m: record.distance_m,
+        selfie_path: record.selfie_path,
+        selfie_url: selfieUrlByRecordId.get(record.id) ?? null,
         submitted_at: record.submitted_at,
         meeting_title: meeting.title,
         meeting_starts_at: meeting.starts_at,
@@ -265,5 +290,13 @@ onMounted(async () => {
 .section-heading h2,
 .section-heading p {
   margin: 0 0 0.25rem;
+}
+
+.attendance-selfie {
+  width: 88px;
+  height: 88px;
+  border-radius: 8px;
+  object-fit: cover;
+  background: var(--ion-color-light);
 }
 </style>

@@ -10,7 +10,33 @@
     </ion-header>
 
     <ion-content class="ion-padding">
-      <ion-card>
+      <div v-if="approvalLoading" class="centered">
+        <ion-spinner name="crescent" />
+      </div>
+
+      <ion-card v-else-if="!teacherApproved" class="approval-card">
+        <ion-card-header>
+          <ion-card-title>
+            {{ teacherApprovalStatus === 'rejected' ? 'Teacher registration rejected' : 'Approval pending' }}
+          </ion-card-title>
+        </ion-card-header>
+        <ion-card-content>
+          <ion-badge :color="teacherApprovalStatus === 'rejected' ? 'danger' : 'warning'">
+            {{ teacherApprovalStatus === 'rejected' ? 'Rejected' : 'Pending' }}
+          </ion-badge>
+          <p v-if="teacherApprovalStatus === 'rejected'">
+            Your teacher registration was not approved. Contact the school administrator if you need the decision reviewed.
+          </p>
+          <p v-else>
+            An administrator must approve your teacher registration before you can create classes or manage attendance.
+          </p>
+          <p v-if="teacherApprovalNote"><strong>Administrator note:</strong> {{ teacherApprovalNote }}</p>
+          <ion-button fill="outline" size="small" @click="checkApprovalStatus">Check status</ion-button>
+        </ion-card-content>
+      </ion-card>
+
+      <template v-else>
+        <ion-card>
         <ion-card-header>
           <ion-card-title>Create a class</ion-card-title>
         </ion-card-header>
@@ -51,9 +77,9 @@
             </ion-button>
           </form>
         </ion-card-content>
-      </ion-card>
+        </ion-card>
 
-      <ion-card>
+        <ion-card>
         <ion-card-header>
           <ion-card-title>My classes</ion-card-title>
         </ion-card-header>
@@ -79,9 +105,9 @@
             </p>
           </div>
         </ion-card-content>
-      </ion-card>
+        </ion-card>
 
-      <template v-if="activeClass">
+        <template v-if="activeClass">
         <ion-card>
           <ion-card-header>
             <ion-card-title>Weekly schedule</ion-card-title>
@@ -310,6 +336,7 @@
             </div>
           </ion-card-content>
         </ion-card>
+        </template>
       </template>
 
       <ion-card v-if="message" :color="messageKind === 'error' ? 'danger' : 'success'">
@@ -426,7 +453,7 @@ const weekdays = [
 ]
 
 const router = useRouter()
-const { signOut } = useSession()
+const { initializeSession, refreshProfile, profile, signOut } = useSession()
 const classes = ref<ClassRow[]>([])
 const schedules = ref<ScheduleRow[]>([])
 const meetings = ref<MeetingRow[]>([])
@@ -434,6 +461,7 @@ const students = ref<StudentRow[]>([])
 const attendanceRecords = ref<AttendanceRow[]>([])
 const selectedClassId = ref('')
 const selectedMeetingId = ref('')
+const approvalLoading = ref(true)
 const loadingClasses = ref(true)
 const loadingDetails = ref(false)
 const savingClass = ref(false)
@@ -479,6 +507,13 @@ const evidenceRows = computed(() =>
 const canMarkAttendance = computed(
   () => Boolean(selectedMeeting.value?.attendance_enabled),
 )
+const teacherApproved = computed(
+  () => profile.value?.role === 'teacher' && profile.value.teacher_approval_status === 'approved',
+)
+const teacherApprovalStatus = computed(() =>
+  profile.value?.teacher_approval_status === 'rejected' ? 'rejected' : 'pending',
+)
+const teacherApprovalNote = computed(() => profile.value?.teacher_approval_note?.trim() || '')
 
 watch(selectedClassId, async (classId) => {
   if (!classId) return
@@ -496,7 +531,30 @@ watch(selectedMeetingId, async (meetingId) => {
   else attendanceRecords.value = []
 })
 
-onMounted(loadClasses)
+onMounted(async () => {
+  await initializeSession()
+  await checkApprovalStatus()
+})
+
+async function checkApprovalStatus() {
+  approvalLoading.value = true
+  clearMessage()
+  try {
+    const currentProfile = await refreshProfile()
+    if (!currentProfile) throw new Error('Unable to load your teacher registration.')
+
+    if (currentProfile?.role === 'teacher' && currentProfile.teacher_approval_status === 'approved') {
+      await loadClasses()
+    } else {
+      loadingClasses.value = false
+    }
+  } catch (error) {
+    loadingClasses.value = false
+    showError(error)
+  } finally {
+    approvalLoading.value = false
+  }
+}
 
 async function currentUserId() {
   const { data, error } = await supabase.auth.getUser()
@@ -852,6 +910,17 @@ async function logout() {
 </script>
 
 <style scoped>
+.centered {
+  display: grid;
+  min-height: 40vh;
+  place-items: center;
+}
+
+.approval-card {
+  max-width: 640px;
+  margin: 2rem auto;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;

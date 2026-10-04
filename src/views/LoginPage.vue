@@ -11,7 +11,7 @@
         <ion-card-header>
           <ion-card-title>{{ mode === 'signin' ? 'Sign in' : 'Create account' }}</ion-card-title>
           <ion-card-subtitle>
-            Teachers sign in with an account issued by the school. Students and parents may register.
+            Students, parents, and teachers may register. Teacher accounts need administrator approval.
           </ion-card-subtitle>
         </ion-card-header>
 
@@ -44,6 +44,7 @@
                 :disabled="busy"
               >
                 <ion-select-option value="student">Student</ion-select-option>
+                <ion-select-option value="teacher">Teacher</ion-select-option>
                 <ion-select-option value="parent">Parent / guardian</ion-select-option>
               </ion-select>
             </template>
@@ -121,7 +122,7 @@ import { homePathForRole, useSession, type AppRole } from '@/composables/useSess
 import { supabase } from '@/lib/supabase'
 
 type AuthMode = 'signin' | 'signup'
-type RegistrationRole = Extract<AppRole, 'student' | 'parent'>
+type RegistrationRole = Extract<AppRole, 'student' | 'teacher' | 'parent'>
 
 const router = useRouter()
 const { initializeSession, refreshProfile, profile } = useSession()
@@ -143,7 +144,7 @@ function validate(): string | null {
   if (password.value.length < 8) return 'Password must contain at least 8 characters.'
 
   if (mode.value === 'signup') {
-    if (fullName.value.trim().length < 2) return 'Enter the student or parent full name.'
+    if (fullName.value.trim().length < 2) return 'Enter your full name.'
     if (password.value !== passwordConfirmation.value) return 'The passwords do not match.'
   }
 
@@ -199,7 +200,9 @@ async function submit() {
       return
     }
 
-    message.value = 'Account created. Check your email to confirm it, then return here to sign in.'
+    message.value = registrationRole.value === 'teacher'
+      ? 'Teacher account created. Confirm your email, then sign in to check the administrator approval status.'
+      : 'Account created. Check your email to confirm it, then return here to sign in.'
     password.value = ''
     passwordConfirmation.value = ''
   } catch (error) {

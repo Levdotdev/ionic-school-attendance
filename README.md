@@ -4,8 +4,8 @@ An Ionic Vue attendance app backed by Supabase Auth, PostgreSQL, Row Level Secur
 
 ## MVP features
 
-- Student and parent email/password registration; school-provisioned teacher accounts.
-- Student registration with either the device camera or an armed, hidden USB/dongle barcode input.
+- Student, parent, and teacher email/password registration. New teachers remain pending until an administrator approves them.
+- Student registration with either a wide camera scanner for long 1D barcodes or an armed, hidden USB/dongle barcode input.
 - Raw barcode values are never stored in the browser or public tables; PostgreSQL stores a one-way hash in a private schema.
 - Teacher-created classes, join codes, weekly schedules, and individual meetings.
 - Four attendance modes:
@@ -14,9 +14,9 @@ An Ionic Vue attendance app backed by Supabase Auth, PostgreSQL, Row Level Secur
   - event self-check with the same physical evidence;
   - online self-check with a newly captured selfie only.
 - Server-side checks for class enrollment, check-in window, matching ID barcode, GPS accuracy, and allowed radius.
-- Private selfie storage with short-lived teacher-only viewing links.
+- Private selfie storage with short-lived viewing links for the approved class teacher and the student's verified linked parent.
 - Teacher approval/rejection of self-check evidence and the ability to disable attendance for one meeting.
-- Parent view for linked students' attendance and submitted location. Parents cannot open selfies.
+- Parent view for linked students' attendance, submitted location, and check-in photos.
 
 ## Local setup
 
@@ -39,7 +39,7 @@ Use only a Supabase publishable key in the app. Never add a service-role key to 
 
 ## Database
 
-The schema is in [`supabase/migrations/20261004043138_attendance_mvp.sql`](supabase/migrations/20261004043138_attendance_mvp.sql). It creates the tables, RPCs, RLS policies, private selfie bucket, and the Auth profile trigger.
+The database migrations are in [`supabase/migrations`](supabase/migrations). They create the tables, RPCs, RLS policies, private selfie bucket, Auth profile trigger, teacher approval workflow, and parent photo access.
 
 For another Supabase project:
 
@@ -49,22 +49,28 @@ pnpm exec supabase link --project-ref your-project-ref
 pnpm exec supabase db push
 ```
 
-The connected `School Attendance Project` already has this migration applied.
+The connected `School Attendance Project` already has these migrations applied.
 
-### Create the first teacher
+### Create the first administrator
 
-Teacher signup is deliberately unavailable in the client so a student cannot grant themselves teacher access.
+The administrator role cannot be selected during signup. This prevents users from granting themselves approval access.
 
-1. In Supabase Dashboard, open **Authentication → Users** and add the teacher user.
-2. In the SQL Editor, promote only that verified school account:
+1. Register the intended administrator through the app and confirm the email address.
+2. In the Supabase SQL Editor, promote only that trusted school account:
 
 ```sql
 update public.profiles
-set role = 'teacher'
-where email = lower('teacher@school.edu');
+set role = 'admin',
+    teacher_approval_status = null,
+    teacher_approval_note = null,
+    teacher_approved_by = null,
+    teacher_approved_at = null
+where email = lower('admin@school.edu');
 ```
 
-The teacher can then sign in, create a class, and share its join code. Students must finish barcode registration before joining.
+3. Sign out and sign back in. The administrator dashboard will list teacher registrations and allow approval or rejection with an optional note.
+
+Teachers choose **Teacher** when registering. They can sign in while pending, but cannot create classes or access teacher data until approved. Students must finish barcode registration before joining a class.
 
 Parent linking is automatic when a student enters the same confirmed email address used by a parent account.
 
@@ -82,11 +88,13 @@ For Android:
 pnpm exec cap open android
 ```
 
-The official Capacitor barcode scanner requires Android API 26 or newer; this project sets `minSdkVersion` to 26.
+The official Capacitor barcode scanner requires Android API 26 or newer; this project sets `minSdkVersion` to 26. Browser camera scanning requires HTTPS (or localhost) and camera permission.
 
 ## Barcode-reader behavior
 
-The USB/dongle field is visually hidden and only listens after the user presses **Use barcode reader**. Rapid keyboard-wedge scans and readers that paste the complete value are supported. Slow typing and dropped text are rejected.
+The camera scanner is configured for long linear barcodes, including Code 128, Code 39, Code 93, Codabar, ITF, EAN, and UPC. It uses a wide rectangular guide instead of a QR-style square.
+
+The USB/dongle field is visually hidden and only listens after the user presses **Use barcode reader**. Rapid keyboard-wedge scans, readers that paste the complete value, and Enter or Tab suffixes are supported. Slow typing and dropped text are rejected.
 
 Web software cannot reliably distinguish a hardware reader's paste event from a person pressing paste. The armed capture window and validation reduce accidental entry, while the camera scanner provides stronger assurance that the physical ID was present.
 
