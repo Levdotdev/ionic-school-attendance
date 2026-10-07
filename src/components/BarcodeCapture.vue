@@ -1,18 +1,29 @@
 <template>
-  <section class="barcode-reader" aria-labelledby="barcode-reader-title">
-    <h3 id="barcode-reader-title">USB / dongle barcode reader</h3>
-    <p>
+  <section class="barcode-reader" :class="{ 'is-capturing': capturing }" aria-labelledby="barcode-reader-title">
+    <div class="reader-heading">
+      <div class="reader-icon" aria-hidden="true">
+        <ion-icon :icon="capturing ? scanOutline : barcodeOutline" />
+      </div>
+      <div>
+        <span class="reader-kicker">Connected scanner</span>
+        <h3 id="barcode-reader-title">USB / dongle barcode reader</h3>
+      </div>
+    </div>
+
+    <p class="reader-description">
       Select the button, then scan the physical student ID. Keyboard-wedge and paste-mode readers
-      are supported, including readers ending with Enter or Tab; the ID value always stays hidden.
+      are supported. The ID number always stays hidden.
     </p>
 
     <ion-button
+      class="reader-button"
       type="button"
       fill="outline"
       :disabled="disabled"
       @click="beginCapture"
     >
-      {{ capturing ? 'Reader ready — scan now' : 'Use barcode reader' }}
+      <ion-icon slot="start" :icon="scanOutline" />
+      {{ capturing ? 'Reader ready - scan now' : 'Use barcode reader' }}
     </ion-button>
 
     <input
@@ -32,12 +43,16 @@
       @blur="onBlur"
     />
 
-    <ion-note v-if="status" :color="statusColor" role="status">{{ status }}</ion-note>
+    <div v-if="status" class="reader-status" :class="{ 'is-error': invalid }" role="status">
+      <ion-icon :icon="invalid ? alertCircleOutline : capturing ? scanOutline : checkmarkCircleOutline" />
+      <ion-note :color="statusColor">{{ status }}</ion-note>
+    </div>
   </section>
 </template>
 
 <script setup lang="ts">
-import { IonButton, IonNote } from '@ionic/vue'
+import { IonButton, IonIcon, IonNote } from '@ionic/vue'
+import { alertCircleOutline, barcodeOutline, checkmarkCircleOutline, scanOutline } from 'ionicons/icons'
 import { computed, nextTick, onBeforeUnmount, ref, watch } from 'vue'
 
 import {
@@ -76,7 +91,7 @@ let startedAt = 0
 let lastCharacterAt = 0
 let captureTimeout: ReturnType<typeof setTimeout> | null = null
 
-const statusColor = computed(() => (invalid.value ? 'danger' : 'medium'))
+const statusColor = computed(() => (invalid.value ? 'danger' : capturing.value ? 'primary' : 'success'))
 
 function clearCaptureTimeout() {
   if (captureTimeout) clearTimeout(captureTimeout)
@@ -235,12 +250,91 @@ watch(
 <style scoped>
 .barcode-reader {
   display: grid;
-  gap: 0.5rem;
+  gap: 0.9rem;
+  padding: 1rem;
+  border: 1px solid var(--campus-border, #d9e2e9);
+  border-radius: var(--campus-radius-md, 16px);
+  background: var(--campus-surface-soft, #f4f8fb);
+  transition: border-color 180ms ease, box-shadow 180ms ease, background 180ms ease;
+}
+
+.barcode-reader.is-capturing {
+  border-color: var(--campus-accent, #245f86);
+  background: var(--campus-accent-soft, #e8f2f8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--campus-accent, #245f86) 12%, transparent);
+}
+
+.reader-heading {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.reader-icon {
+  display: grid;
+  flex: 0 0 auto;
+  width: 2.75rem;
+  height: 2.75rem;
+  place-items: center;
+  border-radius: 0.85rem;
+  background: var(--campus-accent-soft, #e1edf5);
+  color: var(--campus-accent, #245f86);
+  font-size: 1.25rem;
 }
 
 .barcode-reader h3,
 .barcode-reader p {
   margin: 0;
+}
+
+.barcode-reader h3 {
+  margin-top: 0.15rem;
+  color: var(--campus-text, #182632);
+  font-size: 0.98rem;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.reader-kicker {
+  color: var(--campus-muted, #62727f);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.reader-description {
+  color: var(--campus-muted, #62727f);
+  font-size: 0.85rem;
+  line-height: 1.55;
+}
+
+.reader-button {
+  width: fit-content;
+  min-height: 42px;
+  margin: 0;
+  --border-color: var(--campus-border-strong, #b8c8d3);
+  --border-radius: 11px;
+  --color: var(--campus-accent, #245f86);
+}
+
+.reader-status {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.45rem;
+  color: var(--ion-color-success, #147a50);
+  font-size: 0.84rem;
+  line-height: 1.35;
+}
+
+.reader-status.is-error {
+  color: var(--ion-color-danger, #bb3e45);
+}
+
+.reader-status ion-icon {
+  flex: 0 0 auto;
+  margin-top: 0.05rem;
+  font-size: 1rem;
 }
 
 .wedge-input {
@@ -251,5 +345,11 @@ watch(
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+@media (max-width: 520px) {
+  .reader-button {
+    width: 100%;
+  }
 }
 </style>

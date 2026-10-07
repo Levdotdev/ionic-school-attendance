@@ -102,4 +102,4 @@ Web software cannot reliably distinguish a hardware reader's paste event from a 
 
 ## MVP boundaries
 
-This version intentionally leaves out polished visual design, push/email alerts, Google Calendar cloud sync, and production retention automation for selfies/location. Before a real deployment, define consent and retention rules for minors' photos and location data, then add automatic deletion and school-approved notification providers.
+This version intentionally leaves out push/email alerts, Google Calendar cloud sync, and production retention automation for selfies/location. Before a real deployment, define consent and retention rules for minors' photos and location data, then add automatic deletion and school-approved notification providers.

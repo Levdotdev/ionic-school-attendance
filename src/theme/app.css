@@ -1,16 +1,102 @@
 html,
 body {
-  background: var(--ion-background-color, #f7f8fa);
+  background: var(--campus-bg);
+}
+
+body {
+  color: var(--campus-text);
 }
 
 .page-shell {
+  width: min(100%, 1180px);
   margin: 0 auto;
-  max-width: 960px;
-  padding: 16px;
+  padding: clamp(16px, 2.5vw, 30px);
+}
+
+.campus-page ion-content::part(background) {
+  background:
+    radial-gradient(circle at 92% 4%, rgba(var(--ion-color-primary-rgb), 0.08), transparent 25rem),
+    var(--campus-bg);
+}
+
+.campus-toolbar {
+  --background: var(--campus-surface);
+  --border-color: var(--campus-border);
+  --color: var(--campus-text);
+  --min-height: 64px;
+  padding-inline: max(6px, env(safe-area-inset-left));
+}
+
+.campus-brand-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1rem;
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.campus-brand-mark {
+  display: inline-grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: 11px;
+  background: var(--campus-navy);
+  color: #fff;
+  font-size: 0.82rem;
+  font-weight: 800;
+  letter-spacing: 0.02em;
 }
 
 .muted {
-  color: var(--ion-color-medium);
+  color: var(--campus-muted);
+}
+
+ion-card {
+  border: 1px solid var(--campus-border);
+  border-radius: var(--campus-radius);
+  background: var(--campus-surface);
+  box-shadow: var(--campus-shadow);
+}
+
+ion-card-title {
+  color: var(--campus-text);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+ion-card-subtitle,
+ion-note {
+  color: var(--campus-muted);
+}
+
+ion-button {
+  --border-radius: 11px;
+  min-height: 42px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+ion-input,
+ion-select,
+ion-textarea {
+  --border-radius: 12px !important;
+  --border-color: var(--campus-border) !important;
+  --highlight-color-focused: var(--campus-blue) !important;
+}
+
+ion-badge {
+  padding: 6px 9px;
+  border-radius: 999px;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: capitalize;
+}
+
+ion-spinner {
+  color: var(--campus-blue);
 }
 
 .scanner-input {
@@ -21,4 +107,23 @@ body {
   height: 1px;
   opacity: 0;
   pointer-events: none;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(var(--ion-color-primary-rgb), 0.4);
+  outline-offset: 2px;
+}
+
+@media (max-width: 640px) {
+  .page-shell {
+    padding: 14px;
+  }
+
+  ion-card {
+    border-radius: 15px;
+  }
 }

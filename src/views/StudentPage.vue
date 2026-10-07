@@ -1,34 +1,76 @@
 <template>
-  <ion-page>
-    <ion-header>
+  <ion-page class="student-page">
+    <ion-header class="campus-header" :translucent="true">
       <ion-toolbar>
-        <ion-title>Student attendance</ion-title>
+        <ion-title>
+          <span class="toolbar-brand">
+            <span class="brand-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
+            <span>
+              <strong>MinSU Attendance</strong>
+              <small>Student portal</small>
+            </span>
+          </span>
+        </ion-title>
         <ion-buttons slot="end">
-          <ion-button :disabled="signingOut" @click="logout">Sign out</ion-button>
+          <ion-button class="sign-out-button" :disabled="signingOut" aria-label="Sign out" @click="logout">
+            <ion-spinner v-if="signingOut" name="crescent" />
+            <template v-else>
+              <ion-icon slot="start" :icon="logOutOutline" />
+              <span class="sign-out-label">Sign out</span>
+            </template>
+          </ion-button>
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
 
-    <ion-content class="ion-padding">
-      <div v-if="loading" class="centered">
-        <ion-spinner name="crescent" />
+    <ion-content class="student-content" :fullscreen="true">
+      <div
+        v-if="loading"
+        class="centered"
+        role="status"
+        aria-live="polite"
+        aria-busy="true"
+        aria-label="Loading student portal"
+      >
+        <div class="loading-state">
+          <ion-spinner name="crescent" />
+          <span>Preparing your attendance portal...</span>
+        </div>
       </div>
 
-      <template v-else>
-        <ion-card v-if="!registrationCompleted">
-          <ion-card-header>
-            <ion-card-title>Complete student registration</ion-card-title>
-            <ion-card-subtitle>
-              Your physical school ID is required. Its barcode value remains hidden and cannot be typed manually.
-            </ion-card-subtitle>
-          </ion-card-header>
+      <main v-else class="student-shell">
+        <section v-if="!registrationCompleted" class="registration-layout">
+          <div class="registration-intro">
+            <p class="eyebrow">One-time setup</p>
+            <h1>Complete your student profile</h1>
+            <p>
+              Link your physical school ID and a parent or guardian email before joining classes.
+              Your barcode number is protected and never shown on screen.
+            </p>
 
-          <ion-card-content>
-            <form class="stack" @submit.prevent="completeRegistration">
+            <ol class="setup-steps" aria-label="Registration steps">
+              <li class="is-active"><span>1</span><div><strong>Student details</strong><small>Confirm your name and guardian.</small></div></li>
+              <li :class="{ 'is-active': barcodeCaptured }"><span>2</span><div><strong>School ID</strong><small>Scan the long barcode on your ID.</small></div></li>
+              <li><span>3</span><div><strong>Ready</strong><small>Join your teacher's class.</small></div></li>
+            </ol>
+          </div>
+
+          <section class="campus-surface registration-card" aria-labelledby="registration-title">
+            <div class="surface-heading">
+              <div>
+                <p class="eyebrow">Student registration</p>
+                <h2 id="registration-title">Your information</h2>
+              </div>
+              <span class="secure-chip"><ion-icon :icon="shieldCheckmarkOutline" /> Secure</span>
+            </div>
+
+            <form class="registration-form" @submit.prevent="completeRegistration">
               <ion-input
                 v-model="fullName"
+                class="campus-input"
                 label="Student full name"
                 label-placement="stacked"
+                fill="outline"
                 autocomplete="name"
                 :disabled="savingRegistration"
                 required
@@ -36,115 +78,216 @@
 
               <ion-input
                 v-model="guardianEmail"
+                class="campus-input"
                 type="email"
                 label="Parent / guardian email"
                 label-placement="stacked"
+                fill="outline"
                 autocomplete="email"
                 :disabled="savingRegistration"
                 required
               />
 
-              <div class="scan-actions">
+              <div class="scan-methods">
+                <div class="field-heading">
+                  <div>
+                    <strong>Scan your physical school ID</strong>
+                    <span>Use either option below. Manual typing is disabled.</span>
+                  </div>
+                  <span class="capture-state" :class="{ 'is-complete': barcodeCaptured }">
+                    <ion-icon :icon="barcodeCaptured ? checkmarkCircleOutline : barcodeOutline" />
+                    {{ barcodeCaptured ? 'Captured' : 'Required' }}
+                  </span>
+                </div>
+
                 <ion-button
+                  class="camera-scan-button"
                   type="button"
                   fill="outline"
                   :disabled="savingRegistration || scanningCamera"
                   @click="scanWithCamera"
                 >
                   <ion-spinner v-if="scanningCamera" name="crescent" />
-                  <span v-else>Scan ID with camera</span>
+                  <template v-else>
+                    <ion-icon slot="start" :icon="scanOutline" />
+                    Scan barcode with camera
+                  </template>
                 </ion-button>
 
-                <ion-note :color="barcodeCaptured ? 'success' : 'medium'">
-                  {{ barcodeCaptured ? 'ID barcode captured.' : 'No ID barcode captured yet.' }}
-                </ion-note>
+                <div class="method-divider"><span>or</span></div>
+
+                <barcode-capture
+                  :disabled="savingRegistration || scanningCamera"
+                  @scan="acceptBarcode"
+                  @invalid="showRegistrationError"
+                />
               </div>
 
-              <barcode-capture
-                :disabled="savingRegistration || scanningCamera"
-                @scan="acceptBarcode"
-                @invalid="showRegistrationError"
-              />
-
-              <ion-note v-if="registrationMessage" color="danger" role="alert">
-                {{ registrationMessage }}
-              </ion-note>
-
-              <ion-button expand="block" type="submit" :disabled="savingRegistration || !barcodeCaptured">
-                <ion-spinner v-if="savingRegistration" name="crescent" />
-                <span v-else>Finish registration</span>
-              </ion-button>
-            </form>
-          </ion-card-content>
-        </ion-card>
-
-        <section v-else class="meetings">
-          <ion-card>
-            <ion-card-header>
-              <ion-card-title>Join a class</ion-card-title>
-              <ion-card-subtitle>Enter the join code shared by your teacher.</ion-card-subtitle>
-            </ion-card-header>
-            <ion-card-content>
-              <form class="join-form" @submit.prevent="joinClass">
-                <ion-input
-                  v-model="joinCode"
-                  label="Class join code"
-                  label-placement="stacked"
-                  fill="outline"
-                  :maxlength="16"
-                  :disabled="joiningClass"
-                  required
-                />
-                <ion-button type="submit" :disabled="joiningClass || joinCode.trim().length < 6">
-                  <ion-spinner v-if="joiningClass" name="crescent" />
-                  <span v-else>Join class</span>
-                </ion-button>
-              </form>
-              <ion-note v-if="joinMessage" :color="joinFailed ? 'danger' : 'success'" role="status">
-                {{ joinMessage }}
-              </ion-note>
-            </ion-card-content>
-          </ion-card>
-
-          <div class="section-heading">
-            <div>
-              <h2>Available self-checks</h2>
-              <p>Only attendance windows assigned to you and currently open are shown.</p>
-            </div>
-            <ion-button fill="outline" size="small" :disabled="refreshing" @click="loadAvailableMeetings">
-              Refresh
-            </ion-button>
-          </div>
-
-          <ion-note v-if="pageMessage" color="danger" role="alert">{{ pageMessage }}</ion-note>
-
-          <ion-list v-if="meetings.length">
-            <ion-item v-for="meeting in meetings" :key="meeting.id">
-              <ion-label class="ion-text-wrap">
-                <h2>{{ meeting.class_name }} — {{ meeting.title }}</h2>
-                <p>{{ formatMeetingTime(meeting) }}</p>
-                <p>{{ formatMode(meeting.attendance_mode) }}</p>
-                <p v-if="meeting.existing_status">
-                  Recorded: {{ meeting.existing_status }}
-                  <span v-if="meeting.submitted_at">({{ formatDateTime(meeting.submitted_at) }})</span>
-                </p>
-              </ion-label>
+              <div v-if="registrationMessage" class="message-box is-error" role="alert">
+                <ion-icon :icon="alertCircleOutline" />
+                <span>{{ registrationMessage }}</span>
+              </div>
 
               <ion-button
-                slot="end"
-                :disabled="Boolean(meeting.existing_status)"
-                @click="openSelfCheck(meeting.id)"
+                class="primary-action"
+                expand="block"
+                size="large"
+                type="submit"
+                :disabled="savingRegistration || !barcodeCaptured"
               >
-                {{ meeting.existing_status ? 'Submitted' : 'Check in' }}
+                <ion-spinner v-if="savingRegistration" name="crescent" />
+                <template v-else>
+                  Finish registration
+                  <ion-icon slot="end" :icon="arrowForwardOutline" />
+                </template>
               </ion-button>
-            </ion-item>
-          </ion-list>
-
-          <ion-card v-else>
-            <ion-card-content>No self-check attendance is open right now.</ion-card-content>
-          </ion-card>
+            </form>
+          </section>
         </section>
-      </template>
+
+        <template v-else>
+          <section class="welcome-banner">
+            <div>
+              <p class="eyebrow">{{ dashboardDate }}</p>
+              <h1>Welcome back, {{ studentFirstName }}</h1>
+              <p>Check your open attendance windows and submit before they close.</p>
+            </div>
+            <div class="availability-summary" :class="{ 'has-meetings': meetings.length > 0 }">
+              <span class="summary-icon"><ion-icon :icon="meetings.length ? timeOutline : checkmarkCircleOutline" /></span>
+              <span>
+                <strong>{{ meetings.length }}</strong>
+                <small>{{ meetings.length === 1 ? 'open self-check' : 'open self-checks' }}</small>
+              </span>
+            </div>
+          </section>
+
+          <div v-if="pageMessage" class="message-box is-error page-message" role="alert">
+            <ion-icon :icon="alertCircleOutline" />
+            <span>{{ pageMessage }}</span>
+          </div>
+
+          <div class="dashboard-grid">
+            <section class="campus-surface attendance-panel" aria-labelledby="self-checks-title">
+              <div class="surface-heading attendance-heading">
+                <div>
+                  <p class="eyebrow">Attendance</p>
+                  <h2 id="self-checks-title">Available self-checks</h2>
+                  <p>Only meetings assigned to you with an open check-in window are shown.</p>
+                </div>
+                <ion-button
+                  class="icon-action"
+                  fill="clear"
+                  :disabled="refreshing"
+                  aria-label="Refresh available self-checks"
+                  @click="loadAvailableMeetings"
+                >
+                  <ion-spinner v-if="refreshing" name="crescent" />
+                  <ion-icon v-else :icon="refreshOutline" />
+                </ion-button>
+              </div>
+
+              <div v-if="meetings.length" class="meeting-list">
+                <article v-for="meeting in meetings" :key="meeting.id" class="meeting-card">
+                  <div class="meeting-icon" :class="`mode-${meeting.attendance_mode}`" aria-hidden="true">
+                    <ion-icon :icon="meetingModeMeta(meeting.attendance_mode).icon" />
+                  </div>
+
+                  <div class="meeting-copy">
+                    <div class="meeting-title-row">
+                      <div>
+                        <span class="class-name">{{ meeting.class_name }}</span>
+                        <h3>{{ meeting.title }}</h3>
+                      </div>
+                      <span v-if="meeting.existing_status" class="status-chip is-complete">
+                        <ion-icon :icon="checkmarkCircleOutline" /> Submitted
+                      </span>
+                      <span v-else class="status-chip is-open"><span class="live-dot"></span> Open</span>
+                    </div>
+
+                    <div class="meeting-details">
+                      <span><ion-icon :icon="calendarOutline" /> {{ formatMeetingTime(meeting) }}</span>
+                      <span><ion-icon :icon="meetingModeMeta(meeting.attendance_mode).icon" /> {{ meetingModeMeta(meeting.attendance_mode).label }}</span>
+                    </div>
+                    <p>{{ meetingModeMeta(meeting.attendance_mode).detail }}</p>
+
+                    <div class="meeting-actions">
+                      <span v-if="meeting.existing_status" class="submitted-time">
+                        Recorded as {{ meeting.existing_status }}
+                        <template v-if="meeting.submitted_at"> on {{ formatDateTime(meeting.submitted_at) }}</template>
+                      </span>
+                      <ion-button
+                        v-else
+                        class="check-in-button"
+                        @click="openSelfCheck(meeting.id)"
+                      >
+                        Start check-in
+                        <ion-icon slot="end" :icon="arrowForwardOutline" />
+                      </ion-button>
+                    </div>
+                  </div>
+                </article>
+              </div>
+
+              <div v-else class="empty-state">
+                <div class="empty-icon"><ion-icon :icon="checkmarkCircleOutline" /></div>
+                <h3>You're all caught up</h3>
+                <p>No self-check attendance is open right now. Check again when your teacher opens a meeting.</p>
+                <ion-button fill="outline" size="small" :disabled="refreshing" @click="loadAvailableMeetings">
+                  <ion-spinner v-if="refreshing" name="crescent" />
+                  <template v-else><ion-icon slot="start" :icon="refreshOutline" /> Check again</template>
+                </ion-button>
+              </div>
+            </section>
+
+            <aside class="student-sidebar">
+              <section class="campus-surface join-panel" aria-labelledby="join-class-title">
+                <div class="panel-icon"><ion-icon :icon="peopleOutline" /></div>
+                <p class="eyebrow">Enrollment</p>
+                <h2 id="join-class-title">Join a class</h2>
+                <p>Enter the private join code shared by your teacher.</p>
+
+                <form class="join-form" @submit.prevent="joinClass">
+                  <ion-input
+                    v-model="joinCode"
+                    class="join-code-input"
+                    label="Class join code"
+                    label-placement="stacked"
+                    fill="outline"
+                    :maxlength="16"
+                    :disabled="joiningClass"
+                    required
+                  />
+                  <ion-button class="join-button" expand="block" type="submit" :disabled="joiningClass || joinCode.trim().length < 6">
+                    <ion-spinner v-if="joiningClass" name="crescent" />
+                    <template v-else>
+                      Join class
+                      <ion-icon slot="end" :icon="arrowForwardOutline" />
+                    </template>
+                  </ion-button>
+                </form>
+
+                <div
+                  v-if="joinMessage"
+                  class="message-box compact"
+                  :class="joinFailed ? 'is-error' : 'is-success'"
+                  role="status"
+                >
+                  <ion-icon :icon="joinFailed ? alertCircleOutline : checkmarkCircleOutline" />
+                  <span>{{ joinMessage }}</span>
+                </div>
+              </section>
+
+              <section class="privacy-card">
+                <ion-icon :icon="shieldCheckmarkOutline" />
+                <div>
+                  <strong>Your evidence is private</strong>
+                  <p>Only authorized teachers and your linked parent account can view attendance photos.</p>
+                </div>
+              </section>
+            </aside>
+          </div>
+        </template>
+      </main>
     </ion-content>
   </ion-page>
 </template>
@@ -153,23 +296,31 @@
 import {
   IonButton,
   IonButtons,
-  IonCard,
-  IonCardContent,
-  IonCardHeader,
-  IonCardSubtitle,
-  IonCardTitle,
   IonContent,
   IonHeader,
+  IonIcon,
   IonInput,
-  IonItem,
-  IonLabel,
-  IonList,
-  IonNote,
   IonPage,
   IonSpinner,
   IonTitle,
   IonToolbar,
 } from '@ionic/vue'
+import {
+  alertCircleOutline,
+  arrowForwardOutline,
+  barcodeOutline,
+  calendarOutline,
+  checkmarkCircleOutline,
+  cloudOutline,
+  locationOutline,
+  logOutOutline,
+  peopleOutline,
+  refreshOutline,
+  scanOutline,
+  schoolOutline,
+  shieldCheckmarkOutline,
+  timeOutline,
+} from 'ionicons/icons'
 import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 
@@ -177,6 +328,7 @@ import BarcodeCapture from '@/components/BarcodeCapture.vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 type SelfAttendanceMode = 'self_on_site' | 'self_event' | 'self_online'
 
@@ -224,6 +376,10 @@ const pageMessage = ref('')
 
 const registrationCompleted = computed(() => Boolean(studentProfile.value?.registration_completed_at))
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
+const studentFirstName = computed(() => profile.value?.full_name?.trim().split(/\s+/)[0] || 'student')
+const dashboardDate = computed(() =>
+  new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()),
+)
 
 function acceptBarcode(value: string) {
   rawBarcode.value = value
@@ -242,7 +398,7 @@ async function scanWithCamera() {
   try {
     acceptBarcode(await scanStudentBarcode())
   } catch (error) {
-    showRegistrationError(error instanceof Error ? error.message : 'The barcode scan failed.')
+    showRegistrationError(toUserFacingErrorMessage(error, 'The barcode scan failed.'))
   } finally {
     scanningCamera.value = false
   }
@@ -277,7 +433,7 @@ async function loadAvailableMeetings() {
     if (error) throw error
     meetings.value = (data ?? []) as AvailableMeeting[]
   } catch (error) {
-    pageMessage.value = error instanceof Error ? error.message : 'Unable to load attendance meetings.'
+    pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load attendance meetings.')
   } finally {
     refreshing.value = false
   }
@@ -316,7 +472,7 @@ async function completeRegistration() {
     await Promise.all([loadStudentProfile(), refreshProfile()])
     await loadAvailableMeetings()
   } catch (error) {
-    registrationMessage.value = error instanceof Error ? error.message : 'Registration could not be completed.'
+    registrationMessage.value = toUserFacingErrorMessage(error, 'Registration could not be completed.')
   } finally {
     savingRegistration.value = false
   }
@@ -343,7 +499,7 @@ async function joinClass() {
     await loadAvailableMeetings()
   } catch (error) {
     joinFailed.value = true
-    joinMessage.value = error instanceof Error ? error.message : 'The class could not be joined.'
+    joinMessage.value = toUserFacingErrorMessage(error, 'The class could not be joined.')
   } finally {
     joiningClass.value = false
   }
@@ -357,19 +513,40 @@ function formatDateTime(value: string): string {
 }
 
 function formatMeetingTime(meeting: AvailableMeeting): string {
-  const formatter = new Intl.DateTimeFormat(undefined, {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-  })
-  return `${formatter.format(new Date(meeting.starts_at))}–${new Intl.DateTimeFormat(undefined, {
-    timeStyle: 'short',
-  }).format(new Date(meeting.ends_at))}`
+  const dateAndTime = new Intl.DateTimeFormat(undefined, {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(meeting.starts_at))
+  const endTime = new Intl.DateTimeFormat(undefined, {
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(meeting.ends_at))
+  return `${dateAndTime} - ${endTime}`
 }
 
-function formatMode(mode: SelfAttendanceMode): string {
-  if (mode === 'self_online') return 'Online class — selfie required'
-  if (mode === 'self_event') return 'School event — ID barcode, selfie, and location required'
-  return 'On-site class — ID barcode, selfie, and location required'
+function meetingModeMeta(mode: SelfAttendanceMode) {
+  if (mode === 'self_online') {
+    return {
+      label: 'Online class',
+      detail: 'Take a new selfie to verify your attendance.',
+      icon: cloudOutline,
+    }
+  }
+  if (mode === 'self_event') {
+    return {
+      label: 'School event',
+      detail: 'Your school ID, a selfie, and verified location are required.',
+      icon: locationOutline,
+    }
+  }
+  return {
+    label: 'On-site class',
+    detail: 'Your school ID, a selfie, and verified location are required.',
+    icon: schoolOutline,
+  }
 }
 
 async function openSelfCheck(meetingId: string) {
@@ -395,7 +572,7 @@ onMounted(async () => {
     await loadStudentProfile()
     if (registrationCompleted.value) await loadAvailableMeetings()
   } catch (error) {
-    pageMessage.value = error instanceof Error ? error.message : 'Unable to load the student account.'
+    pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load the student account.')
   } finally {
     loading.value = false
   }
@@ -403,40 +580,791 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.student-page {
+  --campus-accent: var(--campus-blue, #245f86);
+  --campus-accent-soft: var(--campus-blue-soft, #e1edf5);
+  --campus-surface-subtle: var(--campus-surface-soft, #f5f8fa);
+  --campus-green: var(--campus-success, #147a50);
+  --campus-green-soft: var(--campus-success-soft, #e1f4eb);
+  --campus-red: var(--campus-danger, #b73542);
+  --campus-red-soft: var(--campus-danger-soft, #fae9ea);
+  --campus-radius-lg: var(--campus-radius, 20px);
+  --campus-radius-md: var(--campus-radius-sm, 14px);
+}
+
+.campus-header ion-toolbar {
+  --background: rgba(255, 255, 255, 0.96);
+  --border-color: var(--campus-border);
+  --min-height: 68px;
+  --padding-start: clamp(0.4rem, 3vw, 1.25rem);
+  --padding-end: clamp(0.35rem, 3vw, 1.1rem);
+}
+
+.toolbar-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.7rem;
+  text-align: left;
+}
+
+.brand-mark {
+  display: grid;
+  width: 2.45rem;
+  height: 2.45rem;
+  place-items: center;
+  border-radius: 0.78rem;
+  background: var(--campus-accent);
+  color: #fff;
+  font-size: 1.15rem;
+}
+
+.toolbar-brand strong,
+.toolbar-brand small {
+  display: block;
+}
+
+.toolbar-brand strong {
+  color: var(--campus-text);
+  font-size: 0.98rem;
+  font-weight: 700;
+}
+
+.toolbar-brand small {
+  margin-top: 0.1rem;
+  color: var(--campus-muted);
+  font-size: 0.7rem;
+  font-weight: 500;
+}
+
+.sign-out-button {
+  --border-radius: 10px;
+  --color: var(--campus-muted);
+  font-size: 0.82rem;
+}
+
+.student-content {
+  --background: var(--campus-bg);
+}
+
+.student-shell {
+  width: min(1120px, calc(100% - 2rem));
+  margin: 0 auto;
+  padding: clamp(1.25rem, 4vw, 2.5rem) 0 4rem;
+}
+
 .centered {
   display: grid;
-  min-height: 50vh;
+  min-height: 70vh;
   place-items: center;
 }
 
-.stack,
-.meetings {
+.loading-state {
+  display: grid;
+  justify-items: center;
+  gap: 0.8rem;
+  color: var(--campus-muted);
+  font-size: 0.9rem;
+}
+
+.loading-state ion-spinner {
+  width: 2rem;
+  height: 2rem;
+  color: var(--campus-accent);
+}
+
+.eyebrow {
+  margin: 0 0 0.35rem;
+  color: var(--campus-muted);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.075em;
+  text-transform: uppercase;
+}
+
+.campus-surface {
+  border: 1px solid var(--campus-border);
+  border-radius: var(--campus-radius-lg);
+  background: var(--campus-surface);
+  box-shadow: 0 14px 40px rgba(21, 54, 78, 0.065);
+}
+
+.registration-layout {
+  display: grid;
+  grid-template-columns: minmax(250px, 0.75fr) minmax(420px, 1.25fr);
+  gap: clamp(1.5rem, 5vw, 4.25rem);
+  align-items: start;
+  padding-top: clamp(0.5rem, 5vw, 3rem);
+}
+
+.registration-intro {
+  position: sticky;
+  top: 2rem;
+  padding: 1.25rem 0;
+}
+
+.registration-intro h1,
+.welcome-banner h1 {
+  margin: 0;
+  color: var(--campus-text);
+  font-size: clamp(1.8rem, 4vw, 2.55rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.1;
+}
+
+.registration-intro > p:not(.eyebrow),
+.welcome-banner p:not(.eyebrow) {
+  max-width: 38rem;
+  margin: 0.9rem 0 0;
+  color: var(--campus-muted);
+  font-size: 0.98rem;
+  line-height: 1.65;
+}
+
+.setup-steps {
+  display: grid;
+  gap: 0.15rem;
+  margin: 2rem 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.setup-steps li {
+  position: relative;
+  display: grid;
+  grid-template-columns: 2.2rem 1fr;
+  gap: 0.75rem;
+  align-items: center;
+  min-height: 4rem;
+  color: var(--campus-muted);
+}
+
+.setup-steps li:not(:last-child)::after {
+  position: absolute;
+  top: 2.75rem;
+  bottom: -0.75rem;
+  left: 1.05rem;
+  width: 2px;
+  background: var(--campus-border);
+  content: '';
+}
+
+.setup-steps li > span {
+  z-index: 1;
+  display: grid;
+  width: 2.15rem;
+  height: 2.15rem;
+  place-items: center;
+  border-radius: 50%;
+  background: #e5ebef;
+  font-size: 0.78rem;
+  font-weight: 750;
+}
+
+.setup-steps li.is-active > span {
+  background: var(--campus-accent);
+  color: #fff;
+}
+
+.setup-steps li div,
+.setup-steps strong,
+.setup-steps small {
+  display: block;
+}
+
+.setup-steps strong {
+  color: var(--campus-text);
+  font-size: 0.9rem;
+}
+
+.setup-steps small {
+  margin-top: 0.18rem;
+  font-size: 0.76rem;
+}
+
+.registration-card,
+.attendance-panel,
+.join-panel {
+  padding: clamp(1.1rem, 3vw, 1.65rem);
+}
+
+.surface-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.surface-heading h2,
+.join-panel h2 {
+  margin: 0;
+  color: var(--campus-text);
+  font-size: 1.3rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.surface-heading > div > p:not(.eyebrow) {
+  max-width: 39rem;
+  margin: 0.4rem 0 0;
+  color: var(--campus-muted);
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.secure-chip,
+.capture-state,
+.status-chip {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.42rem 0.62rem;
+  border-radius: 999px;
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+  font-size: 0.72rem;
+  font-weight: 700;
+}
+
+.registration-form {
+  display: grid;
+  gap: 1rem;
+  margin-top: 1.35rem;
+}
+
+.campus-input,
+.join-code-input {
+  --border-color: var(--campus-border);
+  --border-color-focused: var(--campus-accent);
+  --border-radius: 12px;
+  --highlight-color-focused: var(--campus-accent);
+}
+
+.scan-methods {
+  display: grid;
+  gap: 0.85rem;
+  margin-top: 0.25rem;
+  padding-top: 1.15rem;
+  border-top: 1px solid var(--campus-border);
+}
+
+.field-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.field-heading strong,
+.field-heading span {
+  display: block;
+}
+
+.field-heading strong {
+  color: var(--campus-text);
+  font-size: 0.9rem;
+}
+
+.field-heading div > span {
+  margin-top: 0.2rem;
+  color: var(--campus-muted);
+  font-size: 0.77rem;
+}
+
+.capture-state {
+  background: #edf1f4;
+  color: var(--campus-muted);
+}
+
+.capture-state.is-complete {
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+}
+
+.camera-scan-button {
+  min-height: 46px;
+  margin: 0;
+  --border-color: var(--campus-border);
+  --border-radius: 11px;
+  --color: var(--campus-accent);
+}
+
+.method-divider {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  color: var(--campus-muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+}
+
+.method-divider::before,
+.method-divider::after {
+  flex: 1;
+  height: 1px;
+  background: var(--campus-border);
+  content: '';
+}
+
+.primary-action,
+.check-in-button,
+.join-button {
+  min-height: 46px;
+  margin: 0;
+  --background: var(--campus-accent);
+  --background-hover: #1d506f;
+  --border-radius: 11px;
+  --box-shadow: none;
+  font-weight: 700;
+}
+
+.welcome-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+  padding: clamp(0.5rem, 2vw, 1rem) 0 clamp(1.5rem, 3vw, 2.2rem);
+}
+
+.availability-summary {
+  display: flex;
+  min-width: 176px;
+  align-items: center;
+  gap: 0.8rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--campus-border);
+  border-radius: var(--campus-radius-md);
+  background: var(--campus-surface);
+}
+
+.availability-summary.has-meetings {
+  border-color: var(--campus-warning);
+  background: var(--campus-warning-soft);
+}
+
+.summary-icon {
+  display: grid;
+  width: 2.5rem;
+  height: 2.5rem;
+  place-items: center;
+  border-radius: 0.75rem;
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+  font-size: 1.15rem;
+}
+
+.has-meetings .summary-icon {
+  border: 1px solid var(--campus-warning);
+  background: var(--campus-surface);
+  color: var(--campus-warning);
+}
+
+.availability-summary strong,
+.availability-summary small {
+  display: block;
+}
+
+.availability-summary strong {
+  color: var(--campus-text);
+  font-size: 1.35rem;
+}
+
+.availability-summary small {
+  color: var(--campus-muted);
+  font-size: 0.7rem;
+}
+
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.65fr) minmax(270px, 0.75fr);
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.attendance-heading {
+  padding-bottom: 1.15rem;
+  border-bottom: 1px solid var(--campus-border);
+}
+
+.icon-action {
+  width: 2.65rem;
+  height: 2.65rem;
+  margin: 0;
+  border-radius: 0.75rem;
+  background: var(--campus-surface-subtle);
+  color: var(--campus-accent);
+  font-size: 1.15rem;
+}
+
+.meeting-list {
+  display: grid;
+}
+
+.meeting-card {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 0.95rem;
+  padding: 1.2rem 0;
+  border-bottom: 1px solid var(--campus-border);
+}
+
+.meeting-card:last-child {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+
+.meeting-icon,
+.panel-icon,
+.empty-icon {
+  display: grid;
+  width: 3rem;
+  height: 3rem;
+  place-items: center;
+  border-radius: 0.9rem;
+  background: var(--campus-accent-soft);
+  color: var(--campus-accent);
+  font-size: 1.3rem;
+}
+
+.meeting-icon.mode-self_online {
+  background: #ede9fb;
+  color: #7255b4;
+}
+
+.meeting-icon.mode-self_event {
+  background: var(--campus-warning-soft);
+  color: var(--campus-warning);
+}
+
+.meeting-copy {
+  min-width: 0;
+}
+
+.meeting-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.class-name {
+  color: var(--campus-accent);
+  font-size: 0.72rem;
+  font-weight: 750;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.meeting-title-row h3 {
+  margin: 0.2rem 0 0;
+  color: var(--campus-text);
+  font-size: 1.03rem;
+  font-weight: 700;
+}
+
+.status-chip.is-open {
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+}
+
+.status-chip.is-complete {
+  background: #edf1f4;
+  color: var(--campus-muted);
+}
+
+.live-dot {
+  width: 0.42rem;
+  height: 0.42rem;
+  border-radius: 50%;
+  background: currentColor;
+  box-shadow: 0 0 0 3px rgba(20, 122, 80, 0.12);
+}
+
+.meeting-details {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 1rem;
+  margin-top: 0.75rem;
+}
+
+.meeting-details span {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--campus-muted);
+  font-size: 0.77rem;
+}
+
+.meeting-details ion-icon {
+  color: var(--campus-accent);
+}
+
+.meeting-copy > p {
+  margin: 0.55rem 0 0;
+  color: var(--campus-muted);
+  font-size: 0.82rem;
+  line-height: 1.45;
+}
+
+.meeting-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin-top: 0.9rem;
+}
+
+.check-in-button {
+  min-height: 40px;
+  font-size: 0.78rem;
+}
+
+.submitted-time {
+  color: var(--campus-green);
+  font-size: 0.76rem;
+  font-weight: 650;
+}
+
+.empty-state {
+  display: grid;
+  max-width: 420px;
+  justify-items: center;
+  gap: 0.45rem;
+  margin: 0 auto;
+  padding: clamp(2.5rem, 8vw, 5rem) 1rem;
+  text-align: center;
+}
+
+.empty-icon {
+  width: 4rem;
+  height: 4rem;
+  margin-bottom: 0.55rem;
+  border-radius: 1.25rem;
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+  font-size: 1.8rem;
+}
+
+.empty-state h3 {
+  margin: 0;
+  color: var(--campus-text);
+  font-size: 1.1rem;
+}
+
+.empty-state p {
+  margin: 0 0 0.65rem;
+  color: var(--campus-muted);
+  font-size: 0.84rem;
+  line-height: 1.55;
+}
+
+.student-sidebar {
   display: grid;
   gap: 1rem;
 }
 
-.scan-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 0.75rem;
-  align-items: center;
+.join-panel .panel-icon {
+  margin-bottom: 1rem;
+}
+
+.join-panel > p:not(.eyebrow) {
+  margin: 0.45rem 0 0;
+  color: var(--campus-muted);
+  font-size: 0.84rem;
+  line-height: 1.5;
 }
 
 .join-form {
   display: grid;
   gap: 0.75rem;
-  margin-bottom: 0.5rem;
+  margin-top: 1.2rem;
 }
 
-.section-heading {
+.join-code-input {
+  text-transform: uppercase;
+}
+
+.privacy-card {
   display: flex;
-  justify-content: space-between;
-  gap: 1rem;
-  align-items: start;
+  gap: 0.8rem;
+  padding: 1rem;
+  border-radius: var(--campus-radius-md);
+  background: #e7f1f6;
+  color: var(--campus-accent);
 }
 
-.section-heading h2,
-.section-heading p {
-  margin: 0 0 0.25rem;
+.privacy-card > ion-icon {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  font-size: 1.25rem;
+}
+
+.privacy-card strong {
+  color: var(--campus-text);
+  font-size: 0.82rem;
+}
+
+.privacy-card p {
+  margin: 0.3rem 0 0;
+  color: var(--campus-muted);
+  font-size: 0.75rem;
+  line-height: 1.45;
+}
+
+.message-box {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.55rem;
+  padding: 0.75rem 0.85rem;
+  border-radius: 11px;
+  font-size: 0.82rem;
+  line-height: 1.4;
+}
+
+.message-box ion-icon {
+  flex: 0 0 auto;
+  margin-top: 0.08rem;
+  font-size: 1rem;
+}
+
+.message-box.is-error {
+  background: var(--campus-red-soft);
+  color: var(--campus-red);
+}
+
+.message-box.is-success {
+  background: var(--campus-green-soft);
+  color: var(--campus-green);
+}
+
+.message-box.compact {
+  margin-top: 0.75rem;
+  padding: 0.65rem 0.7rem;
+  font-size: 0.76rem;
+}
+
+.page-message {
+  margin-bottom: 1rem;
+}
+
+@media (prefers-color-scheme: dark) {
+  .campus-header ion-toolbar {
+    --background: rgba(17, 29, 39, 0.97);
+  }
+
+  .capture-state,
+  .status-chip.is-complete,
+  .setup-steps li > span {
+    background: #22313c;
+  }
+
+  .privacy-card {
+    background: #132b3c;
+  }
+}
+
+@media (max-width: 820px) {
+  .registration-layout,
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .registration-intro {
+    position: static;
+    padding-bottom: 0;
+  }
+
+  .setup-steps {
+    grid-template-columns: repeat(3, 1fr);
+  }
+
+  .setup-steps li {
+    grid-template-columns: 1fr;
+    justify-items: center;
+    align-content: start;
+    text-align: center;
+  }
+
+  .setup-steps li:not(:last-child)::after {
+    top: 1.05rem;
+    right: -50%;
+    bottom: auto;
+    left: 50%;
+    width: 100%;
+    height: 2px;
+  }
+
+  .student-sidebar {
+    grid-template-columns: minmax(0, 1fr) minmax(230px, 0.8fr);
+  }
+}
+
+@media (max-width: 600px) {
+  .student-shell {
+    width: min(100% - 1rem, 1120px);
+    padding-top: 1rem;
+  }
+
+  .sign-out-label,
+  .toolbar-brand small {
+    display: none;
+  }
+
+  .brand-mark {
+    width: 2.15rem;
+    height: 2.15rem;
+  }
+
+  .welcome-banner {
+    display: grid;
+  }
+
+  .availability-summary {
+    width: 100%;
+  }
+
+  .student-sidebar {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-card {
+    grid-template-columns: 1fr;
+  }
+
+  .meeting-icon {
+    width: 2.6rem;
+    height: 2.6rem;
+  }
+
+  .meeting-title-row {
+    gap: 0.5rem;
+  }
+
+  .meeting-actions,
+  .check-in-button {
+    width: 100%;
+  }
+
+  .field-heading {
+    display: grid;
+  }
+
+  .capture-state {
+    width: fit-content;
+  }
+}
+
+@media (max-width: 390px) {
+  .toolbar-brand strong {
+    font-size: 0.86rem;
+  }
+
+  .meeting-title-row {
+    display: grid;
+  }
+
+  .status-chip {
+    width: fit-content;
+  }
 }
 </style>
