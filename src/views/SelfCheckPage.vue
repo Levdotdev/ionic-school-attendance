@@ -97,8 +97,8 @@
               <p class="eyebrow">Step {{ currentStepIndex + 1 }} of {{ checkInSteps.length }}</p>
               <h2 id="current-step-title" ref="stageTitle" tabindex="-1">Scan your school ID</h2>
               <p class="stage-copy">
-                Scan the long barcode on your physical ID using your camera or the connected barcode reader.
-                The ID number remains hidden.
+                Use your device camera to scan the long barcode on your physical ID.
+                The ID number remains hidden and cannot be typed manually.
               </p>
 
               <div class="stage-actions barcode-actions">
@@ -115,13 +115,6 @@
                   </template>
                 </ion-button>
 
-                <div class="method-divider"><span>or use a connected reader</span></div>
-
-                <barcode-capture
-                  :disabled="submitting || scanningCamera"
-                  @scan="acceptBarcode"
-                  @invalid="showError"
-                />
               </div>
             </section>
 
@@ -130,7 +123,8 @@
               <p class="eyebrow">Step {{ currentStepIndex + 1 }} of {{ checkInSteps.length }}</p>
               <h2 id="current-step-title" ref="stageTitle" tabindex="-1">Take a clear selfie</h2>
               <p class="stage-copy">
-                Face the camera in good lighting. A new photo is required so your teacher can verify this check-in.
+                Face the camera in good lighting. The capture time{{ requiresLocation ? ' and verified location' : '' }}
+                will be stamped directly on the submitted photo.
               </p>
 
               <div v-if="selfie" class="selfie-frame">
@@ -253,7 +247,7 @@
                 </template>
               </ion-button>
 
-              <p class="submit-note"><ion-icon :icon="lockClosedOutline" /> Evidence is securely sent to your teacher for verification.</p>
+              <p class="submit-note"><ion-icon :icon="lockClosedOutline" /> Your check-in counts as present immediately. Your teacher can void it only if the evidence is invalid.</p>
             </section>
           </section>
 
@@ -269,7 +263,7 @@
                 </div>
                 <div :class="{ 'is-complete': Boolean(selfie) }">
                   <span><ion-icon :icon="cameraOutline" /></span>
-                  <div><strong>New selfie</strong><small>Teacher verification</small></div>
+                  <div><strong>New selfie</strong><small>Timestamp{{ requiresLocation ? ' and location' : '' }} stamped</small></div>
                   <ion-icon v-if="selfie" class="requirement-check" :icon="checkmarkCircleOutline" />
                 </div>
                 <div v-if="requiresLocation" :class="{ 'is-complete': Boolean(location) }">
@@ -326,20 +320,21 @@ import {
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
-import BarcodeCapture from '@/components/BarcodeCapture.vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
+import { analyzeFace, FACE_MODEL_VERSION, type FaceAnalysis } from '@/services/faceRecognition'
 import { captureAttendanceLocation, type AttendanceLocation } from '@/services/location'
 import {
   captureSelfie,
   releaseSelfiePreview,
   uploadAttendanceSelfie,
+  watermarkAttendanceSelfie,
   type CapturedSelfie,
 } from '@/services/selfie'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
-type SelfAttendanceMode = 'self_on_site' | 'self_event' | 'self_online'
+type SelfAttendanceMode = 'self_on_site' | 'self_online'
 type CheckInStage = 'barcode' | 'selfie' | 'location' | 'submit'
 
 interface AvailableMeeting {
@@ -364,6 +359,7 @@ const submitting = ref(false)
 const meeting = ref<AvailableMeeting | null>(null)
 const rawBarcode = ref<string | null>(null)
 const selfie = ref<CapturedSelfie | null>(null)
+const faceAnalysis = ref<FaceAnalysis | null>(null)
 const uploadedSelfiePath = ref<string | null>(null)
 const location = ref<AttendanceLocation | null>(null)
 const message = ref('')
@@ -409,7 +405,7 @@ const stageAnnouncement = computed(() => {
   return `Step ${currentStepIndex.value + 1} of ${checkInSteps.value.length}: ${step?.label ?? 'Check-in'}.`
 })
 const canSubmit = computed(() => {
-  if (!meeting.value || !selfie.value) return false
+  if (!meeting.value || !selfie.value || !faceAnalysis.value) return false
   if (requiresBarcode.value && !rawBarcode.value) return false
   if (requiresLocation.value && !location.value) return false
   return true
@@ -449,8 +445,16 @@ async function takeSelfie() {
 
   try {
     const nextSelfie = await captureSelfie()
+    let nextFace: FaceAnalysis
+    try {
+      nextFace = await analyzeFace(nextSelfie.blob)
+    } catch (error) {
+      releaseSelfiePreview(nextSelfie)
+      throw error
+    }
     releaseSelfiePreview(selfie.value)
     selfie.value = nextSelfie
+    faceAnalysis.value = nextFace
     uploadedSelfiePath.value = null
   } catch (error) {
     showError(error)
@@ -507,13 +511,41 @@ async function loadMeeting() {
 }
 
 async function submitAttendance() {
-  if (!canSubmit.value || !meeting.value || !selfie.value || !user.value) return
+  if (!canSubmit.value || !meeting.value || !selfie.value || !faceAnalysis.value || !user.value) return
 
   submitting.value = true
   message.value = ''
 
   try {
+    const { data: faceResult, error: faceError } = await supabase.rpc('verify_my_face_for_meeting', {
+      p_meeting_id: meeting.value.id,
+      p_embedding: faceAnalysis.value.embedding,
+      p_model_version: FACE_MODEL_VERSION,
+      p_liveness_score: faceAnalysis.value.livenessScore,
+      p_antispoof_score: faceAnalysis.value.antiSpoofScore,
+    })
+    if (faceError) throw faceError
+
+    const verification = Array.isArray(faceResult) ? faceResult[0] : faceResult
+    if (!verification?.matched) {
+      throw new Error('Your face did not match the enrolled student profile. Retake the photo or ask your teacher for manual attendance.')
+    }
+
     if (!uploadedSelfiePath.value) {
+      if (!selfie.value.watermarkApplied) {
+        const watermarkedSelfie = await watermarkAttendanceSelfie(selfie.value, {
+          location: requiresLocation.value && location.value
+            ? {
+                latitude: location.value.latitude,
+                longitude: location.value.longitude,
+                accuracyM: location.value.accuracyM,
+              }
+            : null,
+        })
+        releaseSelfiePreview(selfie.value)
+        selfie.value = watermarkedSelfie
+      }
+
       uploadedSelfiePath.value = await uploadAttendanceSelfie(
         selfie.value,
         user.value.id,
@@ -541,9 +573,8 @@ async function submitAttendance() {
 }
 
 function formatMode(mode: SelfAttendanceMode): string {
-  if (mode === 'self_online') return 'Online class - a new selfie is required.'
-  if (mode === 'self_event') return 'School event - ID, selfie, and verified location required.'
-  return 'On-site class - ID, selfie, and verified location required.'
+  if (mode === 'self_online') return 'Online class - a timestamped selfie is required.'
+  return 'On-site class - ID, timestamped selfie, and verified location required.'
 }
 
 function formatDateTime(value: string): string {
@@ -578,8 +609,8 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
 
 <style scoped>
 .self-check-page {
-  --campus-accent: var(--campus-blue, #245f86);
-  --campus-accent-soft: var(--campus-blue-soft, #e1edf5);
+  --campus-accent: var(--campus-green, #087443);
+  --campus-accent-soft: var(--campus-green-soft, #e4f2e9);
   --campus-surface-subtle: var(--campus-surface-soft, #f5f8fa);
   --campus-green: var(--campus-success, #147a50);
   --campus-green-soft: var(--campus-success-soft, #e1f4eb);
@@ -590,7 +621,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
 }
 
 .campus-header ion-toolbar {
-  --background: rgba(255, 255, 255, 0.96);
+  --background: var(--campus-surface);
   --border-color: var(--campus-border);
   --min-height: 68px;
 }
@@ -677,7 +708,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   border: 1px solid var(--campus-border);
   border-radius: var(--campus-radius-lg);
   background: var(--campus-surface);
-  box-shadow: 0 14px 40px rgba(21, 54, 78, 0.065);
+  box-shadow: var(--campus-shadow);
 }
 
 .meeting-banner {
@@ -904,27 +935,6 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   font-weight: 700;
 }
 
-.method-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  color: var(--campus-muted);
-  font-size: 0.68rem;
-  text-transform: uppercase;
-}
-
-.method-divider::before,
-.method-divider::after {
-  flex: 1;
-  height: 1px;
-  background: var(--campus-border);
-  content: '';
-}
-
-.barcode-actions :deep(.barcode-reader) {
-  text-align: left;
-}
-
 .location-tip {
   display: flex;
   width: 100%;
@@ -953,7 +963,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   overflow: hidden;
   border: 3px solid #fff;
   border-radius: 1.1rem;
-  box-shadow: 0 10px 30px rgba(21, 54, 78, 0.16);
+  box-shadow: var(--campus-shadow);
 }
 
 .selfie-frame img,
@@ -1161,7 +1171,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   gap: 0.75rem;
   padding: 1rem;
   border-radius: var(--campus-radius-md);
-  background: #e7f1f6;
+  background: var(--campus-green-soft);
   color: var(--campus-accent);
 }
 
@@ -1230,24 +1240,6 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   color: var(--campus-muted);
   font-size: 0.88rem;
   line-height: 1.55;
-}
-
-@media (prefers-color-scheme: dark) {
-  .campus-header ion-toolbar {
-    --background: rgba(17, 29, 39, 0.97);
-  }
-
-  .step-number {
-    background: #22313c;
-  }
-
-  .privacy-card {
-    background: #132b3c;
-  }
-
-  .selfie-frame {
-    border-color: #263746;
-  }
 }
 
 @media (max-width: 800px) {

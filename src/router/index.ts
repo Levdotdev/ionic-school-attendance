@@ -14,6 +14,11 @@ const routes = [
     meta: { public: true },
   },
   {
+    path: '/auth/callback',
+    component: () => import('@/views/AuthCallbackPage.vue'),
+    meta: { public: true },
+  },
+  {
     path: '/student',
     component: () => import('@/views/StudentPage.vue'),
     meta: { roles: ['student'] satisfies AppRole[] },
@@ -21,6 +26,11 @@ const routes = [
   {
     path: '/student/check-in/:meetingId',
     component: () => import('@/views/SelfCheckPage.vue'),
+    meta: { roles: ['student'] satisfies AppRole[] },
+  },
+  {
+    path: '/student/tasks',
+    component: () => import('@/views/StudentTasksPage.vue'),
     meta: { roles: ['student'] satisfies AppRole[] },
   },
   {

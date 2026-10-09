@@ -2,6 +2,9 @@
   <ion-page class="teacher-page">
     <ion-header class="app-header">
       <ion-toolbar class="app-toolbar">
+        <ion-buttons slot="start">
+          <ion-menu-button aria-label="Open navigation menu" />
+        </ion-buttons>
         <ion-title>
           <span class="brand-lockup">
             <span class="brand-mark" aria-hidden="true">M</span>
@@ -60,9 +63,9 @@
         <template v-else>
           <section class="dashboard-heading" aria-labelledby="teacher-dashboard-title">
             <div>
-              <p class="eyebrow">Teacher dashboard</p>
-              <h1 id="teacher-dashboard-title">Welcome back, {{ profile?.full_name || 'Teacher' }}</h1>
-              <p>Manage attendance, schedules, and student evidence for the current school week.</p>
+              <p class="eyebrow">{{ sectionMeta.eyebrow }}</p>
+              <h1 id="teacher-dashboard-title">{{ sectionMeta.title }}</h1>
+              <p>{{ sectionMeta.description }}</p>
             </div>
             <div class="week-chip">
               <span>This school week</span>
@@ -81,20 +84,23 @@
             <span>{{ message }}</span>
           </div>
 
-          <section class="surface-card class-workspace" aria-labelledby="class-workspace-title">
+          <section v-if="activeSection === 'classes'" class="surface-card class-workspace" aria-labelledby="class-workspace-title">
             <div class="section-heading class-heading">
               <div>
                 <p class="eyebrow">Class workspace</p>
                 <h2 id="class-workspace-title">My classes</h2>
                 <p>Select a class to manage this week’s attendance and planning.</p>
               </div>
-              <ion-spinner v-if="loadingClasses" name="crescent" />
+              <div class="heading-actions">
+                <ion-spinner v-if="loadingClasses" name="crescent" />
+                <ion-button v-else size="small" @click="beginClassCreate">Create class</ion-button>
+              </div>
             </div>
 
-            <div class="class-workspace-grid">
+            <div class="class-workspace-grid single-column">
               <div class="class-selection">
                 <ion-note v-if="!loadingClasses && classes.length === 0" class="empty-note">
-                  No classes yet. Create your first class using the form.
+                  No classes yet. Create your first class to receive a student join code.
                 </ion-note>
                 <div v-else-if="classes.length" class="select-shell">
                   <ion-select v-model="selectedClassId" label="Open class" label-placement="stacked" fill="outline">
@@ -129,28 +135,11 @@
                 </div>
               </div>
 
-              <form class="class-form" @submit.prevent="saveClass">
-                <div class="form-heading">
-                  <strong>{{ editingClassId ? 'Edit selected class' : classes.length ? 'Create another class' : 'Create your first class' }}</strong>
-                  <span>{{ editingClassId ? 'Update its name or section.' : 'A secure join code is generated automatically.' }}</span>
-                </div>
-                <ion-input v-model="classForm.name" label="Class name" label-placement="stacked" fill="outline" required />
-                <ion-input v-model="classForm.section" label="Section (optional)" label-placement="stacked" fill="outline" />
-                <div class="form-actions">
-                  <ion-button type="submit" :disabled="savingClass">
-                    <ion-spinner v-if="savingClass" name="crescent" />
-                    <span v-else>{{ editingClassId ? 'Save changes' : 'Create class' }}</span>
-                  </ion-button>
-                  <ion-button v-if="editingClassId" type="button" fill="outline" :disabled="savingClass" @click="cancelClassEdit">
-                    Cancel
-                  </ion-button>
-                </div>
-              </form>
             </div>
           </section>
 
           <template v-if="activeClass">
-            <section class="stats-grid" aria-label="Attendance summary">
+            <section v-if="activeSection === 'overview'" class="stats-grid" aria-label="Attendance summary">
               <article class="stat-card present-stat">
                 <span class="stat-icon" aria-hidden="true">✓</span>
                 <div><span>Present</span><strong>{{ presentCount }}</strong></div>
@@ -165,11 +154,11 @@
               </article>
               <article class="stat-card review-stat">
                 <span class="stat-icon" aria-hidden="true">⌕</span>
-                <div><span>Needs review</span><strong>{{ pendingEvidenceCount }}</strong></div>
+                <div><span>Voided self-checks</span><strong>{{ voidedEvidenceCount }}</strong></div>
               </article>
             </section>
 
-            <section class="attendance-layout">
+            <section v-if="activeSection === 'attendance'" class="attendance-layout">
               <article class="surface-card attendance-card" aria-labelledby="student-attendance-title">
                 <div class="section-heading attendance-heading">
                   <div>
@@ -216,6 +205,9 @@
                       >
                         {{ attendanceByStudent[student.id].status }}
                       </ion-badge>
+                      <small v-if="attendanceByStudent[student.id]?.source === 'self_check'" class="self-check-lock">
+                        Self-check evidence · use Void or Restore below
+                      </small>
                     </div>
                     <div class="attendance-buttons" role="group" :aria-label="`Mark attendance for ${student.full_name}`">
                       <ion-button
@@ -224,7 +216,7 @@
                         :aria-label="`Mark ${student.full_name} present`"
                         :aria-pressed="attendanceByStudent[student.id]?.status === 'present'"
                         :fill="attendanceByStudent[student.id]?.status === 'present' ? 'solid' : 'outline'"
-                        :disabled="!canMarkAttendance || markingStudentId === student.id"
+                        :disabled="!canMarkAttendance || markingStudentId === student.id || attendanceByStudent[student.id]?.source === 'self_check'"
                         @click="markAttendance(student.id, 'present')"
                       >
                         Present
@@ -235,7 +227,7 @@
                         :aria-label="`Mark ${student.full_name} absent`"
                         :aria-pressed="attendanceByStudent[student.id]?.status === 'absent'"
                         :fill="attendanceByStudent[student.id]?.status === 'absent' ? 'solid' : 'outline'"
-                        :disabled="!canMarkAttendance || markingStudentId === student.id"
+                        :disabled="!canMarkAttendance || markingStudentId === student.id || attendanceByStudent[student.id]?.source === 'self_check'"
                         @click="markAttendance(student.id, 'absent')"
                       >
                         Absent
@@ -313,7 +305,7 @@
               </aside>
             </section>
 
-            <section class="planning-section" aria-labelledby="planning-title">
+            <section v-if="activeSection === 'schedules'" class="planning-section" aria-labelledby="planning-title">
               <div class="planning-heading">
                 <div><p class="eyebrow">Planning & management</p><h2 id="planning-title">Set up your class week</h2></div>
                 <p>Weekly schedules create meetings automatically. Additional meetings are limited to the current week.</p>
@@ -323,24 +315,12 @@
                 <article class="surface-card schedule-card" aria-labelledby="weekly-schedule-title">
                   <div class="section-heading">
                     <div><p class="eyebrow">Repeats every week</p><h2 id="weekly-schedule-title">Weekly schedule</h2></div>
-                    <span class="count-bubble">{{ schedules.length }}</span>
+                    <div class="heading-actions">
+                      <span class="count-bubble">{{ schedules.length }}</span>
+                      <ion-button size="small" @click="beginScheduleCreate">Add schedule</ion-button>
+                    </div>
                   </div>
                   <p class="section-description">Each active schedule automatically creates one meeting for this week.</p>
-
-                  <form class="form-grid schedule-form" @submit.prevent="saveSchedule">
-                    <ion-select v-model="scheduleForm.day_of_week" label="Day" label-placement="stacked" fill="outline">
-                      <ion-select-option v-for="day in weekdays" :key="day.value" :value="day.value">{{ day.label }}</ion-select-option>
-                    </ion-select>
-                    <ion-input v-model="scheduleForm.starts_at" label="Starts" label-placement="stacked" fill="outline" type="time" required />
-                    <ion-input v-model="scheduleForm.ends_at" label="Ends" label-placement="stacked" fill="outline" type="time" required />
-                    <ion-input v-model="scheduleForm.room" label="Room (optional)" label-placement="stacked" fill="outline" />
-                    <div class="form-actions full-row">
-                      <ion-button type="submit" :disabled="savingSchedule">{{ editingScheduleId ? 'Save schedule' : 'Add schedule' }}</ion-button>
-                      <ion-button v-if="editingScheduleId" type="button" fill="outline" :disabled="savingSchedule" @click="cancelScheduleEdit">
-                        Cancel
-                      </ion-button>
-                    </div>
-                  </form>
 
                   <div v-if="schedules.length" class="schedule-list">
                     <div v-for="schedule in schedules" :key="schedule.id" class="schedule-row">
@@ -363,44 +343,31 @@
                   <div class="section-heading">
                     <div>
                       <p class="eyebrow">One-time adjustment</p>
-                      <h2 id="meeting-form-title">{{ editingMeetingId ? 'Edit meeting' : 'Additional meeting' }}</h2>
+                      <h2 id="meeting-form-title">Additional meeting</h2>
                     </div>
                   </div>
                   <p class="section-description">Use this for events, online classes, or a meeting outside the regular schedule.</p>
 
-                  <form class="form-grid meeting-form" @submit.prevent="saveMeeting">
-                    <ion-input v-model="meetingForm.title" label="Meeting title" label-placement="stacked" fill="outline" required />
-                    <ion-select v-model="meetingForm.mode" label="Attendance mode" label-placement="stacked" fill="outline">
-                      <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
-                      <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
-                      <ion-select-option value="self_event">Student self-check at an event</ion-select-option>
-                      <ion-select-option value="self_online">Online class self-check</ion-select-option>
-                    </ion-select>
-                    <label class="native-field"><span>Meeting starts</span><input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required /></label>
-                    <label class="native-field"><span>Meeting ends</span><input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required /></label>
-                    <label class="native-field"><span>Check-in opens</span><input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required /></label>
-                    <label class="native-field"><span>Check-in closes</span><input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" required /></label>
+                  <div class="meeting-callout">
+                    <span>This meeting appears only in the current school week and can be edited from Attendance.</span>
                     <div class="location-note full-row">
                       <span class="location-pin" aria-hidden="true">⌖</span>
                       <span>Physical self-checks use the protected {{ SCHOOL_RADIUS_M }}-meter school boundary. Online checks do not request location.</span>
                     </div>
-                    <div class="form-actions full-row">
-                      <ion-button type="submit" :disabled="savingMeeting">{{ editingMeetingId ? 'Save meeting' : 'Create meeting' }}</ion-button>
-                      <ion-button v-if="editingMeetingId" type="button" fill="outline" :disabled="savingMeeting" @click="cancelMeetingEdit">Cancel</ion-button>
-                    </div>
-                  </form>
+                    <ion-button @click="beginMeetingCreate">Create meeting</ion-button>
+                  </div>
                 </article>
               </div>
             </section>
 
-            <section class="surface-card evidence-section" aria-labelledby="evidence-title">
+            <section v-if="activeSection === 'evidence'" class="surface-card evidence-section" aria-labelledby="evidence-title">
               <div class="section-heading">
-                <div><p class="eyebrow">Student submissions</p><h2 id="evidence-title">Self-check verification</h2><p>Review photos and location evidence for the selected meeting.</p></div>
+                <div><p class="eyebrow">Student submissions</p><h2 id="evidence-title">Self-check evidence</h2><p>Self-checks count as present automatically. Void only submissions with invalid evidence; a void can be restored.</p></div>
                 <span class="count-bubble review-count">{{ evidenceRows.length }}</span>
               </div>
               <div v-if="evidenceRows.length === 0" class="empty-state">
                 <span aria-hidden="true">⌕</span>
-                <div><strong>No evidence to review</strong><p>Student self-check submissions will appear here.</p></div>
+                <div><strong>No self-check evidence</strong><p>Student self-check submissions will appear here.</p></div>
               </div>
               <div v-else class="evidence-grid">
                 <article v-for="record in evidenceRows" :key="record.id" class="evidence-card">
@@ -412,7 +379,7 @@
                     <div class="evidence-copy">
                       <div class="evidence-title-row">
                         <h3>{{ studentName(record.student_id) }}</h3>
-                        <ion-badge :color="verificationColor(record.verification_status)">{{ record.verification_status || 'not reviewed' }}</ion-badge>
+                        <ion-badge :color="verificationColor(record.verification_status)">{{ verificationLabel(record.verification_status) }}</ion-badge>
                       </div>
                       <p><strong>Attendance:</strong> {{ record.status }}</p>
                       <p><strong>Submitted:</strong> {{ formatDateTime(record.submitted_at || record.created_at) }}</p>
@@ -420,28 +387,28 @@
                       <a v-if="record.latitude != null && record.longitude != null" :href="mapUrl(record.latitude, record.longitude)" target="_blank" rel="noopener">View submitted location</a>
                     </div>
                   </div>
-                  <ion-textarea v-model="record.review_note" label="Teacher note (optional)" label-placement="stacked" fill="outline" auto-grow />
+                  <ion-textarea v-model="record.review_note" :label="record.verification_status === 'rejected' ? 'Void reason / teacher note' : 'Reason if voiding (recommended)'" label-placement="stacked" fill="outline" auto-grow />
                   <div class="review-buttons" role="group" :aria-label="`Review evidence for ${studentName(record.student_id)}`">
                     <ion-button
+                      v-if="record.verification_status === 'rejected'"
                       color="success"
                       size="small"
-                      :aria-label="`Approve evidence for ${studentName(record.student_id)}`"
-                      :aria-pressed="record.verification_status === 'approved'"
+                      :aria-label="`Restore self-check attendance for ${studentName(record.student_id)}`"
                       :disabled="reviewingRecordId === record.id"
-                      @click="reviewEvidence(record, 'approved')"
+                      @click="setEvidenceVoided(record, false)"
                     >
-                      Approve
+                      Restore attendance
                     </ion-button>
                     <ion-button
+                      v-else
                       color="danger"
                       fill="outline"
                       size="small"
-                      :aria-label="`Reject evidence for ${studentName(record.student_id)}`"
-                      :aria-pressed="record.verification_status === 'rejected'"
+                      :aria-label="`Void invalid self-check attendance for ${studentName(record.student_id)}`"
                       :disabled="reviewingRecordId === record.id"
-                      @click="reviewEvidence(record, 'rejected')"
+                      @click="setEvidenceVoided(record, true)"
                     >
-                      Reject
+                      Void attendance
                     </ion-button>
                   </div>
                 </article>
@@ -451,12 +418,126 @@
         </template>
       </main>
     </ion-content>
+
+    <ion-modal
+      :is-open="classModalOpen"
+      :can-dismiss="!savingClass"
+      class="management-modal compact-management-modal"
+      @did-dismiss="cancelClassEdit"
+    >
+      <ion-header>
+        <ion-toolbar>
+          <ion-buttons slot="start">
+            <ion-button :disabled="savingClass" @click="cancelClassEdit">Cancel</ion-button>
+          </ion-buttons>
+          <ion-title>{{ editingClassId ? 'Edit class' : 'Create class' }}</ion-title>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="modal-content">
+        <form class="modal-form" @submit.prevent="saveClass">
+          <div class="form-heading">
+            <strong>{{ editingClassId ? 'Class details' : 'Create a new class' }}</strong>
+            <span>{{ editingClassId ? 'Update its name or section.' : 'A secure student join code is generated automatically.' }}</span>
+          </div>
+          <div v-if="message && messageKind === 'error'" class="status-message error" role="alert">
+            <span class="status-message-icon" aria-hidden="true">!</span>
+            <span>{{ message }}</span>
+          </div>
+          <ion-input v-model="classForm.name" label="Class name" label-placement="stacked" fill="outline" :disabled="savingClass" required />
+          <ion-input v-model="classForm.section" label="Section (optional)" label-placement="stacked" fill="outline" :disabled="savingClass" />
+          <ion-button type="submit" expand="block" :disabled="savingClass">
+            <ion-spinner v-if="savingClass" name="crescent" />
+            <span v-else>{{ editingClassId ? 'Save changes' : 'Create class' }}</span>
+          </ion-button>
+        </form>
+      </ion-content>
+    </ion-modal>
+
+    <ion-modal
+      :is-open="scheduleModalOpen"
+      :can-dismiss="!savingSchedule"
+      class="management-modal"
+      @did-dismiss="cancelScheduleEdit"
+    >
+      <ion-header>
+        <ion-toolbar>
+          <ion-buttons slot="start">
+            <ion-button :disabled="savingSchedule" @click="cancelScheduleEdit">Cancel</ion-button>
+          </ion-buttons>
+          <ion-title>{{ editingScheduleId ? 'Edit weekly schedule' : 'Add weekly schedule' }}</ion-title>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="modal-content">
+        <form class="modal-form form-grid" @submit.prevent="saveSchedule">
+          <div v-if="message && messageKind === 'error'" class="status-message error full-row" role="alert">
+            <span class="status-message-icon" aria-hidden="true">!</span>
+            <span>{{ message }}</span>
+          </div>
+          <ion-select v-model="scheduleForm.day_of_week" label="Day" label-placement="stacked" fill="outline" :disabled="savingSchedule">
+            <ion-select-option v-for="day in weekdays" :key="day.value" :value="day.value">{{ day.label }}</ion-select-option>
+          </ion-select>
+          <ion-input v-model="scheduleForm.starts_at" label="Starts" label-placement="stacked" fill="outline" type="time" :disabled="savingSchedule" required />
+          <ion-input v-model="scheduleForm.ends_at" label="Ends" label-placement="stacked" fill="outline" type="time" :disabled="savingSchedule" required />
+          <ion-input v-model="scheduleForm.room" label="Room (optional)" label-placement="stacked" fill="outline" :disabled="savingSchedule" />
+          <div class="notification-note full-row">
+            <strong>Automatic class reminders</strong>
+            <span>Teachers: 5 minutes before and at start time. Students: 2 hours, 1 hour, 30, 15, and 5 minutes before, plus start time.</span>
+          </div>
+          <ion-button class="full-row" type="submit" expand="block" :disabled="savingSchedule">
+            <ion-spinner v-if="savingSchedule" name="crescent" />
+            <span v-else>{{ editingScheduleId ? 'Save schedule' : 'Add schedule' }}</span>
+          </ion-button>
+        </form>
+      </ion-content>
+    </ion-modal>
+
+    <ion-modal
+      :is-open="meetingModalOpen"
+      :can-dismiss="!savingMeeting"
+      class="management-modal meeting-editor-modal"
+      @did-dismiss="cancelMeetingEdit"
+    >
+      <ion-header>
+        <ion-toolbar>
+          <ion-buttons slot="start">
+            <ion-button :disabled="savingMeeting" @click="cancelMeetingEdit">Cancel</ion-button>
+          </ion-buttons>
+          <ion-title>{{ editingMeetingId ? 'Edit meeting' : 'Create meeting' }}</ion-title>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="modal-content">
+        <form class="modal-form form-grid" @submit.prevent="saveMeeting">
+          <div v-if="message && messageKind === 'error'" class="status-message error full-row" role="alert">
+            <span class="status-message-icon" aria-hidden="true">!</span>
+            <span>{{ message }}</span>
+          </div>
+          <ion-input v-model="meetingForm.title" label="Meeting title" label-placement="stacked" fill="outline" :disabled="savingMeeting" required />
+          <ion-select v-model="meetingForm.mode" label="Attendance mode" label-placement="stacked" fill="outline" :disabled="savingMeeting">
+            <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
+            <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
+            <ion-select-option value="self_online">Online class self-check</ion-select-option>
+          </ion-select>
+          <label class="native-field"><span>Meeting starts</span><input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Meeting ends</span><input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Check-in opens</span><input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Check-in closes</span><input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <div class="location-note full-row">
+            <span class="location-pin" aria-hidden="true">⌖</span>
+            <span>Physical self-checks use the protected {{ SCHOOL_RADIUS_M }}-meter school boundary. Online checks do not request location.</span>
+          </div>
+          <ion-button class="full-row" type="submit" expand="block" :disabled="savingMeeting">
+            <ion-spinner v-if="savingMeeting" name="crescent" />
+            <span v-else>{{ editingMeetingId ? 'Save meeting' : 'Create meeting' }}</span>
+          </ion-button>
+        </form>
+      </ion-content>
+    </ion-modal>
   </ion-page>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import {
   IonBadge,
   IonButton,
@@ -466,6 +547,8 @@ import {
   IonContent,
   IonHeader,
   IonInput,
+  IonMenuButton,
+  IonModal,
   IonNote,
   IonPage,
   IonSelect,
@@ -474,14 +557,16 @@ import {
   IonTextarea,
   IonTitle,
   IonToolbar,
+  alertController,
 } from '@ionic/vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
-type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_event' | 'self_online'
+type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
 type VerificationStatus = 'pending' | 'approved' | 'rejected'
+type TeacherSection = 'overview' | 'classes' | 'attendance' | 'schedules' | 'evidence'
 
 interface ClassRow {
   id: string
@@ -563,6 +648,7 @@ const weekdays = [
 ]
 
 const router = useRouter()
+const route = useRoute()
 const { initializeSession, refreshProfile, profile, signOut } = useSession()
 const classes = ref<ClassRow[]>([])
 const schedules = ref<ScheduleRow[]>([])
@@ -574,6 +660,9 @@ const selectedMeetingId = ref('')
 const editingClassId = ref('')
 const editingScheduleId = ref('')
 const editingMeetingId = ref('')
+const classModalOpen = ref(false)
+const scheduleModalOpen = ref(false)
+const meetingModalOpen = ref(false)
 const approvalLoading = ref(true)
 const loadingClasses = ref(true)
 const loadingDetails = ref(false)
@@ -618,10 +707,12 @@ const presentCount = computed(
 )
 const absentCount = computed(() => attendanceRecords.value.filter((record) => record.status === 'absent').length)
 const uncheckedCount = computed(() => Math.max(students.value.length - attendanceRecords.value.length, 0))
-const pendingEvidenceCount = computed(
-  () => evidenceRows.value.filter((record) => record.verification_status === 'pending').length,
+const voidedEvidenceCount = computed(
+  () => evidenceRows.value.filter((record) => record.verification_status === 'rejected').length,
 )
-const canMarkAttendance = computed(() => Boolean(selectedMeeting.value?.attendance_enabled))
+const canMarkAttendance = computed(
+  () => Boolean(selectedMeeting.value?.attendance_enabled && selectedMeeting.value.attendance_mode === 'teacher_manual'),
+)
 const teacherApproved = computed(
   () => profile.value?.role === 'teacher' && profile.value.teacher_approval_status === 'approved',
 )
@@ -630,6 +721,42 @@ const teacherApprovalStatus = computed(() =>
 )
 const teacherApprovalNote = computed(() => profile.value?.teacher_approval_note?.trim() || '')
 const currentWeekLabel = computed(() => `This week: ${displayDate(week.startDate)} to ${displayDate(week.endDateInclusive)}`)
+const activeSection = computed<TeacherSection>(() => {
+  const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
+  return value === 'classes' || value === 'attendance' || value === 'schedules' || value === 'evidence'
+    ? value
+    : 'overview'
+})
+const sectionMeta = computed(() => {
+  const sections: Record<TeacherSection, { eyebrow: string; title: string; description: string }> = {
+    overview: {
+    eyebrow: 'Teacher dashboard',
+    title: `Welcome back, ${profile.value?.full_name || 'Teacher'}`,
+    description: 'A quick view of attendance for the selected class and current school week.',
+    },
+    classes: {
+    eyebrow: 'Class management',
+    title: 'Classes and enrollment codes',
+    description: 'Create a class, update its section, or open a class workspace.',
+    },
+    attendance: {
+    eyebrow: 'Attendance',
+    title: 'Record this week’s attendance',
+    description: 'Choose a meeting and mark students present or absent.',
+    },
+    schedules: {
+    eyebrow: 'Weekly planning',
+    title: 'Schedules and meetings',
+    description: 'Manage the repeating class schedule and this week’s meeting exceptions.',
+    },
+    evidence: {
+    eyebrow: 'Student self-checks',
+    title: 'Attendance evidence',
+    description: 'Review accepted submissions and void only evidence that is invalid.',
+    },
+  }
+  return sections[activeSection.value]
+})
 
 watch(selectedClassId, async (classId) => {
   if (editingClassId.value && editingClassId.value !== classId) cancelClassEdit()
@@ -700,6 +827,7 @@ async function loadClasses() {
 
 async function saveClass() {
   savingClass.value = true
+  let saved = false
   clearMessage()
   try {
     const name = classForm.name.trim()
@@ -719,7 +847,7 @@ async function saveClass() {
       if (error) throw error
       const index = classes.value.findIndex((item) => item.id === data.id)
       if (index >= 0) classes.value[index] = data as ClassRow
-      cancelClassEdit()
+      saved = true
       showSuccess('Class updated.')
       return
     }
@@ -731,9 +859,9 @@ async function saveClass() {
     })
     if (error) throw error
     const created = (Array.isArray(data) ? data[0] : data) as ClassRow | null
-    resetClassForm()
     await loadClasses()
     if (created?.id) selectedClassId.value = created.id
+    saved = true
     showSuccess(
       created?.join_code
         ? `Class created. Students can join with code ${created.join_code}.`
@@ -743,17 +871,27 @@ async function saveClass() {
     showError(error)
   } finally {
     savingClass.value = false
+    if (saved) cancelClassEdit()
   }
+}
+
+function beginClassCreate() {
+  editingClassId.value = ''
+  resetClassForm()
+  clearMessage()
+  classModalOpen.value = true
 }
 
 function beginClassEdit(item: ClassRow) {
   editingClassId.value = item.id
   classForm.name = item.name
   classForm.section = item.section ?? ''
-  window.scrollTo({ top: 0, behavior: 'smooth' })
+  clearMessage()
+  classModalOpen.value = true
 }
 
 function cancelClassEdit() {
+  classModalOpen.value = false
   editingClassId.value = ''
   resetClassForm()
 }
@@ -764,9 +902,11 @@ function resetClassForm() {
 }
 
 async function deleteClass(item: ClassRow) {
-  const confirmed = window.confirm(
-    `Delete "${item.name}"? Its schedules, meetings, and attendance records will also be removed. This cannot be undone.`,
-  )
+  const confirmed = await confirmAction({
+    header: 'Delete class?',
+    message: 'Its schedules, meetings, enrollment links, and attendance records will also be permanently removed.',
+    confirmText: 'Delete class',
+  })
   if (!confirmed) return
 
   savingClass.value = true
@@ -855,6 +995,7 @@ async function loadStudents(studentIds: string[]): Promise<StudentRow[]> {
 async function saveSchedule() {
   if (!selectedClassId.value) return
   savingSchedule.value = true
+  let saved = false
   clearMessage()
   try {
     if (scheduleForm.ends_at <= scheduleForm.starts_at) throw new Error('Schedule end must be after its start.')
@@ -878,8 +1019,8 @@ async function saveSchedule() {
       if (error) throw error
     }
 
-    cancelScheduleEdit()
     await loadClassDetails(selectedClassId.value)
+    saved = true
     showSuccess(
       wasEditing
         ? "Weekly schedule updated. This week's generated meeting keeps any teacher edits already made."
@@ -889,7 +1030,15 @@ async function saveSchedule() {
     showError(error)
   } finally {
     savingSchedule.value = false
+    if (saved) cancelScheduleEdit()
   }
+}
+
+function beginScheduleCreate() {
+  editingScheduleId.value = ''
+  resetScheduleForm()
+  clearMessage()
+  scheduleModalOpen.value = true
 }
 
 function beginScheduleEdit(schedule: ScheduleRow) {
@@ -898,10 +1047,17 @@ function beginScheduleEdit(schedule: ScheduleRow) {
   scheduleForm.starts_at = schedule.starts_at.slice(0, 5)
   scheduleForm.ends_at = schedule.ends_at.slice(0, 5)
   scheduleForm.room = schedule.room ?? ''
+  clearMessage()
+  scheduleModalOpen.value = true
 }
 
 function cancelScheduleEdit() {
+  scheduleModalOpen.value = false
   editingScheduleId.value = ''
+  resetScheduleForm()
+}
+
+function resetScheduleForm() {
   scheduleForm.day_of_week = 1
   scheduleForm.starts_at = '08:00'
   scheduleForm.ends_at = '09:00'
@@ -909,9 +1065,11 @@ function cancelScheduleEdit() {
 }
 
 async function deleteSchedule(schedule: ScheduleRow) {
-  const confirmed = window.confirm(
-    `Delete the ${dayLabel(schedule.day_of_week)} weekly schedule? It will stop creating future meetings. Meetings already created remain available and can be disabled or deleted separately.`,
-  )
+  const confirmed = await confirmAction({
+    header: `Delete ${dayLabel(schedule.day_of_week)} schedule?`,
+    message: 'This stops future weekly meetings. Meetings already created remain available and can be disabled or deleted separately.',
+    confirmText: 'Delete schedule',
+  })
   if (!confirmed) return
 
   savingSchedule.value = true
@@ -935,6 +1093,7 @@ async function deleteSchedule(schedule: ScheduleRow) {
 async function saveMeeting() {
   if (!selectedClassId.value) return
   savingMeeting.value = true
+  let saved = false
   clearMessage()
   try {
     validateMeetingWindow()
@@ -973,7 +1132,7 @@ async function saveMeeting() {
         meetings.value = meetings.value.filter((item) => item.id !== updated.id)
         selectedMeetingId.value = meetings.value[0]?.id ?? ''
       }
-      cancelMeetingEdit()
+      saved = true
       showSuccess(
         updated.starts_at >= week.startIso && updated.starts_at < week.endIso
           ? 'Meeting updated.'
@@ -990,7 +1149,6 @@ async function saveMeeting() {
       .single()
     if (error) throw error
 
-    cancelMeetingEdit()
     const created = data as MeetingRow
     if (created.starts_at >= week.startIso && created.starts_at < week.endIso) {
       meetings.value.push(created)
@@ -1000,11 +1158,20 @@ async function saveMeeting() {
     } else {
       showSuccess('Meeting created. It will appear in the list during its scheduled week.')
     }
+    saved = true
   } catch (error) {
     showError(error)
   } finally {
     savingMeeting.value = false
+    if (saved) cancelMeetingEdit()
   }
+}
+
+function beginMeetingCreate() {
+  editingMeetingId.value = ''
+  resetMeetingForm()
+  clearMessage()
+  meetingModalOpen.value = true
 }
 
 function beginMeetingEdit(meeting: MeetingRow) {
@@ -1015,10 +1182,17 @@ function beginMeetingEdit(meeting: MeetingRow) {
   meetingForm.ends_at = isoToManilaInput(meeting.ends_at)
   meetingForm.check_in_opens_at = isoToManilaInput(meeting.attendance_opens_at)
   meetingForm.check_in_closes_at = isoToManilaInput(meeting.attendance_closes_at)
+  clearMessage()
+  meetingModalOpen.value = true
 }
 
 function cancelMeetingEdit() {
+  meetingModalOpen.value = false
   editingMeetingId.value = ''
+  resetMeetingForm()
+}
+
+function resetMeetingForm() {
   meetingForm.title = ''
   meetingForm.mode = 'teacher_manual'
   meetingForm.starts_at = ''
@@ -1028,6 +1202,15 @@ function cancelMeetingEdit() {
 }
 
 async function toggleAttendance(meeting: MeetingRow) {
+  if (meeting.attendance_enabled) {
+    const confirmed = await confirmAction({
+      header: 'Do not count this meeting?',
+      message: 'Attendance remains saved, but this meeting will no longer count until you turn it back on.',
+      confirmText: 'Do not count',
+    })
+    if (!confirmed) return
+  }
+
   updatingMeeting.value = true
   clearMessage()
   try {
@@ -1044,9 +1227,11 @@ async function toggleAttendance(meeting: MeetingRow) {
 }
 
 async function deleteMeeting(meeting: MeetingRow) {
-  const confirmed = window.confirm(
-    `Delete "${meeting.title}"? Its attendance records will also be removed. This cannot be undone.`,
-  )
+  const confirmed = await confirmAction({
+    header: 'Delete meeting?',
+    message: 'Its attendance records will also be permanently removed.',
+    confirmText: 'Delete meeting',
+  })
   if (!confirmed) return
 
   updatingMeeting.value = true
@@ -1126,6 +1311,18 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
   } finally {
     reviewingRecordId.value = ''
   }
+}
+
+async function setEvidenceVoided(record: AttendanceRow, voided: boolean) {
+  if (voided) {
+    const confirmed = await confirmAction({
+      header: 'Void this self-check?',
+      message: 'The student will no longer count as present for this meeting. You can restore it later.',
+      confirmText: 'Void attendance',
+    })
+    if (!confirmed) return
+  }
+  await reviewEvidence(record, voided ? 'rejected' : 'approved')
 }
 
 function validateMeetingWindow() {
@@ -1230,7 +1427,6 @@ function modeLabel(mode: MeetingMode) {
   return {
     teacher_manual: 'Teacher marks',
     self_on_site: 'On-site self-check',
-    self_event: 'Event self-check',
     self_online: 'Online self-check',
   }[mode]
 }
@@ -1247,6 +1443,13 @@ function verificationColor(status: VerificationStatus | null) {
   if (status === 'approved') return 'success'
   if (status === 'rejected') return 'danger'
   return status === 'pending' ? 'warning' : 'medium'
+}
+
+function verificationLabel(status: VerificationStatus | null) {
+  if (status === 'rejected') return 'Voided by teacher'
+  if (status === 'approved') return 'Accepted automatically'
+  if (status === 'pending') return 'Legacy review pending'
+  return 'Not applicable'
 }
 
 function formatDateTime(value: string | null) {
@@ -1270,6 +1473,20 @@ function formatTime(value: string) {
 
 function mapUrl(latitude: number, longitude: number) {
   return `https://www.google.com/maps?q=${latitude},${longitude}`
+}
+
+async function confirmAction(options: { header: string; message: string; confirmText: string }) {
+  const alert = await alertController.create({
+    header: options.header,
+    message: options.message,
+    buttons: [
+      { text: 'Cancel', role: 'cancel' },
+      { text: options.confirmText, role: 'confirm' },
+    ],
+  })
+  await alert.present()
+  const result = await alert.onDidDismiss()
+  return result.role === 'confirm'
 }
 
 function showError(error: unknown) {
@@ -1409,8 +1626,8 @@ async function logout() {
 
 /* Campus portal layout */
 .teacher-page {
-  --page-navy: var(--campus-navy, #15364e);
-  --page-blue: var(--campus-blue, #245f86);
+  --page-navy: var(--campus-navy, #063f2a);
+  --page-blue: var(--campus-green, #087443);
   --page-blue-soft: var(--campus-blue-soft, #e1edf5);
   --page-bg: var(--campus-bg, #eef3f7);
   --page-surface: var(--campus-surface, #ffffff);
@@ -1425,7 +1642,7 @@ async function logout() {
   --page-danger: var(--campus-danger, #bb3e45);
   --page-danger-soft: var(--campus-danger-soft, #fae9ea);
   --page-radius: var(--campus-radius, 18px);
-  --page-shadow: var(--campus-shadow, 0 12px 36px rgba(21, 54, 78, 0.08));
+  --page-shadow: var(--campus-shadow, 0 12px 36px rgba(6, 63, 42, 0.08));
   --ion-color-primary: var(--page-blue);
   color: var(--page-text);
 }
@@ -1466,6 +1683,7 @@ async function logout() {
 .section-heading,
 .active-class-summary,
 .evidence-title-row { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.heading-actions { display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 9px; }
 .dashboard-heading { align-items: flex-end; margin-bottom: 24px; }
 .dashboard-heading h1,
 .approval-card h1 {
@@ -1524,6 +1742,7 @@ async function logout() {
   grid-template-columns: minmax(0, 1.15fr) minmax(320px, 0.85fr);
   gap: clamp(22px, 4vw, 46px);
 }
+.class-workspace-grid.single-column { grid-template-columns: 1fr; }
 .class-selection,
 .class-form,
 .form-heading,
@@ -1734,6 +1953,8 @@ async function logout() {
 .planning-heading > p { max-width: 520px; text-align: right; }
 .planning-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
 .section-description { margin: -10px 0 18px; font-size: 0.82rem; }
+.meeting-callout { display: grid; gap: 16px; color: var(--page-muted); font-size: 0.82rem; line-height: 1.5; }
+.meeting-callout ion-button { justify-self: start; }
 .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .full-row { grid-column: 1 / -1; }
 .schedule-list { margin-top: 20px; border-top: 1px solid var(--page-border); }
@@ -1823,6 +2044,40 @@ ion-textarea { --background: var(--page-surface); --border-color: var(--page-bor
 ion-button { --border-radius: 10px; min-height: 38px; font-weight: 650; letter-spacing: 0; text-transform: none; }
 ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font-weight: 650; }
 
+.management-modal {
+  --page-blue: var(--campus-green, #087443);
+  --page-blue-soft: var(--campus-blue-soft, #e1edf5);
+  --page-bg: var(--campus-bg, #eef3f7);
+  --page-surface: var(--campus-surface, #ffffff);
+  --page-surface-soft: var(--campus-surface-soft, #f5f8fa);
+  --page-text: var(--campus-text, #182632);
+  --page-muted: var(--campus-muted, #62727f);
+  --page-border: var(--campus-border, #d9e2e9);
+  --page-danger: var(--campus-danger, #bb3e45);
+  --page-danger-soft: var(--campus-danger-soft, #fae9ea);
+  --width: min(700px, calc(100% - 32px));
+  --height: min(680px, calc(100% - 32px));
+  --border-radius: 20px;
+  --ion-color-primary: var(--page-blue);
+  color: var(--page-text);
+}
+.management-modal.compact-management-modal { --height: min(500px, calc(100% - 32px)); }
+.management-modal.meeting-editor-modal { --height: min(780px, calc(100% - 32px)); }
+.modal-content { --background: var(--page-bg); }
+.modal-form { display: grid; gap: 14px; padding: 22px; }
+.modal-form .status-message { margin-bottom: 0; }
+.notification-note {
+  display: grid;
+  gap: 4px;
+  padding: 13px 14px;
+  border-radius: 12px;
+  background: var(--page-blue-soft);
+  color: var(--page-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+.notification-note strong { color: var(--page-text); font-size: 0.8rem; }
+
 @media (max-width: 1100px) {
   .attendance-layout { grid-template-columns: 1fr; }
   .attendance-side { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -1837,6 +2092,10 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
 }
 
 @media (max-width: 680px) {
+  .management-modal,
+  .management-modal.compact-management-modal,
+  .management-modal.meeting-editor-modal { --width: 100%; --height: 100%; --border-radius: 0; }
+  .modal-form { padding: 18px 14px 28px; }
   .app-toolbar { --min-height: 64px; }
   .dashboard-shell { padding: 18px 13px 34px; }
   .dashboard-heading { align-items: flex-start; flex-direction: column; }

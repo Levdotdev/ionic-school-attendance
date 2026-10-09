@@ -2,6 +2,9 @@
   <ion-page class="student-page">
     <ion-header class="campus-header" :translucent="true">
       <ion-toolbar>
+        <ion-buttons slot="start">
+          <ion-menu-button aria-label="Open navigation menu" />
+        </ion-buttons>
         <ion-title>
           <span class="toolbar-brand">
             <span class="brand-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
@@ -92,7 +95,7 @@
                 <div class="field-heading">
                   <div>
                     <strong>Scan your physical school ID</strong>
-                    <span>Use either option below. Manual typing is disabled.</span>
+                    <span>Use your device camera. Manual typing is disabled.</span>
                   </div>
                   <span class="capture-state" :class="{ 'is-complete': barcodeCaptured }">
                     <ion-icon :icon="barcodeCaptured ? checkmarkCircleOutline : barcodeOutline" />
@@ -114,13 +117,6 @@
                   </template>
                 </ion-button>
 
-                <div class="method-divider"><span>or</span></div>
-
-                <barcode-capture
-                  :disabled="savingRegistration || scanningCamera"
-                  @scan="acceptBarcode"
-                  @invalid="showRegistrationError"
-                />
               </div>
 
               <div v-if="registrationMessage" class="message-box is-error" role="alert">
@@ -166,8 +162,14 @@
             <span>{{ pageMessage }}</span>
           </div>
 
-          <div class="dashboard-grid">
-            <section class="campus-surface attendance-panel" aria-labelledby="self-checks-title">
+          <div
+            class="dashboard-grid"
+            :class="{
+              'courses-layout': activeSection === 'courses',
+              'single-section': activeSection === 'schedule',
+            }"
+          >
+            <section v-if="activeSection === 'overview'" class="campus-surface attendance-panel" aria-labelledby="self-checks-title">
               <div class="surface-heading attendance-heading">
                 <div>
                   <p class="eyebrow">Attendance</p>
@@ -239,32 +241,83 @@
               </div>
             </section>
 
+            <section v-if="activeSection === 'courses'" class="campus-surface attendance-panel" aria-labelledby="student-courses-title">
+              <div class="surface-heading attendance-heading">
+                <div>
+                  <p class="eyebrow">Subjects</p>
+                  <h2 id="student-courses-title">My courses</h2>
+                  <p>Tasks can be connected directly to any course listed here.</p>
+                </div>
+                <span class="status-chip is-complete">{{ courses.length }} enrolled</span>
+              </div>
+
+              <div v-if="courses.length" class="course-list">
+                <article v-for="course in courses" :key="course.id" class="course-card">
+                  <div class="meeting-icon"><ion-icon :icon="schoolOutline" /></div>
+                  <div>
+                    <h3>{{ course.name }}</h3>
+                    <p>{{ course.section || 'No section specified' }}</p>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="empty-state compact-empty">
+                <div class="empty-icon"><ion-icon :icon="schoolOutline" /></div>
+                <h3>No courses yet</h3>
+                <p>Use your teacher's join code to enroll.</p>
+              </div>
+            </section>
+
+            <section v-if="activeSection === 'schedule'" class="campus-surface attendance-panel" aria-labelledby="student-schedule-title">
+              <div class="surface-heading attendance-heading">
+                <div>
+                  <p class="eyebrow">Current week</p>
+                  <h2 id="student-schedule-title">This week's schedule</h2>
+                  <p>Only meetings from the current Monday-to-Sunday week are shown.</p>
+                </div>
+                <ion-button class="icon-action" fill="clear" :disabled="refreshingSchedule" aria-label="Refresh this week's schedule" @click="loadCoursesAndSchedule">
+                  <ion-spinner v-if="refreshingSchedule" name="crescent" />
+                  <ion-icon v-else :icon="refreshOutline" />
+                </ion-button>
+              </div>
+
+              <div v-if="weeklyMeetings.length" class="meeting-list">
+                <article v-for="meeting in weeklyMeetings" :key="meeting.id" class="meeting-card">
+                  <div class="meeting-icon" aria-hidden="true"><ion-icon :icon="calendarOutline" /></div>
+                  <div class="meeting-copy">
+                    <div class="meeting-title-row">
+                      <div>
+                        <span class="class-name">{{ meeting.class_name }}</span>
+                        <h3>{{ meeting.title }}</h3>
+                      </div>
+                      <span class="status-chip" :class="meeting.attendance_enabled ? 'is-open' : 'is-complete'">
+                        {{ meeting.attendance_enabled ? 'Counts' : 'Not counted' }}
+                      </span>
+                    </div>
+                    <div class="meeting-details">
+                      <span><ion-icon :icon="calendarOutline" /> {{ formatMeetingTime(meeting) }}</span>
+                      <span v-if="meeting.class_section"><ion-icon :icon="peopleOutline" /> {{ meeting.class_section }}</span>
+                    </div>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="empty-state">
+                <div class="empty-icon"><ion-icon :icon="calendarOutline" /></div>
+                <h3>No meetings this week</h3>
+                <p>Your enrolled classes have no meeting scheduled for the current week.</p>
+              </div>
+            </section>
+
             <aside class="student-sidebar">
-              <section class="campus-surface join-panel" aria-labelledby="join-class-title">
+              <section v-if="activeSection === 'courses'" class="campus-surface join-panel" aria-labelledby="join-class-title">
                 <div class="panel-icon"><ion-icon :icon="peopleOutline" /></div>
                 <p class="eyebrow">Enrollment</p>
                 <h2 id="join-class-title">Join a class</h2>
                 <p>Enter the private join code shared by your teacher.</p>
 
-                <form class="join-form" @submit.prevent="joinClass">
-                  <ion-input
-                    v-model="joinCode"
-                    class="join-code-input"
-                    label="Class join code"
-                    label-placement="stacked"
-                    fill="outline"
-                    :maxlength="16"
-                    :disabled="joiningClass"
-                    required
-                  />
-                  <ion-button class="join-button" expand="block" type="submit" :disabled="joiningClass || joinCode.trim().length < 6">
-                    <ion-spinner v-if="joiningClass" name="crescent" />
-                    <template v-else>
-                      Join class
-                      <ion-icon slot="end" :icon="arrowForwardOutline" />
-                    </template>
-                  </ion-button>
-                </form>
+                <ion-button class="join-button" expand="block" @click="openJoinModal">
+                  Enter class code
+                  <ion-icon slot="end" :icon="arrowForwardOutline" />
+                </ion-button>
 
                 <div
                   v-if="joinMessage"
@@ -277,7 +330,23 @@
                 </div>
               </section>
 
-              <section class="privacy-card">
+              <section v-if="activeSection === 'overview'" class="face-setup-card">
+                <ion-icon :icon="personCircleOutline" />
+                <div>
+                  <strong>{{ faceEnrolled ? 'Face verification is active' : 'Face verification is not set up' }}</strong>
+                  <p>{{ faceEnrolled ? 'Your private template is ready for self-check attendance.' : 'Enroll once before using student self-check attendance.' }}</p>
+                  <div class="face-actions">
+                    <ion-button size="small" fill="outline" @click="faceEnrollmentOpen = true">
+                      {{ faceEnrolled ? 'Re-enroll' : 'Set up now' }}
+                    </ion-button>
+                    <ion-button v-if="faceEnrolled" size="small" fill="clear" color="danger" @click="confirmRemoveFace">
+                      Remove
+                    </ion-button>
+                  </div>
+                </div>
+              </section>
+
+              <section v-if="activeSection === 'overview'" class="privacy-card">
                 <ion-icon :icon="shieldCheckmarkOutline" />
                 <div>
                   <strong>Your evidence is private</strong>
@@ -289,17 +358,76 @@
         </template>
       </main>
     </ion-content>
+
+    <ion-modal :is-open="joinModalOpen" :can-dismiss="!joiningClass" @did-dismiss="closeJoinModal">
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Join a class</ion-title>
+          <ion-buttons slot="end">
+            <ion-button :disabled="joiningClass" @click="closeJoinModal">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content class="ion-padding">
+        <div class="join-modal-copy">
+          <div class="panel-icon"><ion-icon :icon="peopleOutline" /></div>
+          <p class="eyebrow">Course enrollment</p>
+          <h2>Enter your teacher's code</h2>
+          <p>The code is 6 to 16 characters and is not case-sensitive.</p>
+        </div>
+
+        <form class="join-form" @submit.prevent="joinClass">
+          <ion-input
+            v-model="joinCode"
+            class="join-code-input"
+            label="Class join code"
+            label-placement="stacked"
+            fill="outline"
+            :maxlength="16"
+            :disabled="joiningClass"
+            autocapitalize="characters"
+            required
+          />
+          <ion-button class="join-button" expand="block" type="submit" :disabled="joiningClass || joinCode.trim().length < 6">
+            <ion-spinner v-if="joiningClass" name="crescent" />
+            <template v-else>
+              Join class
+              <ion-icon slot="end" :icon="arrowForwardOutline" />
+            </template>
+          </ion-button>
+        </form>
+
+        <div
+          v-if="joinMessage"
+          class="message-box compact"
+          :class="joinFailed ? 'is-error' : 'is-success'"
+          role="status"
+        >
+          <ion-icon :icon="joinFailed ? alertCircleOutline : checkmarkCircleOutline" />
+          <span>{{ joinMessage }}</span>
+        </div>
+      </ion-content>
+    </ion-modal>
+
+    <face-enrollment-modal
+      :open="faceEnrollmentOpen"
+      @close="faceEnrollmentOpen = false"
+      @enrolled="handleFaceEnrolled"
+    />
   </ion-page>
 </template>
 
 <script setup lang="ts">
 import {
+  alertController,
   IonButton,
   IonButtons,
   IonContent,
   IonHeader,
   IonIcon,
   IonInput,
+  IonMenuButton,
+  IonModal,
   IonPage,
   IonSpinner,
   IonTitle,
@@ -312,9 +440,9 @@ import {
   calendarOutline,
   checkmarkCircleOutline,
   cloudOutline,
-  locationOutline,
   logOutOutline,
   peopleOutline,
+  personCircleOutline,
   refreshOutline,
   scanOutline,
   schoolOutline,
@@ -322,15 +450,15 @@ import {
   timeOutline,
 } from 'ionicons/icons'
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
-import BarcodeCapture from '@/components/BarcodeCapture.vue'
+import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
-type SelfAttendanceMode = 'self_on_site' | 'self_event' | 'self_online'
+type SelfAttendanceMode = 'self_on_site' | 'self_online'
 
 interface StudentProfileRow {
   user_id: string
@@ -354,17 +482,39 @@ interface AvailableMeeting {
   submitted_at: string | null
 }
 
+interface StudentCourse {
+  id: string
+  name: string
+  section: string | null
+  timezone: string
+}
+
+interface WeeklyMeeting {
+  id: string
+  title: string
+  meeting_date: string
+  starts_at: string
+  ends_at: string
+  attendance_enabled: boolean
+  class_name: string
+  class_section: string | null
+}
+
 const router = useRouter()
+const route = useRoute()
 const { initializeSession, profile, refreshProfile, signOut, user } = useSession()
 
 const loading = ref(true)
 const refreshing = ref(false)
+const refreshingSchedule = ref(false)
 const signingOut = ref(false)
 const savingRegistration = ref(false)
 const scanningCamera = ref(false)
 const joiningClass = ref(false)
 const studentProfile = ref<StudentProfileRow | null>(null)
 const meetings = ref<AvailableMeeting[]>([])
+const courses = ref<StudentCourse[]>([])
+const weeklyMeetings = ref<WeeklyMeeting[]>([])
 const fullName = ref('')
 const guardianEmail = ref('')
 const rawBarcode = ref<string | null>(null)
@@ -373,6 +523,9 @@ const joinMessage = ref('')
 const joinFailed = ref(false)
 const registrationMessage = ref('')
 const pageMessage = ref('')
+const faceEnrolled = ref(false)
+const faceEnrollmentOpen = ref(false)
+const joinModalOpen = ref(false)
 
 const registrationCompleted = computed(() => Boolean(studentProfile.value?.registration_completed_at))
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
@@ -380,6 +533,10 @@ const studentFirstName = computed(() => profile.value?.full_name?.trim().split(/
 const dashboardDate = computed(() =>
   new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()),
 )
+const activeSection = computed(() => {
+  const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
+  return value === 'courses' || value === 'schedule' ? value : 'overview'
+})
 
 function acceptBarcode(value: string) {
   rawBarcode.value = value
@@ -418,6 +575,19 @@ async function loadStudentProfile() {
   guardianEmail.value = data?.guardian_email ?? ''
 }
 
+async function loadFaceEnrollmentStatus() {
+  const { data, error } = await supabase.rpc('my_face_enrollment_status')
+  if (error) {
+    // The UI remains usable while a migration is being deployed, but self-check
+    // will still be protected by the server once face verification is enabled.
+    if (error.code === '42883' || error.code === 'PGRST202') return
+    throw error
+  }
+
+  const status = Array.isArray(data) ? data[0] : data
+  faceEnrolled.value = Boolean(status?.enrolled)
+}
+
 async function loadAvailableMeetings() {
   refreshing.value = true
   pageMessage.value = ''
@@ -436,6 +606,86 @@ async function loadAvailableMeetings() {
     pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load attendance meetings.')
   } finally {
     refreshing.value = false
+  }
+}
+
+function currentManilaWeekRange(): { start: string; end: string } {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Asia/Manila',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(new Date())
+  const numberPart = (type: Intl.DateTimeFormatPartTypes) =>
+    Number(parts.find((part) => part.type === type)?.value)
+  const today = new Date(Date.UTC(numberPart('year'), numberPart('month') - 1, numberPart('day')))
+  const mondayOffset = (today.getUTCDay() + 6) % 7
+  const start = new Date(today)
+  start.setUTCDate(today.getUTCDate() - mondayOffset)
+  const end = new Date(start)
+  end.setUTCDate(start.getUTCDate() + 6)
+  return {
+    start: start.toISOString().slice(0, 10),
+    end: end.toISOString().slice(0, 10),
+  }
+}
+
+async function loadCoursesAndSchedule() {
+  if (!user.value) return
+  refreshingSchedule.value = true
+
+  try {
+    const week = currentManilaWeekRange()
+    const [enrollmentResult, meetingResult] = await Promise.all([
+      supabase
+        .from('class_enrollments')
+        .select('class:classes(id,name,section,timezone)')
+        .eq('student_id', user.value.id)
+        .eq('is_active', true),
+      supabase
+        .from('meetings')
+        .select('id,title,meeting_date,starts_at,ends_at,attendance_enabled,class:classes!inner(name,section)')
+        .gte('meeting_date', week.start)
+        .lte('meeting_date', week.end)
+        .order('starts_at', { ascending: true }),
+    ])
+    if (enrollmentResult.error) throw enrollmentResult.error
+    if (meetingResult.error) throw meetingResult.error
+
+    const enrollmentRows = (enrollmentResult.data ?? []) as unknown as Array<{
+      class: StudentCourse | StudentCourse[] | null
+    }>
+    courses.value = enrollmentRows
+      .flatMap((row) => Array.isArray(row.class) ? row.class : row.class ? [row.class] : [])
+      .sort((first, second) => first.name.localeCompare(second.name))
+
+    const meetingRows = (meetingResult.data ?? []) as unknown as Array<{
+      id: string
+      title: string
+      meeting_date: string
+      starts_at: string
+      ends_at: string
+      attendance_enabled: boolean
+      class: Pick<StudentCourse, 'name' | 'section'> | Array<Pick<StudentCourse, 'name' | 'section'>>
+    }>
+    weeklyMeetings.value = meetingRows.flatMap((row) => {
+      const course = Array.isArray(row.class) ? row.class[0] : row.class
+      if (!course) return []
+      return [{
+        id: row.id,
+        title: row.title,
+        meeting_date: row.meeting_date,
+        starts_at: row.starts_at,
+        ends_at: row.ends_at,
+        attendance_enabled: row.attendance_enabled,
+        class_name: course.name,
+        class_section: course.section,
+      }]
+    })
+  } catch (error) {
+    pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load this week\'s classes.')
+  } finally {
+    refreshingSchedule.value = false
   }
 }
 
@@ -470,7 +720,8 @@ async function completeRegistration() {
     // Erase the raw credential from client memory as soon as the secure RPC has used it.
     rawBarcode.value = null
     await Promise.all([loadStudentProfile(), refreshProfile()])
-    await loadAvailableMeetings()
+    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule()])
+    faceEnrollmentOpen.value = true
   } catch (error) {
     registrationMessage.value = toUserFacingErrorMessage(error, 'Registration could not be completed.')
   } finally {
@@ -496,13 +747,27 @@ async function joinClass() {
     const schoolClass = data as { name?: string } | null
     joinCode.value = ''
     joinMessage.value = schoolClass?.name ? `Joined ${schoolClass.name}.` : 'Class joined.'
-    await loadAvailableMeetings()
+    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule()])
   } catch (error) {
     joinFailed.value = true
     joinMessage.value = toUserFacingErrorMessage(error, 'The class could not be joined.')
   } finally {
     joiningClass.value = false
   }
+}
+
+function openJoinModal() {
+  joinMessage.value = ''
+  joinFailed.value = false
+  joinModalOpen.value = true
+}
+
+function closeJoinModal() {
+  if (joiningClass.value) return
+  joinModalOpen.value = false
+  joinCode.value = ''
+  joinMessage.value = ''
+  joinFailed.value = false
 }
 
 function formatDateTime(value: string): string {
@@ -512,7 +777,7 @@ function formatDateTime(value: string): string {
   }).format(new Date(value))
 }
 
-function formatMeetingTime(meeting: AvailableMeeting): string {
+function formatMeetingTime(meeting: Pick<AvailableMeeting, 'starts_at' | 'ends_at'>): string {
   const dateAndTime = new Intl.DateTimeFormat(undefined, {
     weekday: 'short',
     month: 'short',
@@ -531,26 +796,56 @@ function meetingModeMeta(mode: SelfAttendanceMode) {
   if (mode === 'self_online') {
     return {
       label: 'Online class',
-      detail: 'Take a new selfie to verify your attendance.',
+      detail: 'Take a new timestamped selfie. Your check-in counts immediately.',
       icon: cloudOutline,
-    }
-  }
-  if (mode === 'self_event') {
-    return {
-      label: 'School event',
-      detail: 'Your school ID, a selfie, and verified location are required.',
-      icon: locationOutline,
     }
   }
   return {
     label: 'On-site class',
-    detail: 'Your school ID, a selfie, and verified location are required.',
+    detail: 'Your school ID, a timestamped selfie, and verified location are required.',
     icon: schoolOutline,
   }
 }
 
 async function openSelfCheck(meetingId: string) {
+  if (!faceEnrolled.value) {
+    faceEnrollmentOpen.value = true
+    pageMessage.value = 'Set up face verification before starting a self-check.'
+    return
+  }
   await router.push(`/student/check-in/${meetingId}`)
+}
+
+async function handleFaceEnrolled() {
+  faceEnrolled.value = true
+  faceEnrollmentOpen.value = false
+  pageMessage.value = ''
+}
+
+async function confirmRemoveFace() {
+  const alert = await alertController.create({
+    header: 'Remove face verification?',
+    message: 'You will not be able to use self-check attendance until you enroll again. Your past attendance photos are not deleted.',
+    buttons: [
+      { text: 'Cancel', role: 'cancel' },
+      {
+        text: 'Remove',
+        role: 'destructive',
+        handler: () => { void removeFaceEnrollment() },
+      },
+    ],
+  })
+  await alert.present()
+}
+
+async function removeFaceEnrollment() {
+  pageMessage.value = ''
+  const { error } = await supabase.rpc('delete_my_face')
+  if (error) {
+    pageMessage.value = toUserFacingErrorMessage(error, 'Face enrollment could not be removed.')
+    return
+  }
+  faceEnrolled.value = false
 }
 
 async function logout() {
@@ -570,7 +865,14 @@ onMounted(async () => {
 
     fullName.value = profile.value.full_name
     await loadStudentProfile()
-    if (registrationCompleted.value) await loadAvailableMeetings()
+    if (registrationCompleted.value) {
+      await Promise.all([
+        loadAvailableMeetings(),
+        loadCoursesAndSchedule(),
+        loadFaceEnrollmentStatus(),
+      ])
+      faceEnrollmentOpen.value = !faceEnrolled.value
+    }
   } catch (error) {
     pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load the student account.')
   } finally {
@@ -581,8 +883,8 @@ onMounted(async () => {
 
 <style scoped>
 .student-page {
-  --campus-accent: var(--campus-blue, #245f86);
-  --campus-accent-soft: var(--campus-blue-soft, #e1edf5);
+  --campus-accent: var(--campus-green, #087443);
+  --campus-accent-soft: var(--campus-green-soft, #e4f2e9);
   --campus-surface-subtle: var(--campus-surface-soft, #f5f8fa);
   --campus-green: var(--campus-success, #147a50);
   --campus-green-soft: var(--campus-success-soft, #e1f4eb);
@@ -593,7 +895,7 @@ onMounted(async () => {
 }
 
 .campus-header ion-toolbar {
-  --background: rgba(255, 255, 255, 0.96);
+  --background: var(--campus-surface);
   --border-color: var(--campus-border);
   --min-height: 68px;
   --padding-start: clamp(0.4rem, 3vw, 1.25rem);
@@ -685,7 +987,7 @@ onMounted(async () => {
   border: 1px solid var(--campus-border);
   border-radius: var(--campus-radius-lg);
   background: var(--campus-surface);
-  box-shadow: 0 14px 40px rgba(21, 54, 78, 0.065);
+  box-shadow: var(--campus-shadow);
 }
 
 .registration-layout {
@@ -890,30 +1192,13 @@ onMounted(async () => {
   --color: var(--campus-accent);
 }
 
-.method-divider {
-  display: flex;
-  align-items: center;
-  gap: 0.7rem;
-  color: var(--campus-muted);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-}
-
-.method-divider::before,
-.method-divider::after {
-  flex: 1;
-  height: 1px;
-  background: var(--campus-border);
-  content: '';
-}
-
 .primary-action,
 .check-in-button,
 .join-button {
   min-height: 46px;
   margin: 0;
   --background: var(--campus-accent);
-  --background-hover: #1d506f;
+  --background-hover: var(--campus-navy);
   --border-radius: 11px;
   --box-shadow: none;
   font-weight: 700;
@@ -982,6 +1267,14 @@ onMounted(async () => {
   align-items: start;
 }
 
+.dashboard-grid.courses-layout {
+  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.65fr);
+}
+
+.dashboard-grid.single-section {
+  grid-template-columns: minmax(0, 1fr);
+}
+
 .attendance-heading {
   padding-bottom: 1.15rem;
   border-bottom: 1px solid var(--campus-border);
@@ -999,6 +1292,44 @@ onMounted(async () => {
 
 .meeting-list {
   display: grid;
+}
+
+.course-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+  gap: 12px;
+  padding-top: 18px;
+}
+
+.course-card {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 14px;
+  border: 1px solid var(--campus-border);
+  border-radius: var(--campus-radius-md);
+  background: var(--campus-surface-subtle);
+}
+
+.course-card h3,
+.course-card p {
+  margin: 0;
+}
+
+.course-card h3 {
+  color: var(--campus-text);
+  font-size: 0.9rem;
+}
+
+.course-card p {
+  margin-top: 4px;
+  color: var(--campus-muted);
+  font-size: 0.75rem;
+}
+
+.compact-empty {
+  padding-top: 2.4rem;
+  padding-bottom: 1.2rem;
 }
 
 .meeting-card {
@@ -1030,11 +1361,6 @@ onMounted(async () => {
 .meeting-icon.mode-self_online {
   background: #ede9fb;
   color: #7255b4;
-}
-
-.meeting-icon.mode-self_event {
-  background: var(--campus-warning-soft);
-  color: var(--campus-warning);
 }
 
 .meeting-copy {
@@ -1184,27 +1510,42 @@ onMounted(async () => {
   text-transform: uppercase;
 }
 
-.privacy-card {
+.privacy-card,
+.face-setup-card {
   display: flex;
   gap: 0.8rem;
   padding: 1rem;
   border-radius: var(--campus-radius-md);
-  background: #e7f1f6;
+  background: var(--campus-green-soft);
   color: var(--campus-accent);
 }
 
-.privacy-card > ion-icon {
+.face-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.face-setup-card {
+  border: 1px solid color-mix(in srgb, var(--campus-gold) 55%, var(--campus-border));
+  background: var(--campus-gold-soft);
+}
+
+.privacy-card > ion-icon,
+.face-setup-card > ion-icon {
   flex: 0 0 auto;
   margin-top: 0.08rem;
   font-size: 1.25rem;
 }
 
-.privacy-card strong {
+.privacy-card strong,
+.face-setup-card strong {
   color: var(--campus-text);
   font-size: 0.82rem;
 }
 
-.privacy-card p {
+.privacy-card p,
+.face-setup-card p {
   margin: 0.3rem 0 0;
   color: var(--campus-muted);
   font-size: 0.75rem;
@@ -1245,22 +1586,6 @@ onMounted(async () => {
 
 .page-message {
   margin-bottom: 1rem;
-}
-
-@media (prefers-color-scheme: dark) {
-  .campus-header ion-toolbar {
-    --background: rgba(17, 29, 39, 0.97);
-  }
-
-  .capture-state,
-  .status-chip.is-complete,
-  .setup-steps li > span {
-    background: #22313c;
-  }
-
-  .privacy-card {
-    background: #132b3c;
-  }
 }
 
 @media (max-width: 820px) {

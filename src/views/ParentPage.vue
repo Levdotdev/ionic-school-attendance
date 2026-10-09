@@ -2,6 +2,9 @@
   <ion-page class="dashboard-page">
     <ion-header class="app-header">
       <ion-toolbar class="app-toolbar">
+        <ion-buttons slot="start">
+          <ion-menu-button aria-label="Open navigation menu" />
+        </ion-buttons>
         <ion-title>
           <span class="toolbar-brand">
             <span class="toolbar-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
@@ -32,8 +35,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">Parent and guardian portal</p>
-            <h1>Your child’s attendance</h1>
-            <p>See recent check-ins, teacher verification, photos, and submitted locations.</p>
+            <h1>{{ activeSection === 'history' ? 'Attendance history' : 'Your child’s attendance' }}</h1>
+            <p>{{ activeSection === 'history' ? 'Review past classes, status changes, photos, and submitted locations.' : 'See the latest attendance status and submitted evidence.' }}</p>
           </div>
           <ion-button class="secondary-button" fill="outline" :disabled="refreshing" @click="loadDashboard">
             <ion-spinner v-if="refreshing" name="crescent" />
@@ -75,7 +78,7 @@
             </header>
 
             <template v-if="dashboard.latest">
-              <div class="latest-grid">
+              <div v-if="activeSection === 'overview'" class="latest-grid">
                 <section
                   class="status-card"
                   :class="dashboard.latest.status === 'present' ? 'is-present' : 'is-absent'"
@@ -167,7 +170,7 @@
                 </section>
               </div>
 
-              <section class="history-card" :aria-labelledby="`history-${dashboard.student.id}`">
+              <section v-if="activeSection === 'history'" class="history-card" :aria-labelledby="`history-${dashboard.student.id}`">
                 <div class="section-title history-title">
                   <div>
                     <p class="eyebrow">Attendance history</p>
@@ -248,6 +251,7 @@ import {
   IonContent,
   IonHeader,
   IonIcon,
+  IonMenuButton,
   IonPage,
   IonSpinner,
   IonTitle,
@@ -271,7 +275,7 @@ import {
   timeOutline,
 } from 'ionicons/icons'
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
@@ -299,6 +303,7 @@ interface AttendanceDisplayRow {
 }
 
 const router = useRouter()
+const route = useRoute()
 const { initializeSession, profile, signOut } = useSession()
 const loading = ref(true)
 const refreshing = ref(false)
@@ -306,6 +311,7 @@ const signingOut = ref(false)
 const students = ref<StudentRow[]>([])
 const attendance = ref<AttendanceDisplayRow[]>([])
 const message = ref('')
+const activeSection = computed(() => route.query.section === 'history' ? 'history' : 'overview')
 
 const studentDashboards = computed(() => students.value.map((student) => {
   const records = attendance.value.filter((record) => record.student_id === student.id)
@@ -423,9 +429,9 @@ function statusLabel(status: AttendanceDisplayRow['status']) {
 }
 
 function verificationLabel(status: AttendanceDisplayRow['verification_status']) {
-  if (status === 'approved') return 'Verified by teacher'
-  if (status === 'rejected') return 'Evidence rejected'
-  if (status === 'pending') return 'Awaiting teacher verification'
+  if (status === 'approved') return 'Self-check accepted'
+  if (status === 'rejected') return 'Voided by teacher'
+  if (status === 'pending') return 'Legacy review pending'
   return 'Teacher-recorded attendance'
 }
 
@@ -478,8 +484,8 @@ onMounted(async () => {
 
 <style scoped>
 .dashboard-page {
-  --campus-accent-local: var(--campus-accent, #245f86);
-  --campus-navy-local: var(--campus-navy, #15364e);
+  --campus-accent-local: var(--campus-accent, #087443);
+  --campus-navy-local: var(--campus-navy, #063f2a);
   --campus-bg-local: var(--campus-bg, #eef3f7);
   --campus-surface-local: var(--campus-surface, #ffffff);
   --campus-surface-soft-local: var(--campus-surface-soft, #f5f8fa);
@@ -692,7 +698,7 @@ onMounted(async () => {
   border: 1px solid var(--campus-border-local);
   border-radius: var(--campus-radius, 20px);
   background: var(--campus-surface-local);
-  box-shadow: var(--campus-shadow, 0 15px 45px rgba(21, 54, 78, 0.055));
+  box-shadow: var(--campus-shadow, 0 15px 45px rgba(6, 63, 42, 0.08));
 }
 
 .student-heading {

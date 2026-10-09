@@ -2,6 +2,9 @@
   <ion-page class="admin-page">
     <ion-header class="app-header">
       <ion-toolbar class="app-toolbar">
+        <ion-buttons slot="start">
+          <ion-menu-button aria-label="Open navigation menu" />
+        </ion-buttons>
         <ion-title>
           <span class="toolbar-brand">
             <span class="toolbar-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
@@ -27,8 +30,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">School administration</p>
-            <h1>Teacher approvals</h1>
-            <p>Review teacher registrations before they can create classes or manage attendance.</p>
+            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : 'Administration overview' }}</h1>
+            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : 'Monitor the current teacher registration totals.' }}</p>
           </div>
           <ion-button class="secondary-button" fill="outline" :disabled="loading" @click="loadApplicants">
             <ion-spinner v-if="loading" name="crescent" />
@@ -37,7 +40,7 @@
           </ion-button>
         </header>
 
-        <section class="summary-grid" aria-label="Teacher registration totals">
+        <section v-if="activeSection === 'overview'" class="summary-grid" aria-label="Teacher registration totals">
           <article class="summary-card is-pending">
             <span class="summary-icon"><ion-icon :icon="hourglassOutline" /></span>
             <span><small>Needs review</small><strong>{{ pendingCount }}</strong></span>
@@ -62,7 +65,7 @@
           <span>{{ message }}</span>
         </div>
 
-        <section class="queue-card" aria-labelledby="queue-heading">
+        <section v-if="activeSection === 'teachers'" class="queue-card" aria-labelledby="queue-heading">
           <header class="queue-heading">
             <div>
               <p class="eyebrow">Registration queue</p>
@@ -124,60 +127,88 @@
               </div>
 
               <div class="review-panel">
-                <ion-textarea
-                  v-model="reviewNotes[applicant.id]"
-                  class="review-note"
-                  label="Decision note (optional)"
-                  label-placement="stacked"
-                  fill="outline"
-                  auto-grow
-                  :disabled="reviewingTeacherId === applicant.id"
-                  placeholder="Add a short note the teacher can see"
-                />
-
-                <div
-                  class="review-buttons"
-                  role="group"
-                  :aria-label="`Review ${applicant.full_name}'s registration`"
-                >
-                  <ion-button
-                    class="reject-button"
-                    fill="outline"
-                    :aria-label="`Reject ${applicant.full_name}'s teacher registration`"
-                    :disabled="reviewingTeacherId === applicant.id"
-                    @click="reviewApplicant(applicant, 'rejected')"
-                  >
-                    <ion-spinner
-                      v-if="reviewingTeacherId === applicant.id && reviewDecision === 'rejected'"
-                      name="crescent"
-                    />
-                    <template v-else>
-                      <ion-icon slot="start" :icon="closeCircleOutline" aria-hidden="true" />
-                      Reject
-                    </template>
-                  </ion-button>
-                  <ion-button
-                    class="approve-button"
-                    :aria-label="`Approve ${applicant.full_name}'s teacher registration`"
-                    :disabled="reviewingTeacherId === applicant.id"
-                    @click="reviewApplicant(applicant, 'approved')"
-                  >
-                    <ion-spinner
-                      v-if="reviewingTeacherId === applicant.id && reviewDecision === 'approved'"
-                      name="crescent"
-                    />
-                    <template v-else>
-                      <ion-icon slot="start" :icon="checkmarkCircleOutline" aria-hidden="true" />
-                      Approve
-                    </template>
-                  </ion-button>
-                </div>
+                <p v-if="applicant.teacher_approval_note" class="existing-review-note">
+                  {{ applicant.teacher_approval_note }}
+                </p>
+                <ion-button class="approve-button" fill="outline" @click="openReviewModal(applicant)">
+                  {{ applicant.teacher_approval_status === 'pending' || !applicant.teacher_approval_status ? 'Review registration' : 'Change decision' }}
+                </ion-button>
               </div>
             </article>
           </div>
         </section>
       </main>
     </ion-content>
+
+    <ion-modal
+      :is-open="Boolean(selectedApplicant)"
+      :can-dismiss="!reviewingTeacherId"
+      @did-dismiss="closeReviewModal"
+    >
+      <ion-header>
+        <ion-toolbar>
+          <ion-title>Teacher registration</ion-title>
+          <ion-buttons slot="end">
+            <ion-button :disabled="Boolean(reviewingTeacherId)" @click="closeReviewModal">Close</ion-button>
+          </ion-buttons>
+        </ion-toolbar>
+      </ion-header>
+      <ion-content v-if="selectedApplicant" class="ion-padding">
+        <section class="review-modal-summary">
+          <span class="applicant-avatar" aria-hidden="true">{{ initials(selectedApplicant.full_name) }}</span>
+          <div>
+            <p class="eyebrow">Teacher account</p>
+            <h2>{{ selectedApplicant.full_name }}</h2>
+            <p><ion-icon :icon="mailOutline" /> {{ selectedApplicant.email }}</p>
+            <span class="status-pill" :class="`is-${selectedApplicant.teacher_approval_status ?? 'pending'}`">
+              <span aria-hidden="true"></span>
+              {{ statusLabel(selectedApplicant.teacher_approval_status) }}
+            </span>
+          </div>
+        </section>
+
+        <ion-textarea
+          v-model="reviewNotes[selectedApplicant.id]"
+          class="review-note"
+          label="Decision note (optional)"
+          label-placement="stacked"
+          fill="outline"
+          auto-grow
+          :disabled="reviewingTeacherId === selectedApplicant.id"
+          placeholder="Add a short note the teacher can see"
+        />
+
+        <div
+          class="review-buttons"
+          role="group"
+          :aria-label="`Review ${selectedApplicant.full_name}'s registration`"
+        >
+          <ion-button
+            class="reject-button"
+            fill="outline"
+            :disabled="reviewingTeacherId === selectedApplicant.id"
+            @click="reviewApplicant(selectedApplicant, 'rejected')"
+          >
+            <ion-spinner v-if="reviewDecision === 'rejected'" name="crescent" />
+            <template v-else>
+              <ion-icon slot="start" :icon="closeCircleOutline" />
+              Reject
+            </template>
+          </ion-button>
+          <ion-button
+            class="approve-button"
+            :disabled="reviewingTeacherId === selectedApplicant.id"
+            @click="reviewApplicant(selectedApplicant, 'approved')"
+          >
+            <ion-spinner v-if="reviewDecision === 'approved'" name="crescent" />
+            <template v-else>
+              <ion-icon slot="start" :icon="checkmarkCircleOutline" />
+              Approve
+            </template>
+          </ion-button>
+        </div>
+      </ion-content>
+    </ion-modal>
   </ion-page>
 </template>
 
@@ -188,6 +219,8 @@ import {
   IonContent,
   IonHeader,
   IonIcon,
+  IonMenuButton,
+  IonModal,
   IonLabel,
   IonPage,
   IonSegment,
@@ -211,7 +244,7 @@ import {
   timeOutline,
 } from 'ionicons/icons'
 import { computed, onMounted, reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
@@ -230,6 +263,7 @@ interface TeacherApplicant {
 type QueueView = 'pending' | 'all'
 
 const router = useRouter()
+const route = useRoute()
 const { initializeSession, profile, signOut } = useSession()
 const applicants = ref<TeacherApplicant[]>([])
 const reviewNotes = reactive<Record<string, string>>({})
@@ -240,6 +274,8 @@ const signingOut = ref(false)
 const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
 const selectedView = ref<QueueView>('pending')
+const selectedApplicant = ref<TeacherApplicant | null>(null)
+const activeSection = computed(() => route.query.section === 'teachers' ? 'teachers' : 'overview')
 
 const pendingCount = computed(() => applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending').length)
 const approvedCount = computed(() => applicants.value.filter((applicant) => applicant.teacher_approval_status === 'approved').length)
@@ -296,12 +332,24 @@ async function reviewApplicant(
 
     await loadApplicants()
     showSuccess(`${applicant.full_name}'s registration was ${decision}.`)
+    selectedApplicant.value = null
   } catch (error) {
     showError(error)
   } finally {
     reviewingTeacherId.value = ''
     reviewDecision.value = null
   }
+}
+
+function openReviewModal(applicant: TeacherApplicant) {
+  reviewNotes[applicant.id] = applicant.teacher_approval_note ?? ''
+  selectedApplicant.value = applicant
+}
+
+function closeReviewModal() {
+  if (reviewingTeacherId.value) return
+  selectedApplicant.value = null
+  reviewDecision.value = null
 }
 
 function initials(name: string) {
@@ -365,8 +413,8 @@ onMounted(async () => {
 
 <style scoped>
 .admin-page {
-  --campus-accent-local: var(--campus-accent, #245f86);
-  --campus-navy-local: var(--campus-navy, #15364e);
+  --campus-accent-local: var(--campus-accent, #087443);
+  --campus-navy-local: var(--campus-navy, #063f2a);
   --campus-bg-local: var(--campus-bg, #eef3f7);
   --campus-surface-local: var(--campus-surface, #ffffff);
   --campus-accent-soft-local: var(--campus-accent-soft, #e1edf5);
@@ -594,7 +642,7 @@ onMounted(async () => {
   border: 1px solid var(--campus-border-local);
   border-radius: var(--campus-radius, 20px);
   background: var(--campus-surface-local);
-  box-shadow: var(--campus-shadow, 0 15px 45px rgba(21, 54, 78, 0.055));
+  box-shadow: var(--campus-shadow, 0 15px 45px rgba(6, 63, 42, 0.08));
 }
 
 .queue-heading {
@@ -770,6 +818,50 @@ onMounted(async () => {
 
 .review-panel {
   min-width: 0;
+}
+
+.existing-review-note {
+  display: -webkit-box;
+  overflow: hidden;
+  margin: 0 0 10px;
+  color: var(--campus-muted-local);
+  font-size: 12px;
+  line-height: 1.45;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.review-modal-summary {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  max-width: 560px;
+  margin: 6px auto 22px;
+  padding: 18px;
+  border: 1px solid var(--campus-border-local);
+  border-radius: 16px;
+  background: var(--campus-surface-local);
+}
+
+.review-modal-summary h2,
+.review-modal-summary p {
+  margin: 0;
+}
+
+.review-modal-summary p:not(.eyebrow) {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 10px;
+  color: var(--campus-muted-local);
+  font-size: 13px;
+}
+
+ion-modal .review-note,
+ion-modal .review-buttons {
+  max-width: 560px;
+  margin-right: auto;
+  margin-left: auto;
 }
 
 .review-note {

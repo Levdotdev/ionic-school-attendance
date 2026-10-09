@@ -2,6 +2,7 @@ import type { Session, User } from '@supabase/supabase-js'
 import { computed, readonly, ref, shallowRef } from 'vue'
 
 import { supabase } from '@/lib/supabase'
+import { unregisterFromClassNotifications } from '@/services/notifications'
 import type { AppRole, TeacherApprovalStatus } from '@/types/database'
 
 export type { AppRole } from '@/types/database'
@@ -128,6 +129,10 @@ export function initializeSession(): Promise<void> {
 }
 
 export async function signOut(): Promise<void> {
+  // Remove the signed-in user's device mapping before Supabase clears the JWT.
+  // A notification failure must not trap someone inside their account.
+  await unregisterFromClassNotifications().catch(() => undefined)
+
   const { error } = await supabase.auth.signOut()
   if (error) throw error
 

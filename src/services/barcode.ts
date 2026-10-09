@@ -9,7 +9,6 @@ import { Capacitor } from '@capacitor/core'
 
 export const MIN_STUDENT_BARCODE_LENGTH = 4
 export const MAX_STUDENT_BARCODE_LENGTH = 256
-export const DEFAULT_SCANNER_AVERAGE_INTERVAL_MS = 150
 
 const PRINTABLE_ASCII = /^[\x20-\x7e]+$/
 const BROWSER_SCANNER_OVERLAY_ID = 'student-barcode-camera-overlay'
@@ -32,15 +31,6 @@ export class BarcodeCaptureError extends Error {
     super(message)
     this.name = 'BarcodeCaptureError'
   }
-}
-
-export function isLikelyHardwareScan(
-  characterCount: number,
-  durationMs: number,
-  maxAverageIntervalMs = DEFAULT_SCANNER_AVERAGE_INTERVAL_MS,
-): boolean {
-  if (characterCount < 2 || durationMs < 0 || maxAverageIntervalMs <= 0) return false
-  return durationMs / (characterCount - 1) <= maxAverageIntervalMs
 }
 
 /**

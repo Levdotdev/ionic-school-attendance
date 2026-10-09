@@ -1,28 +1,72 @@
-# Ionic School Attendance MVP
+# MinSU School Attendance
 
-An Ionic Vue attendance app backed by Supabase Auth, PostgreSQL, Row Level Security, and private Storage.
+An Ionic Vue school attendance system backed by Supabase Auth, PostgreSQL, Row Level Security, Edge Functions, and private Storage.
 
-## MVP features
+## Implemented features
 
-- Student, parent, and teacher email/password registration. New teachers remain pending until an administrator approves them.
-- Student registration with either a wide camera scanner for long 1D barcodes or an armed, hidden USB/dongle barcode input.
-- Raw barcode values are never stored in the browser or public tables; PostgreSQL stores a one-way hash in a private schema.
-- Teacher-created classes, join codes, weekly schedules, and individual meetings. Classes, schedules, and meetings can be edited or deleted.
-- Each active weekly schedule automatically creates one persisted meeting for the current Manila week. Teachers can edit, disable, or delete a single occurrence without changing the recurring schedule.
-- Four attendance modes:
-  - teacher manually marks present or absent;
-  - on-site student self-check with ID barcode, a newly captured selfie, and location;
-  - event self-check with the same physical evidence;
-  - online self-check with a newly captured selfie only.
-- Server-side checks for class enrollment, check-in window, matching ID barcode, GPS accuracy, and allowed radius.
-- Private selfie storage with short-lived viewing links for the approved class teacher and the student's verified linked parent.
-- Teacher approval/rejection of self-check evidence and the ability to disable attendance for one meeting.
-- Parent view for linked students' attendance, submitted location, and check-in photos.
-- The school geofence is fixed by the database at `13.387419, 121.162494` with a `180` meter radius, so teachers do not enter coordinates.
+### Accounts and access
+
+- Student, parent, and teacher registration with email and password.
+- Google and Facebook sign-in support through Supabase OAuth.
+- New teacher accounts remain pending until an administrator approves them.
+- Role-based side menus for administrators, teachers, students, and parents.
+- MinSU green-and-gold light and dark themes.
+- Responsive sign-in and registration layout with a fixed information panel on wide screens.
+
+Social sign-in creates a student account by default. Teachers and parents should use the role-aware email registration form so the teacher-approval and parent-linking workflows are applied.
+
+### Attendance
+
+- Camera-only scanning for long 1D student ID barcodes: Code 128, Code 39, Code 93, Codabar, ITF, EAN, and UPC.
+- Raw barcode values are not stored in browser storage or public tables. PostgreSQL stores a one-way hash in a private schema.
+- Manual teacher attendance with present and absent controls.
+- On-site self-check requires the physical ID barcode, a newly captured selfie, the school geofence, and face verification when a template is enrolled.
+- Online self-check requires a newly captured selfie and face verification when a template is enrolled.
+- Event self-check is disabled; event attendance is handled manually by the teacher.
+- Self-check submissions are accepted immediately. The teacher can inspect the evidence photo, void an invalid submission, or restore it.
+- The captured photo contains a visible Manila timestamp and submitted coordinates/accuracy.
+- Evidence photos are stored privately and are available only to the student, approved class teacher, and verified linked parent as authorized by database policies.
+- The school geofence is fixed at `13.387419, 121.162494` with a `180` meter radius.
+
+### Face verification
+
+- Students can enroll, replace, or remove a private facial template.
+- Enrollment uses three live camera samples and stores the derived template, not the enrollment photos.
+- Self-check performs on-device face analysis and submits an actor-bound verification request to Supabase.
+- A manual evidence-review fallback remains available when a student cannot enroll or the device cannot complete face analysis.
+
+Face matching is an attendance aid, not a guarantee of identity. Teachers should still review questionable evidence and the school should define consent, retention, and access rules before production use with minors.
+
+### Classes and schedules
+
+- Teachers can create, edit, and delete classes, weekly schedules, and individual meetings through modals.
+- A weekly schedule automatically produces the current week's meeting.
+- Only the current Monday-to-Sunday schedule is shown to users.
+- Teachers can disable, restore, edit, or remove one meeting without changing the repeating schedule.
+- The database uses the Asia/Manila timezone when creating weekly occurrences and reminders.
+
+### Notifications
+
+- Teacher reminders: 5 minutes before class and at the start time.
+- Student reminders: 2 hours, 1 hour, 30 minutes, 15 minutes, 5 minutes, and at the start time.
+- Reminder preferences are created with each weekly schedule, so teachers do not enter them repeatedly.
+- Native Android push tokens are registered after sign-in, notification taps open the schedule, and sign-out removes the account/device mapping.
+- A protected Supabase Edge Function claims queued deliveries and sends Android notifications through Firebase Cloud Messaging.
+
+The notification code, schema, queue, and Edge Function are deployed, but actual delivery requires the Firebase credentials and scheduled invocation described in [`supabase/functions/dispatch-class-reminders/README.md`](supabase/functions/dispatch-class-reminders/README.md).
+
+### Student tasks
+
+- Course-linked tasks that use enrolled classes as subjects.
+- Optional custom categories in addition to subjects.
+- Create, edit, delete, complete, and reopen tasks.
+- Priority, due date/time, recurrence, notes, links, search, filtering, and sorting.
+- Private task attachments with database and Storage access policies.
+- Task summary and occurrence tracking.
 
 ## Local setup
 
-Requirements: Node.js 22 or newer, pnpm, and Android Studio/JDK 21 for Android builds.
+Requirements: Node.js 22 or newer, pnpm, and Android Studio with JDK 21 for Android builds.
 
 ```bash
 pnpm install
@@ -37,13 +81,13 @@ VITE_SUPABASE_URL=https://your-project-ref.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=sb_publishable_replace_me
 ```
 
-Use only a Supabase publishable key in the app. Never add a service-role key to a `VITE_` variable.
+Use only a Supabase publishable key in the app. Never expose a service-role key in a `VITE_` variable.
 
-## Database
+## Supabase setup
 
-The database migrations are in [`supabase/migrations`](supabase/migrations). They create the tables, RPCs, RLS policies, private selfie bucket, Auth profile trigger, teacher approval workflow, and parent photo access.
+Database migrations are in [`supabase/migrations`](supabase/migrations). They define the data model, RPCs, RLS policies, private Storage buckets, account workflows, weekly meeting generation, face templates, task management, and notification queue.
 
-For another Supabase project:
+To initialize another Supabase project:
 
 ```bash
 pnpm exec supabase login
@@ -51,14 +95,11 @@ pnpm exec supabase link --project-ref your-project-ref
 pnpm exec supabase db push
 ```
 
-The connected `School Attendance Project` already has these migrations applied. Supabase Cron creates the new week's scheduled meetings shortly after midnight every Monday in Manila; opening the teacher dashboard also performs an idempotent recovery check.
+The currently connected School Attendance Project already has all checked-in migrations and the `dispatch-class-reminders` Edge Function deployed.
 
 ### Create the first administrator
 
-The administrator role cannot be selected during signup. This prevents users from granting themselves approval access.
-
-1. Register the intended administrator through the app and confirm the email address.
-2. In the Supabase SQL Editor, promote only that trusted school account:
+The administrator role cannot be selected during registration. Promote only a trusted school account in the Supabase SQL Editor:
 
 ```sql
 update public.profiles
@@ -70,15 +111,28 @@ set role = 'admin',
 where email = lower('admin@school.edu');
 ```
 
-3. Sign out and sign back in. The administrator dashboard will list teacher registrations and allow approval or rejection with an optional note.
+Sign out and back in after the update. The administrator dashboard will then show pending teacher registrations.
 
-Teachers choose **Teacher** when registering. They can sign in while pending, but cannot create classes or access teacher data until approved. Students must finish barcode registration before joining a class.
+### Configure social sign-in
 
-Parent linking is automatic when a student enters the same confirmed email address used by a parent account.
+1. Create Google and Facebook OAuth applications.
+2. Add their client IDs and secrets under Supabase Authentication providers.
+3. Allow the deployed web callback URL ending in `/auth/callback`.
+4. Keep `edu.minsu.attendance://auth/callback` available for the Android app flow.
 
-## Verification commands
+### Configure Android push delivery
+
+1. Register the Android application ID in Firebase.
+2. Place the downloaded file at `android/app/google-services.json`; this path is intentionally git-ignored.
+3. Set the Edge Function secrets `FIREBASE_SERVICE_ACCOUNT_JSON` and `REMINDER_DISPATCH_SECRET`.
+4. Add the matching dispatch secret to Supabase Vault and schedule the protected Edge Function once per minute.
+
+See the Edge Function README linked above for the exact SQL and commands. The current sender supports Android FCM; APNs configuration is still required for native iOS delivery.
+
+## Verification
 
 ```bash
+pnpm exec vue-tsc --noEmit
 pnpm test
 pnpm build
 pnpm cap:sync
@@ -90,16 +144,20 @@ For Android:
 pnpm exec cap open android
 ```
 
-The official Capacitor barcode scanner requires Android API 26 or newer; this project sets `minSdkVersion` to 26. Browser camera scanning requires HTTPS (or localhost) and camera permission.
+Use JDK 21 for the included Gradle toolchain. Browser camera and location features require HTTPS or localhost plus user permission.
 
-## Barcode-reader behavior
+## Vercel
 
-The camera scanner is configured for long linear barcodes, including Code 128, Code 39, Code 93, Codabar, ITF, EAN, and UPC. It uses a wide rectangular guide instead of a QR-style square.
+- Install command: `pnpm install --frozen-lockfile`
+- Build command: `pnpm build`
+- Output directory: `dist`
 
-The USB/dongle field is visually hidden and only listens after the user presses **Use barcode reader**. Rapid keyboard-wedge scans, readers that paste the complete value, and Enter or Tab suffixes are supported. Slow typing and dropped text are rejected.
+Add `VITE_SUPABASE_URL` and `VITE_SUPABASE_PUBLISHABLE_KEY` as Vercel environment variables, and add the Vercel `/auth/callback` URL to the Supabase redirect allow-list.
 
-Web software cannot reliably distinguish a hardware reader's paste event from a person pressing paste. The armed capture window and validation reduce accidental entry, while the camera scanner provides stronger assurance that the physical ID was present.
+## Production checklist
 
-## MVP boundaries
-
-This version intentionally leaves out push/email alerts, Google Calendar cloud sync, and production retention automation for selfies/location. Before a real deployment, define consent and retention rules for minors' photos and location data, then add automatic deletion and school-approved notification providers.
+- Enable leaked-password protection in Supabase Authentication settings.
+- Configure Google and Facebook provider credentials and redirect URLs.
+- Configure Firebase, Edge Function secrets, Vault, and the one-minute dispatcher schedule.
+- Define school-approved consent and retention rules for minors' photos, facial templates, and location evidence.
+- Build Android with JDK 21 and test permissions, barcode scanning, geofencing, deep links, and notifications on physical devices.

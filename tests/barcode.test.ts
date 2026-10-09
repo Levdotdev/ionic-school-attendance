@@ -2,9 +2,7 @@ import { describe, expect, it } from 'vitest'
 
 import {
   BarcodeCaptureError,
-  DEFAULT_SCANNER_AVERAGE_INTERVAL_MS,
   getOneDimensionalScanRegion,
-  isLikelyHardwareScan,
   MAX_STUDENT_BARCODE_LENGTH,
   validateStudentBarcode,
 } from '@/services/barcode'
@@ -31,21 +29,6 @@ describe('student ID barcode validation', () => {
 
     expect(validateStudentBarcode(longestValidBarcode)).toBe(longestValidBarcode)
     expect(validateStudentBarcode('CODE128-00001234\r\n')).toBe('CODE128-00001234')
-  })
-})
-
-describe('keyboard-wedge timing', () => {
-  it('accepts a rapid hardware-like scan', () => {
-    expect(isLikelyHardwareScan(10, 90, 80)).toBe(true)
-  })
-
-  it('allows a realistic pause when the scan remains fast on average', () => {
-    expect(isLikelyHardwareScan(20, 2_700, DEFAULT_SCANNER_AVERAGE_INTERVAL_MS)).toBe(true)
-  })
-
-  it('rejects slow manual typing and a single key', () => {
-    expect(isLikelyHardwareScan(10, 2_000, 80)).toBe(false)
-    expect(isLikelyHardwareScan(1, 0, 80)).toBe(false)
   })
 })
 

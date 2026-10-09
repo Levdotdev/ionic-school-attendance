@@ -5,6 +5,7 @@ dist/
 .env.*.local
 android/.gradle/
 android/app/build/
+android/app/google-services.json
 ios/App/Pods/
 coverage/
 .DS_Store

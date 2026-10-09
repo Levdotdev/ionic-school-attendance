@@ -14,11 +14,13 @@ import '@ionic/vue/css/flex-utils.css'
 import '@ionic/vue/css/display.css'
 import '@/theme/variables.css'
 import '@/theme/app.css'
+import { initializeTheme } from '@/composables/useTheme'
 
 import App from './App.vue'
 import router from './router'
 
 defineCustomElements(window)
+initializeTheme()
 
 const app = createApp(App).use(IonicVue).use(router)
 

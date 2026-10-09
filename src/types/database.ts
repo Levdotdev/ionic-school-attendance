@@ -4,7 +4,6 @@ export type TeacherApprovalStatus = 'pending' | 'approved' | 'rejected'
 export type AttendanceMode =
   | 'teacher_manual'
   | 'self_on_site'
-  | 'self_event'
   | 'self_online'
 
 export type AttendanceStatus = 'present' | 'absent'

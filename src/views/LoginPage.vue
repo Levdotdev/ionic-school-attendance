@@ -3,18 +3,33 @@
     <ion-content :fullscreen="true" class="auth-content">
       <main class="auth-shell">
         <section class="auth-story" aria-labelledby="product-name">
-          <div class="brand-lockup">
-            <div class="brand-mark" aria-hidden="true">
-              <ion-icon :icon="schoolOutline" />
+          <div class="story-top">
+            <div class="brand-lockup">
+              <img
+                src="/minsu-logo.png"
+                alt="Mindoro State University seal"
+                class="brand-logo"
+              />
+              <div>
+                <strong id="product-name">MinSU Attendance</strong>
+                <span>Mindoro State University</span>
+              </div>
             </div>
-            <div>
-              <strong id="product-name">MinSU Attendance</strong>
-              <span>School attendance system</span>
-            </div>
+
+            <ion-button
+              class="theme-button theme-button-on-dark"
+              fill="clear"
+              shape="round"
+              :aria-label="isDark ? 'Use light mode' : 'Use dark mode'"
+              :title="isDark ? 'Use light mode' : 'Use dark mode'"
+              @click="toggleTheme"
+            >
+              <ion-icon slot="icon-only" :icon="isDark ? sunnyOutline : moonOutline" />
+            </ion-button>
           </div>
 
           <div class="story-copy">
-            <p class="eyebrow">Mindoro State University</p>
+            <p class="eyebrow">Attendance and student support</p>
             <h1>Attendance everyone can trust.</h1>
             <p>
               A secure place for teachers to manage classes, students to check in,
@@ -25,7 +40,7 @@
           <ul class="trust-list" aria-label="System features">
             <li>
               <span class="trust-icon"><ion-icon :icon="scanOutline" /></span>
-              <span><strong>Verified student check-ins</strong><small>School ID barcode and fresh photo evidence</small></span>
+              <span><strong>Verified student check-ins</strong><small>Camera-scanned school ID and fresh photo evidence</small></span>
             </li>
             <li>
               <span class="trust-icon"><ion-icon :icon="locationOutline" /></span>
@@ -41,14 +56,29 @@
         </section>
 
         <section class="auth-panel" aria-labelledby="auth-heading">
-          <div class="mobile-brand">
-            <div class="brand-mark" aria-hidden="true">
-              <ion-icon :icon="schoolOutline" />
+          <div class="mobile-top">
+            <div class="mobile-brand">
+              <img
+                src="/minsu-logo.png"
+                alt="Mindoro State University seal"
+                class="brand-logo"
+              />
+              <div>
+                <strong>MinSU Attendance</strong>
+                <span>Mindoro State University</span>
+              </div>
             </div>
-            <div>
-              <strong>MinSU Attendance</strong>
-              <span>School attendance system</span>
-            </div>
+
+            <ion-button
+              class="theme-button"
+              fill="clear"
+              shape="round"
+              :aria-label="isDark ? 'Use light mode' : 'Use dark mode'"
+              :title="isDark ? 'Use light mode' : 'Use dark mode'"
+              @click="toggleTheme"
+            >
+              <ion-icon slot="icon-only" :icon="isDark ? sunnyOutline : moonOutline" />
+            </ion-button>
           </div>
 
           <div class="auth-card">
@@ -62,7 +92,7 @@
               </p>
             </div>
 
-            <ion-segment v-model="mode" :disabled="busy" class="auth-mode" aria-label="Account action">
+            <ion-segment v-model="mode" :disabled="authBusy" class="auth-mode" aria-label="Account action">
               <ion-segment-button value="signin">
                 <ion-label>Sign in</ion-label>
               </ion-segment-button>
@@ -70,6 +100,44 @@
                 <ion-label>Register</ion-label>
               </ion-segment-button>
             </ion-segment>
+
+            <div class="social-auth" aria-label="Social sign in options">
+              <div class="social-grid">
+                <ion-button
+                  class="social-button"
+                  fill="outline"
+                  type="button"
+                  :disabled="authBusy"
+                  @click="signInWithProvider('google')"
+                >
+                  <ion-spinner v-if="socialBusy === 'google'" name="crescent" />
+                  <template v-else>
+                    <ion-icon slot="start" :icon="logoGoogle" aria-hidden="true" />
+                    Google
+                  </template>
+                </ion-button>
+
+                <ion-button
+                  class="social-button"
+                  fill="outline"
+                  type="button"
+                  :disabled="authBusy"
+                  @click="signInWithProvider('facebook')"
+                >
+                  <ion-spinner v-if="socialBusy === 'facebook'" name="crescent" />
+                  <template v-else>
+                    <ion-icon slot="start" :icon="logoFacebook" aria-hidden="true" />
+                    Facebook
+                  </template>
+                </ion-button>
+              </div>
+
+              <p v-if="mode === 'signup'" class="social-role-note">
+                New social accounts start as student accounts. Teachers and parents should register with email below.
+              </p>
+            </div>
+
+            <div class="auth-divider"><span>or continue with email</span></div>
 
             <form class="auth-form" @submit.prevent="submit">
               <template v-if="mode === 'signup'">
@@ -80,7 +148,7 @@
                   label-placement="stacked"
                   fill="outline"
                   autocomplete="name"
-                  :disabled="busy"
+                  :disabled="authBusy"
                   required
                 />
 
@@ -91,7 +159,7 @@
                   label-placement="stacked"
                   fill="outline"
                   interface="popover"
-                  :disabled="busy"
+                  :disabled="authBusy"
                 >
                   <ion-select-option value="student">Student</ion-select-option>
                   <ion-select-option value="teacher">Teacher</ion-select-option>
@@ -112,7 +180,7 @@
                 label-placement="stacked"
                 fill="outline"
                 autocomplete="email"
-                :disabled="busy"
+                :disabled="authBusy"
                 required
               />
 
@@ -124,7 +192,7 @@
                 label-placement="stacked"
                 fill="outline"
                 :autocomplete="mode === 'signin' ? 'current-password' : 'new-password'"
-                :disabled="busy"
+                :disabled="authBusy"
                 required
               />
 
@@ -137,7 +205,7 @@
                 label-placement="stacked"
                 fill="outline"
                 autocomplete="new-password"
-                :disabled="busy"
+                :disabled="authBusy"
                 required
               />
 
@@ -151,7 +219,7 @@
                 <span>{{ message }}</span>
               </div>
 
-              <ion-button expand="block" type="submit" :disabled="busy" class="submit-button">
+              <ion-button expand="block" type="submit" :disabled="authBusy" class="submit-button">
                 <ion-spinner v-if="busy" name="crescent" />
                 <template v-else>
                   <span>{{ mode === 'signin' ? 'Sign in securely' : 'Create account' }}</span>
@@ -191,21 +259,31 @@ import {
   checkmarkCircleOutline,
   locationOutline,
   lockClosedOutline,
+  logoFacebook,
+  logoGoogle,
+  moonOutline,
   scanOutline,
-  schoolOutline,
   shieldCheckmarkOutline,
+  sunnyOutline,
 } from 'ionicons/icons'
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { homePathForRole, useSession, type AppRole } from '@/composables/useSession'
+import { useTheme } from '@/composables/useTheme'
 import { supabase } from '@/lib/supabase'
+import {
+  beginSocialSignIn,
+  initializeNativeOAuthCallback,
+  type SocialProvider,
+} from '@/services/oauth'
 
 type AuthMode = 'signin' | 'signup'
 type RegistrationRole = Extract<AppRole, 'student' | 'teacher' | 'parent'>
 
 const router = useRouter()
 const { initializeSession, refreshProfile, profile } = useSession()
+const { isDark, toggleTheme } = useTheme()
 
 const mode = ref<AuthMode>('signin')
 const registrationRole = ref<RegistrationRole>('student')
@@ -214,8 +292,10 @@ const email = ref('')
 const password = ref('')
 const passwordConfirmation = ref('')
 const busy = ref(false)
+const socialBusy = ref<SocialProvider | null>(null)
 const message = ref('')
 const hasError = ref(false)
+const authBusy = computed(() => busy.value || socialBusy.value !== null)
 
 function validate(): string | null {
   if (!email.value.trim() || !email.value.includes('@')) return 'Enter a valid email address.'
@@ -291,7 +371,30 @@ async function submit() {
   }
 }
 
+async function signInWithProvider(provider: SocialProvider) {
+  socialBusy.value = provider
+  hasError.value = false
+  message.value = ''
+
+  try {
+    await beginSocialSignIn(provider)
+  } catch (error) {
+    hasError.value = true
+    message.value = error instanceof Error
+      ? error.message
+      : `Unable to continue with ${provider === 'google' ? 'Google' : 'Facebook'}. Please try again.`
+  } finally {
+    socialBusy.value = null
+  }
+}
+
+watch(mode, () => {
+  hasError.value = false
+  message.value = ''
+})
+
 onMounted(async () => {
+  await initializeNativeOAuthCallback()
   await initializeSession()
   if (profile.value) await router.replace(homePathForRole(profile.value.role))
 })
@@ -299,13 +402,15 @@ onMounted(async () => {
 
 <style scoped>
 .auth-page {
-  --campus-accent-local: var(--campus-accent, #245f86);
-  --campus-navy-local: var(--campus-navy, #15364e);
-  --campus-bg-local: var(--campus-bg, #eef3f7);
+  --campus-accent-local: var(--campus-green, #087443);
+  --campus-navy-local: var(--campus-navy, #063f2a);
+  --campus-gold-local: var(--campus-gold, #efb71b);
+  --campus-gold-soft-local: var(--campus-gold-soft, #fff3c8);
+  --campus-bg-local: var(--campus-bg, #f5f7f1);
   --campus-surface-local: var(--campus-surface, #ffffff);
-  --campus-text-local: var(--campus-text, #182632);
-  --campus-muted-local: var(--campus-muted, #62727f);
-  --campus-border-local: var(--campus-border, #d9e2e9);
+  --campus-text-local: var(--campus-text, #1d2924);
+  --campus-muted-local: var(--campus-muted, #65736b);
+  --campus-border-local: var(--campus-border, #d8e1d9);
   --campus-success-local: var(--campus-success, #147a50);
   --campus-success-soft-local: var(--campus-success-soft, #e1f4eb);
   --campus-danger-local: var(--campus-danger, #bb3e45);
@@ -315,23 +420,28 @@ onMounted(async () => {
 
 .auth-content {
   --background: var(--campus-bg-local);
+  --overflow: hidden;
 }
 
 .auth-shell {
-  min-height: 100%;
   display: grid;
+  height: 100dvh;
+  overflow: hidden;
   grid-template-columns: minmax(340px, 0.88fr) minmax(500px, 1.12fr);
 }
 
 .auth-story {
   position: relative;
   display: flex;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
   flex-direction: column;
-  overflow: hidden;
+  overflow-x: hidden;
+  overflow-y: auto;
   padding: clamp(32px, 5vw, 68px);
   background: var(--campus-navy-local);
   color: #f4f9fc;
+  scrollbar-width: thin;
 }
 
 .auth-story::before,
@@ -357,26 +467,37 @@ onMounted(async () => {
   bottom: -270px;
 }
 
+.story-top,
+.mobile-top,
 .brand-lockup,
 .mobile-brand {
   display: flex;
   align-items: center;
+}
+
+.story-top,
+.mobile-top {
+  position: relative;
+  z-index: 2;
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.brand-lockup,
+.mobile-brand {
   gap: 12px;
 }
 
-.brand-mark {
-  display: grid;
-  width: 44px;
-  height: 44px;
+.brand-logo {
+  display: block;
+  width: 58px;
+  height: 58px;
   flex: 0 0 auto;
-  place-items: center;
-  border-radius: 14px;
-  background: rgba(255, 255, 255, 0.13);
-  color: #ffffff;
-}
-
-.brand-mark ion-icon {
-  font-size: 23px;
+  border: 3px solid rgba(255, 255, 255, 0.88);
+  border-radius: 50%;
+  background: #ffffff;
+  object-fit: contain;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
 }
 
 .brand-lockup strong,
@@ -388,8 +509,8 @@ onMounted(async () => {
 
 .brand-lockup strong,
 .mobile-brand strong {
-  font-size: 16px;
-  font-weight: 650;
+  font-size: 17px;
+  font-weight: 700;
 }
 
 .brand-lockup span,
@@ -397,6 +518,25 @@ onMounted(async () => {
   margin-top: 2px;
   font-size: 12px;
   opacity: 0.68;
+}
+
+.theme-button {
+  --color: var(--campus-text-local);
+  --padding-start: 0;
+  --padding-end: 0;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--campus-border-local);
+  border-radius: 50%;
+  background: var(--campus-surface-local);
+}
+
+.theme-button-on-dark {
+  --color: #ffffff;
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.08);
 }
 
 .story-copy {
@@ -505,12 +645,15 @@ onMounted(async () => {
 
 .auth-panel {
   display: grid;
-  min-height: 100vh;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
   place-items: center;
   padding: clamp(24px, 6vw, 84px);
+  scrollbar-width: thin;
 }
 
-.mobile-brand {
+.mobile-top {
   display: none;
 }
 
@@ -520,7 +663,7 @@ onMounted(async () => {
   border: 1px solid var(--campus-border-local);
   border-radius: var(--campus-radius, 22px);
   background: var(--campus-surface-local);
-  box-shadow: 0 24px 70px rgba(21, 54, 78, 0.1);
+  box-shadow: 0 24px 70px rgba(6, 63, 42, 0.1);
 }
 
 .auth-heading h2 {
@@ -556,6 +699,73 @@ onMounted(async () => {
   font-weight: 600;
 }
 
+.social-auth {
+  display: grid;
+  gap: 10px;
+}
+
+.social-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.social-button {
+  --background: var(--campus-surface-local);
+  --background-hover: var(--campus-green-soft, #e4f2e9);
+  --border-color: var(--campus-border-local);
+  --border-radius: 12px;
+  --color: var(--campus-text-local);
+  --box-shadow: none;
+  min-height: 46px;
+  margin: 0;
+  font-size: 13px;
+  font-weight: 650;
+  text-transform: none;
+}
+
+.social-button ion-icon {
+  color: var(--campus-accent-local);
+  font-size: 19px;
+}
+
+.social-button ion-spinner {
+  width: 20px;
+  height: 20px;
+  color: var(--campus-accent-local);
+}
+
+.social-role-note {
+  margin: 0;
+  color: var(--campus-muted-local);
+  font-size: 11px;
+  line-height: 1.5;
+  text-align: center;
+}
+
+.auth-divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin: 17px 0;
+  color: var(--campus-muted-local);
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+.auth-divider::before,
+.auth-divider::after {
+  height: 1px;
+  flex: 1;
+  background: var(--campus-border-local);
+  content: '';
+}
+
+.auth-divider span {
+  white-space: nowrap;
+}
+
 .auth-form {
   display: grid;
   gap: 15px;
@@ -584,8 +794,8 @@ onMounted(async () => {
 .role-notice {
   padding: 11px 12px;
   border-radius: 11px;
-  background: #fff3d5;
-  color: #77500d;
+  background: var(--campus-gold-soft-local);
+  color: var(--campus-warning, #77500d);
 }
 
 .role-notice ion-icon,
@@ -613,7 +823,7 @@ onMounted(async () => {
 
 .submit-button {
   --background: var(--campus-accent-local);
-  --background-hover: #1d5276;
+  --background-hover: var(--campus-navy-local);
   --border-radius: 12px;
   --box-shadow: none;
   min-height: 48px;
@@ -630,7 +840,14 @@ onMounted(async () => {
 }
 
 @media (max-width: 900px) {
+  .auth-content {
+    --overflow: auto;
+  }
+
   .auth-shell {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
     grid-template-columns: 1fr;
   }
 
@@ -639,19 +856,24 @@ onMounted(async () => {
   }
 
   .auth-panel {
+    height: auto;
+    min-height: 100%;
+    overflow: visible;
     align-content: start;
     padding: 28px 20px 48px;
   }
 
-  .mobile-brand {
+  .mobile-top {
     display: flex;
     width: min(100%, 510px);
     margin-bottom: 24px;
     color: var(--campus-text-local);
   }
 
-  .mobile-brand .brand-mark {
-    background: var(--campus-navy-local);
+  .mobile-brand .brand-logo {
+    width: 54px;
+    height: 54px;
+    border-color: var(--campus-surface-local);
   }
 
   .auth-card {
@@ -666,7 +888,11 @@ onMounted(async () => {
 
   .auth-card {
     border-radius: 18px;
-    box-shadow: 0 15px 45px rgba(21, 54, 78, 0.08);
+    box-shadow: 0 15px 45px rgba(6, 63, 42, 0.08);
+  }
+
+  .social-grid {
+    grid-template-columns: 1fr;
   }
 }
 
