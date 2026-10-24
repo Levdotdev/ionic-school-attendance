@@ -534,7 +534,7 @@ onMounted(async () => {
   opacity: 0.68;
 }
 
-.theme-button {
+ion-button.theme-button {
   --color: var(--campus-text-local);
   --padding-start: 0;
   --padding-end: 0;
@@ -547,8 +547,8 @@ onMounted(async () => {
   background: var(--campus-surface-local);
 }
 
-.theme-button-on-dark {
-  --color: #ffffff;
+ion-button.theme-button-on-dark {
+  --color: #e2e9e4;
   border-color: rgba(255, 255, 255, 0.16);
   background: rgba(255, 255, 255, 0.08);
 }
