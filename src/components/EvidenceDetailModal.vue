@@ -4,12 +4,12 @@
       <div class="evidence-heading"><div><p>{{ record.class_name || 'Self-check attendance' }}</p><h2>{{ studentName }}</h2><span>{{ record.meeting_title }}</span></div><ion-badge :color="record.attendance_enabled === false ? 'medium' : record.verification_status === 'rejected' || record.status === 'absent' ? 'danger' : 'success'">{{ record.attendance_enabled === false ? 'Meeting not counted' : record.verification_status === 'rejected' ? 'Voided by teacher' : record.status === 'present' ? 'Present' : 'Absent' }}</ion-badge></div>
       <div v-if="loadingPhoto" class="photo-state" role="status"><ion-spinner /><span>Loading protected photo…</span></div>
       <img v-else-if="photoUrl && !photoFailed" :src="photoUrl" :alt="`${studentName}'s attendance photo`" class="evidence-photo" @error="photoFailed = true" />
-      <div v-else class="photo-state"><ion-icon :icon="imageOutline" /><span>{{ record.selfie_path ? 'Photo unavailable. Close and reopen to try again.' : 'No photo was required for this attendance record.' }}</span></div>
+      <div v-else class="photo-state" :class="{ 'is-empty': !record.selfie_path }"><ion-icon :icon="imageOutline" /><span>{{ record.selfie_path ? 'Photo unavailable. Close and reopen to try again.' : record.is_inferred ? 'No attendance check-in was submitted.' : 'No photo was required for this attendance record.' }}</span></div>
       <p v-if="photoError" class="evidence-error" role="alert">{{ photoError }}</p>
       <dl class="evidence-facts">
         <div><dt>Submitted at</dt><dd>{{ formatDate(record.submitted_at || record.created_at) }}</dd></div>
         <div><dt>Meeting time</dt><dd>{{ formatDate(record.meeting_starts_at) }}</dd></div>
-        <div><dt>Location</dt><dd v-if="record.latitude != null && record.longitude != null"><a :href="`https://www.google.com/maps?q=${record.latitude},${record.longitude}`" target="_blank" rel="noopener">{{ record.latitude.toFixed(6) }}, {{ record.longitude.toFixed(6) }} ↗</a></dd><dd v-else>Not required for this check-in</dd></div>
+        <div><dt>Location</dt><dd v-if="record.latitude != null && record.longitude != null"><a :href="`https://www.google.com/maps?q=${record.latitude},${record.longitude}`" target="_blank" rel="noopener">{{ record.latitude.toFixed(6) }}, {{ record.longitude.toFixed(6) }} ↗</a></dd><dd v-else>{{ record.attendance_mode === 'self_online' ? 'Online check-in location is private to the linked parent or guardian.' : 'No submitted location' }}</dd></div>
         <div v-if="record.distance_m != null"><dt>Distance from school</dt><dd>{{ Math.round(record.distance_m) }} meters</dd></div>
       </dl>
       <p v-if="!reviewable && record.review_note" class="teacher-note"><strong>Teacher’s note</strong>{{ record.review_note }}</p>
@@ -38,6 +38,8 @@ export interface EvidenceRecord {
   submitted_at: string | null; created_at?: string; meeting_starts_at?: string; meeting_title?: string; class_name?: string
   review_note?: string | null
   attendance_enabled?: boolean
+  attendance_mode?: string
+  is_inferred?: boolean
 }
 const props = defineProps<{ record: EvidenceRecord | null; studentName: string; reviewable?: boolean; busy?: boolean; actionError?: string }>()
 defineEmits<{ close: []; review: [voided: boolean, note: string] }>()
@@ -47,9 +49,10 @@ const photoFailed = ref(false)
 const photoError = ref('')
 const note = ref('')
 let photoRequest = 0
-watch(() => props.record, async record => {
+watch(() => props.record?.id, () => { note.value = props.record?.review_note || '' }, { immediate: true })
+watch(() => `${props.record?.id ?? ''}:${props.record?.selfie_path ?? ''}`, async () => {
+  const record = props.record
   const request = ++photoRequest
-  note.value = record?.review_note || ''
   photoUrl.value = ''
   photoFailed.value = false
   photoError.value = ''
@@ -69,7 +72,7 @@ watch(() => props.record, async record => {
 }, { immediate: true })
 function formatDate(value?: string | null) {
   const date = value ? new Date(value) : null
-  return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', dateStyle: 'medium', timeStyle: 'short' }).format(date) : 'Not recorded'
+  return date && !Number.isNaN(date.getTime()) ? new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', weekday: 'short', year: 'numeric', month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' }).format(date) : 'Not recorded'
 }
 </script>
 
@@ -81,6 +84,8 @@ function formatDate(value?: string | null) {
 .evidence-photo { display: block; width: 100%; max-height: 420px; object-fit: contain; border: 1px solid var(--campus-border); border-radius: 14px; background: var(--campus-surface-soft); }
 .photo-state { display: grid; place-items: center; gap: 12px; min-height: 180px; padding: 24px; border: 1px dashed var(--campus-border); border-radius: 14px; color: var(--campus-muted); text-align: center; font-size: 13px; }
 .photo-state ion-icon { font-size: 30px; }
+.photo-state.is-empty { min-height: 0; display: flex; justify-content: flex-start; padding: 14px 16px; text-align: left; }
+.photo-state.is-empty ion-icon { font-size: 22px; flex: 0 0 auto; }
 .evidence-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; margin: 24px 0; }
 .evidence-facts div { display: grid; gap: 5px; }
 dt { color: var(--campus-muted); font-size: 12px; } dd { margin: 0; overflow-wrap: anywhere; color: var(--campus-text); font-size: 13px; font-weight: 600; } a { color: var(--campus-accent); }

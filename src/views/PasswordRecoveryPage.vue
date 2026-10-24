@@ -24,7 +24,7 @@ import { IonButton, IonContent, IonInput, IonPage, IonSpinner, onIonViewWillEnte
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { accountPathForProfile, useSession } from '@/composables/useSession'
-import { supabase } from '@/lib/supabase'
+import { authActionError, changeAccountPassword } from '@/services/account'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const router = useRouter()
@@ -47,14 +47,13 @@ async function savePassword() {
   }
   busy.value = true
   try {
-    const { error } = await supabase.auth.updateUser({ password: password.value })
-    if (error) throw error
+    await changeAccountPassword(password.value)
     password.value = ''
     confirmation.value = ''
     saved.value = true
     finishPasswordRecovery()
     message.value = 'Your password has been updated.'
-  } catch (error) { hasError.value = true; message.value = toUserFacingErrorMessage(error, 'Your reset link may have expired. Request a new link from the sign-in page.') }
+  } catch (error) { hasError.value = true; message.value = authActionError(error, 'Your reset link may have expired. Request a new link from the sign-in page.') }
   finally { busy.value = false }
 }
 async function continueToAccount() {

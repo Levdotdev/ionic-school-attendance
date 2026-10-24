@@ -1,19 +1,21 @@
 <template>
   <ion-app>
-    <ion-split-pane content-id="portal-content" when="lg" :disabled="!showPortalMenu">
+    <div class="portal-layout" :class="{ 'has-navigation': showPortalMenu, 'navigation-collapsed': collapsed }">
       <app-menu v-if="showPortalMenu" />
-      <ion-router-outlet id="portal-content" :key="user?.id ?? 'signed-out'" />
-    </ion-split-pane>
+      <section id="portal-content" class="portal-outlet"><ion-router-outlet :key="user?.id ?? 'signed-out'" /></section>
+    </div>
   </ion-app>
 </template>
 
 <script setup lang="ts">
-import { IonApp, IonRouterOutlet, IonSplitPane } from '@ionic/vue'
+import { IonApp, IonRouterOutlet } from '@ionic/vue'
 import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppMenu from '@/components/AppMenu.vue'
 import { useSession } from '@/composables/useSession'
+import { useNavigation } from '@/composables/useNavigation'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { loadStudentTaskData } from '@/services/studentTasks'
 import { isNativeTaskReminders, listenForStudentTaskReminderActions, syncStudentTaskReminders } from '@/services/studentTaskReminders'
 import { initializeNativeOAuthCallback } from '@/services/oauth'
@@ -24,7 +26,9 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { initializeSession, profile, user } = useSession()
+const { initializeSession, profile, user, refreshProfile } = useSession()
+const { collapsed } = useNavigation()
+useRealtimeRefresh({ channel: 'account-profile', onChange: async () => { await refreshProfile() } })
 const showPortalMenu = computed(
   () => Boolean(profile.value?.onboarding_completed_at)
     && /^\/(student|teacher|parent|admin)(\/|$)/.test(route.path)
@@ -88,3 +92,12 @@ onBeforeUnmount(() => {
   void stopTaskActions?.()
 })
 </script>
+
+<style scoped>
+.portal-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; width: 100%; min-height: 0; }
+.portal-outlet { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+@media (min-width: 992px) {
+  .portal-layout.has-navigation { grid-template-columns: 256px minmax(0, 1fr); }
+  .portal-layout.has-navigation.navigation-collapsed { grid-template-columns: 76px minmax(0, 1fr); }
+}
+</style>

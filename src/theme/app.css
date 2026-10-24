@@ -6,6 +6,7 @@ html, body {
 body { font-size: 15px; }
 .ion-page h1 { font-family: var(--campus-heading-font); }
 button, input, select, textarea { font: inherit; }
+input, select, textarea { color: var(--campus-text); accent-color: var(--campus-green); }
 button, a { -webkit-tap-highlight-color: transparent; }
 .page-shell { width: min(100%, 1280px); margin: 0 auto; padding: clamp(20px, 3.4vw, 48px); }
 .campus-page ion-content::part(background) { background: var(--campus-bg); }
@@ -18,16 +19,26 @@ ion-card-title { color: var(--campus-text); font-weight: 650; letter-spacing: -.
 ion-card-subtitle, ion-note { color: var(--campus-muted); }
 ion-button { --border-radius: 10px; --box-shadow: none; min-height: 42px; font-weight: 600; letter-spacing: 0; text-transform: none; }
 ion-button[fill='outline'] { --border-width: 1px; }
+ion-button:not([fill='clear']):not([fill='outline']):not([color]) { --color: var(--campus-on-accent); }
+ion-button[fill='clear']:not([color]), ion-button[fill='outline']:not([color]) { --color: var(--campus-accent); }
 ion-input, ion-select, ion-textarea { --border-radius: 10px !important; --border-color: var(--campus-border) !important; --highlight-color-focused: var(--campus-green) !important; }
 ion-badge { padding: 6px 10px; border-radius: 7px; font-weight: 600; letter-spacing: 0; text-transform: capitalize; }
 ion-spinner { color: var(--campus-green); }
 ion-modal { --background: var(--campus-surface); --border-radius: 18px; --box-shadow: 0 24px 90px rgba(15, 33, 23, .24); --backdrop-opacity: .42; }
 ion-modal ion-toolbar { --background: var(--campus-surface); --color: var(--campus-text); --border-color: var(--campus-border); }
 ion-modal ion-content { --background: var(--campus-surface); }
+ion-popover { --background: var(--campus-surface); --color: var(--campus-text); --box-shadow: 0 16px 50px #0004; }
+ion-item { --color: var(--campus-text); --background: transparent; --border-color: var(--campus-border); }
+ion-alert { --color: var(--campus-text); }
+ion-alert .alert-title, ion-alert .alert-radio-label, ion-alert .alert-checkbox-label { color: var(--campus-text) !important; }
+ion-alert .alert-message { color: var(--campus-muted) !important; }
+:root[data-theme='dark'] ion-input, :root[data-theme='dark'] ion-textarea, :root[data-theme='dark'] ion-select { --background: var(--campus-surface); --color: var(--campus-text); --placeholder-color: var(--campus-muted); }
+:root[data-theme='dark'] ion-button { --background-hover-opacity: .14; }
+button:disabled { cursor: not-allowed; }
 ion-modal ion-title { font-size: 1.05rem; font-weight: 650; letter-spacing: -.02em; }
 ion-alert { --background: var(--campus-surface); --backdrop-opacity: .4; }
 ion-toast { --border-radius: 12px; }
-button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 3px solid rgba(var(--ion-color-primary-rgb), .35); outline-offset: 3px; }
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible { outline: 2px solid var(--campus-focus); outline-offset: 3px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: .01ms !important; transition-duration: .01ms !important; scroll-behavior: auto !important; }
 }

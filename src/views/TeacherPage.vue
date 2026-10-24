@@ -36,7 +36,7 @@
               <span class="status-message-icon" aria-hidden="true">{{ messageKind === 'error' ? '!' : '✓' }}</span>
               <span>{{ message }}</span>
             </div>
-            <ion-button fill="outline" @click="checkApprovalStatus">Check approval status</ion-button>
+            <p class="approval-live-note">This page updates automatically when the administrator reviews your registration.</p>
           </ion-card-content>
         </ion-card>
 
@@ -48,7 +48,7 @@
               <p>{{ sectionMeta.description }}</p>
             </div>
             <div class="week-chip">
-              <span>This school week</span>
+              <span>{{ isCurrentSchoolWeek ? 'This school week' : 'Selected school week' }}</span>
               <strong>{{ displayDate(week.startDate) }} – {{ displayDate(week.endDateInclusive) }}</strong>
             </div>
           </section>
@@ -64,17 +64,22 @@
             <span>{{ message }}</span>
           </div>
 
-          <section v-if="classes.length && activeSection !== 'classes'" class="workspace-switcher" aria-label="Choose class">
+          <section v-if="visibleClasses.length && activeSection !== 'classes'" class="workspace-switcher" aria-label="Choose class">
             <ion-select v-model="selectedClassId" label="Class workspace" label-placement="stacked" fill="outline">
-              <ion-select-option v-for="item in classes" :key="item.id" :value="item.id">{{ item.name }}{{ item.section ? ` · ${item.section}` : '' }}</ion-select-option>
+              <ion-select-option v-for="item in visibleClasses" :key="item.id" :value="item.id">{{ item.name }}{{ item.archived_at ? ' · Archived' : '' }}</ion-select-option>
             </ion-select>
-            <ion-select v-if="meetings.length && activeSection !== 'schedules'" v-model="selectedMeetingId" label="This week’s meeting" label-placement="stacked" fill="outline">
+            <ion-select v-if="meetings.length && activeSection !== 'schedules'" v-model="selectedMeetingId" label="Meeting in selected week" label-placement="stacked" fill="outline">
               <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">{{ meeting.title }} · {{ formatDateTime(meeting.starts_at) }}{{ meeting.attendance_enabled ? '' : ' · Not counted' }}</ion-select-option>
             </ion-select>
           </section>
-          <section v-if="!loadingClasses && !classes.length && activeSection !== 'classes'" class="surface-card no-classes">
+          <section v-if="!loadingClasses && !visibleClasses.length && activeSection !== 'classes'" class="surface-card no-classes">
             <h2>Start with your first class</h2><p>Create a class, share its join code, then add the weekly schedule.</p>
             <ion-button @click="beginClassCreate">Create class</ion-button>
+          </section>
+
+          <section v-if="activeSection === 'schedules'" class="collective-calendar" aria-label="All class schedules">
+            <schedule-calendar :events="calendarEvents" :selected-date="calendarDate" @date-change="changeCalendarDate" @range-change="changeCalendarRange" @select="openCalendarEvent" />
+            <p class="schedule-help">All active classes appear together. Select a meeting to manage attendance, or a weekly occurrence to edit its recurring schedule. Weekly occurrences without a generated meeting are shown as planned.</p>
           </section>
 
           <section v-if="activeSection === 'classes'" class="surface-card class-workspace" aria-labelledby="class-workspace-title">
@@ -82,7 +87,7 @@
               <div>
                 <p class="eyebrow">Class workspace</p>
                 <h2 id="class-workspace-title">My classes</h2>
-                <p>Select a class to manage this week’s attendance and planning.</p>
+                <p>Manage active classes or open an archived class without losing its attendance.</p>
               </div>
               <div class="heading-actions">
                 <ion-spinner v-if="loadingClasses" name="crescent" />
@@ -92,13 +97,17 @@
 
             <div class="class-workspace-grid single-column">
               <div class="class-selection">
-                <ion-note v-if="!loadingClasses && classes.length === 0" class="empty-note">
-                  No classes yet. Create your first class to receive a student join code.
+                <div class="class-filters" role="group" aria-label="Class list">
+                  <button type="button" :class="{ selected: classFilter === 'active' }" :aria-pressed="classFilter === 'active'" @click="classFilter = 'active'">Active <span>{{ activeClasses.length }}</span></button>
+                  <button type="button" :class="{ selected: classFilter === 'archived' }" :aria-pressed="classFilter === 'archived'" @click="classFilter = 'archived'">Archived <span>{{ archivedClasses.length }}</span></button>
+                </div>
+                <ion-note v-if="!loadingClasses && visibleClasses.length === 0" class="empty-note">
+                  {{ classFilter === 'archived' ? 'No archived classes. Archive a finished class to keep its attendance history.' : 'No active classes. Create a class to receive a student join code.' }}
                 </ion-note>
-                <div v-else-if="classes.length" class="select-shell">
+                <div v-else-if="visibleClasses.length" class="select-shell">
                   <ion-select v-model="selectedClassId" label="Open class" label-placement="stacked" fill="outline">
-                    <ion-select-option v-for="item in classes" :key="item.id" :value="item.id">
-                      {{ item.name }}{{ item.section ? ` · ${item.section}` : '' }} ({{ item.join_code }})
+                    <ion-select-option v-for="item in visibleClasses" :key="item.id" :value="item.id">
+                      {{ item.name }} ({{ item.join_code }})
                     </ion-select-option>
                   </ion-select>
                 </div>
@@ -107,7 +116,7 @@
                   <div class="class-avatar" aria-hidden="true">{{ activeClass.name.charAt(0).toUpperCase() }}</div>
                   <div class="class-identity">
                     <strong>{{ activeClass.name }}</strong>
-                    <span>{{ activeClass.section || 'No section specified' }}</span>
+                    <span>{{ activeClass.archived_at ? 'Archived class · attendance preserved' : `${students.length} enrolled students` }}</span>
                   </div>
                   <div class="join-code-block">
                     <span>Student join code</span>
@@ -116,7 +125,8 @@
                 </div>
 
                 <div v-if="activeClass" class="row-actions class-actions">
-                  <ion-button size="small" fill="outline" @click="beginClassEdit(activeClass)">Edit class</ion-button>
+                  <ion-button size="small" fill="outline" :disabled="savingClass || Boolean(activeClass.archived_at)" @click="beginClassEdit(activeClass)">Edit class</ion-button>
+                  <ion-button size="small" fill="outline" :disabled="savingClass" @click="setClassArchived(activeClass, !activeClass.archived_at)">{{ activeClass.archived_at ? 'Restore class' : 'Archive class' }}</ion-button>
                   <ion-button size="small" fill="clear" color="danger" :disabled="savingClass" @click="deleteClass(activeClass)">
                     Delete class
                   </ion-button>
@@ -132,6 +142,7 @@
           </section>
 
           <template v-if="activeClass">
+            <div v-if="activeClass.archived_at" class="archived-notice" role="status">This class is archived. Its saved attendance remains available. Restore the class to resume schedules, check-ins, and reminders.</div>
             <section v-if="activeSection === 'overview'" class="stats-grid" aria-label="Attendance summary">
               <article class="stat-card present-stat">
                 <span class="stat-icon" aria-hidden="true">✓</span>
@@ -152,8 +163,8 @@
             </section>
 
             <section v-if="activeSection === 'overview'" class="overview-grid">
-              <article class="surface-card overview-card"><p class="eyebrow">Your class</p><h2>{{ activeClass.name }}</h2><p>{{ activeClass.section || 'No section specified' }} · {{ students.length }} enrolled students</p><p class="join-code-copy">Join code <strong>{{ activeClass.join_code }}</strong></p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'classes' } })">Manage classes</ion-button></article>
-              <article class="surface-card overview-card"><p class="eyebrow">Weekly plan</p><h2>{{ meetings.length }} meetings this week</h2><p>{{ countedMeetings }} {{ countedMeetings === 1 ? 'meeting counts' : 'meetings count' }} toward attendance. Disable a single meeting when class is cancelled.</p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'schedules' } })">Manage schedules</ion-button></article>
+              <article class="surface-card overview-card"><p class="eyebrow">Your class</p><h2>{{ activeClass.name }}</h2><p>{{ students.length }} enrolled students{{ activeClass.archived_at ? ' · Archived' : '' }}</p><p class="join-code-copy">Join code <strong>{{ activeClass.join_code }}</strong></p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'classes' } })">Manage classes</ion-button></article>
+              <article class="surface-card overview-card"><p class="eyebrow">Weekly plan</p><h2>{{ meetings.length }} meetings in this week</h2><p>{{ countedMeetings }} {{ countedMeetings === 1 ? 'meeting counts' : 'meetings count' }} toward attendance. Disable a single meeting when class is cancelled.</p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'schedules' } })">Manage schedules</ion-button></article>
               <article class="surface-card overview-card"><p class="eyebrow">{{ selectedMeeting ? 'Selected meeting' : 'Attendance' }}</p><h2>{{ selectedMeeting?.title || 'No meeting selected' }}</h2><p>{{ selectedMeeting ? formatDateTime(selectedMeeting.starts_at) : 'Add your weekly schedule to create meetings automatically.' }}</p><ion-button v-if="selectedMeeting" @click="router.push({ path: '/teacher', query: { section: 'attendance' } })">Open attendance</ion-button></article>
             </section>
 
@@ -163,7 +174,7 @@
                   <div>
                     <p class="eyebrow">Current meeting</p>
                     <h2 id="student-attendance-title">Student attendance</h2>
-                    <p v-if="selectedMeeting">{{ formatDateTime(selectedMeeting.starts_at) }} · {{ modeLabel(selectedMeeting.attendance_mode) }}</p>
+                    <p v-if="selectedMeeting">{{ formatDateTime(selectedMeeting.starts_at) }} · {{ modeLabel(selectedMeeting.attendance_mode) }}. Mark missing check-ins manually; open submitted attendance to view its photo or void it.</p>
                     <p v-else>Select a meeting before marking attendance.</p>
                   </div>
                   <span
@@ -176,7 +187,7 @@
                 </div>
 
                 <div v-if="meetings.length" class="meeting-selector select-shell">
-                  <ion-select v-model="selectedMeetingId" label="This week’s meeting" label-placement="stacked" fill="outline">
+                  <ion-select v-model="selectedMeetingId" label="Meeting in selected week" label-placement="stacked" fill="outline">
                     <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">
                       {{ meeting.title }} · {{ formatDateTime(meeting.starts_at) }}
                     </ion-select-option>
@@ -205,10 +216,13 @@
                         {{ attendanceByStudent[student.id].status }}
                       </ion-badge>
                       <small v-if="attendanceByStudent[student.id]?.source === 'self_check'" class="self-check-lock">
-                        Self-check evidence · use Void or Restore below
+                        Self-check submitted {{ formatDateTime(attendanceByStudent[student.id].submitted_at || attendanceByStudent[student.id].created_at) }}
                       </small>
                     </div>
-                    <div class="attendance-buttons" role="group" :aria-label="`Mark attendance for ${student.full_name}`">
+                    <div v-if="attendanceByStudent[student.id]?.source === 'self_check'" class="attendance-buttons evidence-actions">
+                      <ion-button size="small" fill="outline" @click="openEvidence(attendanceByStudent[student.id])">View attendance</ion-button>
+                    </div>
+                    <div v-else class="attendance-buttons" role="group" :aria-label="`Mark attendance for ${student.full_name}`">
                       <ion-button
                         color="success"
                         size="small"
@@ -262,13 +276,13 @@
                       class="full-button"
                       :color="selectedMeeting.attendance_enabled ? 'warning' : 'success'"
                       fill="outline"
-                      :disabled="updatingMeeting"
+                      :disabled="updatingMeeting || Boolean(activeClass.archived_at)"
                       @click="toggleAttendance(selectedMeeting)"
                     >
                       {{ selectedMeeting.attendance_enabled ? 'Do not count this meeting' : 'Count this meeting' }}
                     </ion-button>
                     <div class="row-actions meeting-edit-actions">
-                      <ion-button size="small" fill="outline" :disabled="updatingMeeting" @click="beginMeetingEdit(selectedMeeting)">
+                      <ion-button size="small" fill="outline" :disabled="updatingMeeting || Boolean(activeClass.archived_at)" @click="beginMeetingEdit(selectedMeeting)">
                         Edit meeting
                       </ion-button>
                       <ion-button size="small" fill="clear" color="danger" :disabled="updatingMeeting" @click="deleteMeeting(selectedMeeting)">
@@ -281,7 +295,7 @@
 
                 <section class="surface-card week-overview" aria-labelledby="week-overview-title">
                   <div class="section-heading">
-                    <div><p class="eyebrow">This week</p><h2 id="week-overview-title">Meeting overview</h2></div>
+                    <div><p class="eyebrow">{{ isCurrentSchoolWeek ? 'This week' : 'Selected week' }}</p><h2 id="week-overview-title">Meeting overview</h2></div>
                     <span class="count-bubble">{{ meetings.length }}</span>
                   </div>
                   <div v-if="meetings.length" class="mini-meeting-list">
@@ -307,7 +321,7 @@
             <section v-if="activeSection === 'schedules'" class="planning-section" aria-labelledby="planning-title">
               <div class="planning-heading">
                 <div><p class="eyebrow">Planning & management</p><h2 id="planning-title">Set up your class week</h2></div>
-                <p>Weekly schedules create meetings automatically. Additional meetings are limited to the current week.</p>
+                <p>Weekly schedules create meetings automatically. Manage the selected week’s class and meeting exceptions below.</p>
               </div>
 
               <div class="planning-grid">
@@ -316,7 +330,7 @@
                     <div><p class="eyebrow">Repeats every week</p><h2 id="weekly-schedule-title">Weekly schedule</h2></div>
                     <div class="heading-actions">
                       <span class="count-bubble">{{ schedules.length }}</span>
-                      <ion-button size="small" @click="beginScheduleCreate">Add schedule</ion-button>
+                      <ion-button size="small" :disabled="Boolean(activeClass.archived_at)" @click="beginScheduleCreate">Add schedule</ion-button>
                     </div>
                   </div>
                   <p class="section-description">Each active schedule automatically creates one meeting for this week.</p>
@@ -327,12 +341,13 @@
                       <div class="schedule-copy">
                         <strong>{{ dayLabel(schedule.day_of_week) }} · {{ scheduleDateLabel(schedule.day_of_week) }}</strong>
                         <span>{{ formatTime(schedule.starts_at) }} – {{ formatTime(schedule.ends_at) }}<template v-if="schedule.room"> · {{ schedule.room }}</template></span>
-                        <span>{{ modeLabel(schedule.attendance_mode) }} · Check-in opens {{ schedule.check_in_minutes_before }} min before</span>
+                        <span>{{ modeLabel(schedule.attendance_mode) }}</span>
+                        <span>Check-in {{ scheduleCheckInWindow(schedule) }}</span>
                         <ion-badge v-if="!schedule.is_active" color="medium">Inactive</ion-badge>
                       </div>
                       <div class="item-actions">
-                        <ion-button size="small" fill="clear" @click="beginScheduleEdit(schedule)">Edit</ion-button>
-                        <ion-button size="small" fill="clear" color="danger" @click="deleteSchedule(schedule)">Delete</ion-button>
+                        <ion-button size="small" fill="outline" :disabled="Boolean(activeClass.archived_at)" @click="beginScheduleEdit(schedule)">Edit</ion-button>
+                        <ion-button size="small" fill="outline" color="danger" :disabled="Boolean(activeClass.archived_at)" @click="deleteSchedule(schedule)">Delete</ion-button>
                       </div>
                     </div>
                   </div>
@@ -349,50 +364,17 @@
                   <p class="section-description">Use this for events, online classes, or a meeting outside the regular schedule.</p>
 
                   <div class="meeting-callout">
-                    <span>This meeting appears only in the current school week and can be edited from Attendance.</span>
+                    <span>Create a meeting in the selected school week, then manage it from Attendance or the calendar.</span>
                     <div class="location-note full-row">
                       <span class="location-pin" aria-hidden="true">⌖</span>
-                      <span>Physical self-checks use the protected {{ SCHOOL_RADIUS_M }}-meter school boundary. Online checks do not request location.</span>
+                      <span>On-site checks use the {{ SCHOOL_RADIUS_M }}-meter school boundary. Online check-in locations are shared only with linked parents.</span>
                     </div>
-                    <ion-button @click="beginMeetingCreate">Create meeting</ion-button>
+                    <ion-button :disabled="Boolean(activeClass.archived_at)" @click="beginMeetingCreate">Create meeting</ion-button>
                   </div>
                 </article>
               </div>
             </section>
 
-            <section v-if="activeSection === 'evidence'" class="surface-card evidence-section" aria-labelledby="evidence-title">
-              <div class="section-heading">
-                <div><p class="eyebrow">Student submissions</p><h2 id="evidence-title">Self-check evidence</h2><p>Self-checks count as present automatically. Void only submissions with invalid evidence; a void can be restored.</p></div>
-                <span class="count-bubble review-count">{{ evidenceRows.length }}</span>
-              </div>
-              <div v-if="evidenceRows.length === 0" class="empty-state">
-                <span aria-hidden="true">⌕</span>
-                <div><strong>No self-check evidence</strong><p>Student self-check submissions will appear here.</p></div>
-              </div>
-              <div v-else class="evidence-grid">
-                <article v-for="record in evidenceRows" :key="record.id" class="evidence-card">
-                  <div class="evidence-main">
-                    <img v-if="record.selfie_url" :src="record.selfie_url" :alt="`${studentName(record.student_id)} self-check selfie`" class="selfie" />
-                    <div v-else class="selfie selfie-placeholder" role="img" :aria-label="record.selfie_path ? 'Submitted photo is unavailable' : 'No photo was submitted'">
-                      {{ record.selfie_path ? 'Photo unavailable' : 'No photo' }}
-                    </div>
-                    <div class="evidence-copy">
-                      <div class="evidence-title-row">
-                        <h3>{{ studentName(record.student_id) }}</h3>
-                        <ion-badge :color="verificationColor(record.verification_status)">{{ verificationLabel(record.verification_status) }}</ion-badge>
-                      </div>
-                      <p><strong>Attendance:</strong> {{ record.status }}</p>
-                      <p><strong>Submitted:</strong> {{ formatDateTime(record.submitted_at || record.created_at) }}</p>
-                      <p v-if="record.distance_m != null"><strong>School distance:</strong> {{ Math.round(record.distance_m) }} m</p>
-                      <a v-if="record.latitude != null && record.longitude != null" :href="mapUrl(record.latitude, record.longitude)" target="_blank" rel="noopener">View submitted location</a>
-                    </div>
-                  </div>
-                  <div class="review-buttons" role="group" :aria-label="`Review evidence for ${studentName(record.student_id)}`">
-                    <ion-button size="small" fill="outline" @click="openEvidence(record)">View photo & review</ion-button>
-                  </div>
-                </article>
-              </div>
-            </section>
           </template>
         </template>
       </main>
@@ -404,14 +386,13 @@
         <form class="modal-form" @submit.prevent="saveClass">
           <div class="form-heading">
             <strong>{{ editingClassId ? 'Class details' : 'Create a new class' }}</strong>
-            <span>{{ editingClassId ? 'Update its name or section.' : 'A secure student join code is generated automatically.' }}</span>
+            <span>{{ editingClassId ? 'Update the class name.' : 'A secure student join code is generated automatically.' }}</span>
           </div>
           <div v-if="message && messageKind === 'error'" class="status-message error" role="alert">
             <span class="status-message-icon" aria-hidden="true">!</span>
             <span>{{ message }}</span>
           </div>
           <ion-input v-model="classForm.name" label="Class name" label-placement="stacked" fill="outline" :disabled="savingClass" required />
-          <ion-input v-model="classForm.section" label="Section (optional)" label-placement="stacked" fill="outline" :disabled="savingClass" />
           <ion-button type="submit" expand="block" :disabled="savingClass">
             <ion-spinner v-if="savingClass" name="crescent" />
             <span v-else>{{ editingClassId ? 'Save changes' : 'Create class' }}</span>
@@ -437,11 +418,11 @@
             <ion-select-option value="self_online">Online class self-check</ion-select-option>
           </ion-select>
           <ion-input v-model="scheduleForm.check_in_minutes_before" type="number" min="0" max="120" step="1" label="Open check-in minutes before class" label-placement="stacked" fill="outline" :disabled="savingSchedule" required />
-          <ion-toggle v-model="scheduleForm.is_active" :disabled="savingSchedule">Repeat weekly</ion-toggle>
-          <p class="schedule-help full-row">Changes apply to future weekly occurrences. Use Edit meeting to change a meeting already created this week. Turning off repetition keeps existing meetings and attendance.</p>
+          <ion-input v-model="scheduleForm.check_in_minutes_after_start" type="number" min="1" max="1440" step="1" label="Close check-in minutes after class starts" label-placement="stacked" fill="outline" placeholder="Leave blank for class end" :disabled="savingSchedule" />
+          <p class="schedule-help full-row">Check-in window: {{ scheduleCheckInWindow(scheduleForm) }}. Leave the closing field empty to close at class end. Weekly repetition is automatic. Changes apply to future meetings; edit a meeting to adjust this week’s window.</p>
           <div class="notification-note full-row">
             <strong>Automatic class reminders</strong>
-            <span>Teachers: 5 minutes before and at start time. Students: 2 hours, 1 hour, 30, 15, and 5 minutes before, plus start time.</span>
+            <span>You receive reminders 5 minutes before and at class time. Students choose which reminder times they want for each schedule.</span>
           </div>
           <ion-button class="full-row" type="submit" expand="block" :disabled="savingSchedule">
             <ion-spinner v-if="savingSchedule" name="crescent" />
@@ -462,13 +443,13 @@
             <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
             <ion-select-option value="self_online">Online class self-check</ion-select-option>
           </ion-select>
-          <label class="native-field"><span>Meeting starts</span><input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
-          <label class="native-field"><span>Meeting ends</span><input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
-          <label class="native-field"><span>Check-in opens</span><input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
-          <label class="native-field"><span>Check-in closes</span><input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Meeting starts</span><day-date-input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Meeting ends</span><day-date-input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Check-in opens</span><day-date-input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
+          <label class="native-field"><span>Check-in closes</span><day-date-input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
           <div class="location-note full-row">
             <span class="location-pin" aria-hidden="true">⌖</span>
-            <span>Physical self-checks use the protected {{ SCHOOL_RADIUS_M }}-meter school boundary. Online checks do not request location.</span>
+            <span>On-site checks use the {{ SCHOOL_RADIUS_M }}-meter school boundary. Online check-in locations are shared only with linked parents.</span>
           </div>
           <ion-button class="full-row" type="submit" expand="block" :disabled="savingMeeting">
             <ion-spinner v-if="savingMeeting" name="crescent" />
@@ -480,7 +461,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   IonBadge,
@@ -506,16 +487,19 @@ import {
   onIonViewWillEnter,
 } from '@ionic/vue'
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { supabase } from '@/lib/supabase'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 import PortalHeader from '@/components/PortalHeader.vue'
 import AppModal from '@/components/AppModal.vue'
 import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
+import ScheduleCalendar, { type CalendarEvent } from '@/components/ScheduleCalendar.vue'
+import DayDateInput from '@/components/DayDateInput.vue'
 
 type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
 type VerificationStatus = 'pending' | 'approved' | 'rejected'
-type TeacherSection = 'overview' | 'classes' | 'attendance' | 'schedules' | 'evidence'
+type TeacherSection = 'overview' | 'classes' | 'attendance' | 'schedules'
 
 interface ClassRow {
   id: string
@@ -523,6 +507,7 @@ interface ClassRow {
   join_code: string
   name: string
   section: string | null
+  archived_at?: string | null
   timezone: string
   default_latitude: number | null
   default_longitude: number | null
@@ -540,6 +525,7 @@ interface ScheduleRow {
   is_active: boolean
   attendance_mode: MeetingMode
   check_in_minutes_before: number
+  check_in_minutes_after_start: number | null
 }
 
 interface MeetingRow {
@@ -583,6 +569,12 @@ interface AttendanceRow {
   created_at: string
 }
 
+interface TeacherCalendarEvent extends CalendarEvent {
+  classId: string
+  scheduleId?: string
+  meetingId?: string
+}
+
 const SCHOOL_LATITUDE = 13.387419
 const SCHOOL_LONGITUDE = 121.162494
 const SCHOOL_RADIUS_M = 180
@@ -602,7 +594,14 @@ const router = useRouter()
 const route = useRoute()
 const { initializeSession, refreshProfile, profile, signOut } = useSession()
 const classes = ref<ClassRow[]>([])
+const classFilter = ref<'active' | 'archived'>('active')
+const activeClasses = computed(() => classes.value.filter(item => !item.archived_at))
+const archivedClasses = computed(() => classes.value.filter(item => Boolean(item.archived_at)))
+const visibleClasses = computed(() => classFilter.value === 'archived' ? archivedClasses.value : activeClasses.value)
 const schedules = ref<ScheduleRow[]>([])
+const calendarSchedules = ref<ScheduleRow[]>([])
+const calendarMeetings = ref<MeetingRow[]>([])
+const calendarExceptions = ref<Array<{ schedule_id: string; schedule_week_start: string }>>([])
 const meetings = ref<MeetingRow[]>([])
 const students = ref<StudentRow[]>([])
 const attendanceRecords = ref<AttendanceRow[]>([])
@@ -632,12 +631,16 @@ const signingOut = ref(false)
 const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
 
-const week = currentManilaWeek()
-const meetingInputMin = `${week.startDate}T00:00`
-const meetingInputMax = `${week.endDateInclusive}T23:59`
+const week = reactive(currentManilaWeek())
+const calendarDate = ref(dateKeyInManila(new Date()))
+const calendarRange = ref({ start: week.startDate, end: dateKeyInManila(new Date(week.endIso)) })
+const isCurrentSchoolWeek = computed(() => week.startDate === currentManilaWeek().startDate)
+const meetingInputMin = computed(() => `${week.startDate}T00:00`)
+const meetingInputMax = computed(() => `${week.endDateInclusive}T23:59`)
+let calendarRequest = 0
 
-const classForm = reactive({ name: '', section: '' })
-const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '', attendance_mode: 'teacher_manual' as MeetingMode, check_in_minutes_before: 15 as number | string, is_active: true })
+const classForm = reactive({ name: '' })
+const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '', attendance_mode: 'teacher_manual' as MeetingMode, check_in_minutes_before: 15 as number | string, check_in_minutes_after_start: '' as number | string, is_active: true })
 const meetingForm = reactive({
   title: '',
   mode: 'teacher_manual' as MeetingMode,
@@ -648,6 +651,27 @@ const meetingForm = reactive({
 })
 
 const activeClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value) ?? null)
+const calendarEvents = computed<TeacherCalendarEvent[]>(() => {
+  const classMap = new Map(activeClasses.value.map(item => [item.id, item]))
+  const events: TeacherCalendarEvent[] = []
+  const actualOccurrences = new Set<string>()
+  const excludedOccurrences = new Set(calendarExceptions.value.map(exception => `${exception.schedule_id}:${exception.schedule_week_start}`))
+  for (const meeting of calendarMeetings.value) {
+    const schoolClass = classMap.get(meeting.class_id)
+    if (!schoolClass) continue
+    if (meeting.schedule_id) actualOccurrences.add(`${meeting.schedule_id}:${dateKeyInManila(new Date(meeting.starts_at))}`)
+    events.push({ id: `meeting:${meeting.id}`, title: meeting.title, start: meeting.starts_at, end: meeting.ends_at, kind: 'meeting', className: schoolClass.name, status: meeting.attendance_enabled ? 'active' : 'not_counted', subtext: modeLabel(meeting.attendance_mode), classId: meeting.class_id, meetingId: meeting.id })
+  }
+  for (let day = calendarRange.value.start; day < calendarRange.value.end; day = addCalendarDays(day, 1)) {
+    const dayOfWeek = new Date(`${day}T00:00:00Z`).getUTCDay()
+    for (const schedule of calendarSchedules.value) {
+      const schoolClass = classMap.get(schedule.class_id)
+      if (!schoolClass || !schedule.is_active || schedule.day_of_week !== dayOfWeek || actualOccurrences.has(`${schedule.id}:${day}`) || excludedOccurrences.has(`${schedule.id}:${currentManilaWeek(new Date(`${day}T12:00:00+08:00`)).startDate}`)) continue
+      events.push({ id: `weekly:${schedule.id}:${day}`, title: schoolClass.name, start: manilaInputToIso(`${day}T${schedule.starts_at.slice(0, 5)}`), end: manilaInputToIso(`${day}T${schedule.ends_at.slice(0, 5)}`), kind: 'weekly', className: schoolClass.name, status: 'planned', subtext: schedule.room ? `${schedule.room} · Planned` : 'Planned weekly class', classId: schoolClass.id, scheduleId: schedule.id })
+    }
+  }
+  return events.sort((a, b) => a.start.localeCompare(b.start))
+})
 const selectedMeeting = computed(() => meetings.value.find((item) => item.id === selectedMeetingId.value) ?? null)
 const attendanceByStudent = computed<Record<string, AttendanceRow>>(() =>
   Object.fromEntries(attendanceRecords.value.map((record) => [record.student_id, record])),
@@ -668,7 +692,7 @@ const voidedEvidenceCount = computed(
   () => evidenceRows.value.filter((record) => record.verification_status === 'rejected').length,
 )
 const canMarkAttendance = computed(
-  () => Boolean(!loadingDetails.value && !loadingAttendance.value && selectedMeeting.value?.attendance_enabled && selectedMeeting.value.attendance_mode === 'teacher_manual'),
+  () => Boolean(!activeClass.value?.archived_at && !loadingDetails.value && !loadingAttendance.value && selectedMeeting.value?.attendance_enabled),
 )
 const teacherApproved = computed(
   () => profile.value?.role === 'teacher' && profile.value.teacher_approval_status === 'approved',
@@ -680,39 +704,45 @@ const teacherApprovalNote = computed(() => profile.value?.teacher_approval_note?
 const currentWeekLabel = computed(() => `This week: ${displayDate(week.startDate)} to ${displayDate(week.endDateInclusive)}`)
 const activeSection = computed<TeacherSection>(() => {
   const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
-  return value === 'classes' || value === 'attendance' || value === 'schedules' || value === 'evidence'
-    ? value
-    : 'overview'
+  if (value === 'evidence') return 'attendance'
+  return value === 'classes' || value === 'attendance' || value === 'schedules' ? value : 'overview'
 })
 const sectionMeta = computed(() => {
   const sections: Record<TeacherSection, { eyebrow: string; title: string; description: string }> = {
     overview: {
     eyebrow: 'Teacher dashboard',
     title: `Welcome back, ${profile.value?.full_name || 'Teacher'}`,
-    description: 'A quick view of attendance for the selected class and current school week.',
+    description: 'A quick view of attendance for the selected class and school week.',
     },
     classes: {
     eyebrow: 'Class management',
     title: 'Classes and enrollment codes',
-    description: 'Create a class, update its section, or open a class workspace.',
+    description: 'Create, rename, or archive a class and manage its enrollment code.',
     },
     attendance: {
     eyebrow: 'Attendance',
-    title: 'Record this week’s attendance',
-    description: 'Choose a meeting and mark students present or absent.',
+    title: 'Class attendance',
+    description: 'Mark students present or absent, view submitted photos, and review self-check attendance.',
     },
     schedules: {
     eyebrow: 'Weekly planning',
     title: 'Schedules and meetings',
-    description: 'Manage the repeating class schedule and this week’s meeting exceptions.',
-    },
-    evidence: {
-    eyebrow: 'Student self-checks',
-    title: 'Attendance evidence',
-    description: 'Review accepted submissions and void only evidence that is invalid.',
+    description: 'See every class together and manage recurring schedules or individual meeting exceptions.',
     },
   }
   return sections[activeSection.value]
+})
+
+watch(classFilter, () => {
+  if (!visibleClasses.value.some(item => item.id === selectedClassId.value)) {
+    selectedClassId.value = visibleClasses.value[0]?.id ?? ''
+  }
+})
+
+useRealtimeRefresh({
+  channel: 'teacher-workspace',
+  enabled: () => profile.value?.role === 'teacher' && !approvalLoading.value,
+  onChange: refreshTeacherWorkspace,
 })
 
 watch(selectedClassId, async (classId) => {
@@ -772,21 +802,100 @@ async function currentUserId() {
   return data.user.id
 }
 
-async function loadClasses() {
-  loadingClasses.value = true
+async function refreshTeacherWorkspace() {
+  const currentProfile = await refreshProfile()
+  if (currentProfile?.role !== 'teacher' || currentProfile.teacher_approval_status !== 'approved') return
+  const previousClassId = selectedClassId.value
+  await loadClasses(true)
+  if (previousClassId && selectedClassId.value === previousClassId) await loadClassDetails(previousClassId, { generate: false, silent: true })
+}
+
+function dateKeyInManila(date: Date) {
+  const parts = datePartsInManila(date)
+  return `${parts.year}-${String(parts.month).padStart(2, '0')}-${String(parts.day).padStart(2, '0')}`
+}
+
+function addCalendarDays(day: string, amount: number) {
+  const date = new Date(`${day}T00:00:00Z`)
+  date.setUTCDate(date.getUTCDate() + amount)
+  return dateKey(date)
+}
+
+function changeCalendarRange(range: { start: string; end: string }) {
+  calendarRange.value = range
+  void loadCalendar()
+}
+
+async function changeCalendarDate(day: string) {
+  calendarDate.value = day
+  const nextWeek = currentManilaWeek(new Date(`${day}T12:00:00+08:00`))
+  if (week.startDate === nextWeek.startDate) return
+  Object.assign(week, nextWeek)
+  if (selectedClassId.value) await loadClassDetails(selectedClassId.value, { generate: isCurrentSchoolWeek.value, silent: true })
+}
+
+async function loadCalendar() {
+  const request = ++calendarRequest
+  const classIds = activeClasses.value.map(item => item.id)
+  if (!classIds.length) {
+    calendarSchedules.value = []
+    calendarMeetings.value = []
+    calendarExceptions.value = []
+    return
+  }
+  const range = calendarRange.value
+  try {
+    const [scheduleResult, meetingResult, exceptionResult] = await Promise.all([
+      supabase.from('class_schedules').select('*').in('class_id', classIds),
+      supabase.from('meetings').select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m').in('class_id', classIds).gte('starts_at', `${range.start}T00:00:00+08:00`).lt('starts_at', `${range.end}T00:00:00+08:00`).order('starts_at'),
+      supabase.rpc('visible_schedule_meeting_exceptions', { p_start: range.start, p_end: range.end }),
+    ])
+    if (request !== calendarRequest) return
+    if (scheduleResult.error) throw scheduleResult.error
+    if (meetingResult.error) throw meetingResult.error
+    if (exceptionResult.error) throw exceptionResult.error
+    calendarSchedules.value = ((scheduleResult.data ?? []) as ScheduleRow[]).filter(schedule => classIds.includes(schedule.class_id))
+    calendarMeetings.value = ((meetingResult.data ?? []) as MeetingRow[]).filter(meeting => classIds.includes(meeting.class_id))
+    calendarExceptions.value = Array.isArray(exceptionResult.data) ? exceptionResult.data : []
+  } catch (error) {
+    if (request === calendarRequest) showError(error)
+  }
+}
+
+async function openCalendarEvent(event: CalendarEvent) {
+  const selected = calendarEvents.value.find(item => item.id === event.id)
+  if (!selected) return
+  classFilter.value = 'active'
+  calendarDate.value = dateKeyInManila(new Date(selected.start))
+  Object.assign(week, currentManilaWeek(new Date(selected.start)))
+  selectedClassId.value = selected.classId
+  await nextTick()
+  await loadClassDetails(selected.classId, { generate: isCurrentSchoolWeek.value })
+  if (selected.meetingId) {
+    selectedMeetingId.value = selected.meetingId
+    await router.push({ path: '/teacher', query: { section: 'attendance' } })
+  } else if (selected.scheduleId) {
+    const schedule = schedules.value.find(item => item.id === selected.scheduleId)
+    if (schedule) beginScheduleEdit(schedule)
+  }
+}
+
+async function loadClasses(silent = false) {
+  if (!silent) loadingClasses.value = true
   try {
     const teacherId = await currentUserId()
     const { data, error } = await supabase
       .from('classes')
-      .select('id,teacher_id,join_code,name,section,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
+      .select('id,teacher_id,join_code,name,section,archived_at,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
       .eq('teacher_id', teacherId)
       .order('created_at', { ascending: false })
     if (error) throw error
 
     classes.value = (data ?? []) as ClassRow[]
-    if (!classes.value.some((item) => item.id === selectedClassId.value)) {
-      selectedClassId.value = classes.value[0]?.id ?? ''
+    if (!visibleClasses.value.some((item) => item.id === selectedClassId.value)) {
+      selectedClassId.value = visibleClasses.value[0]?.id ?? ''
     }
+    await loadCalendar()
   } catch (error) {
     showError(error)
   } finally {
@@ -807,11 +916,10 @@ async function saveClass() {
         .from('classes')
         .update({
           name,
-          section: classForm.section.trim() || null,
           timezone: MANILA_TIME_ZONE,
         })
         .eq('id', editingClassId.value)
-        .select('id,teacher_id,join_code,name,section,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
+        .select('id,teacher_id,join_code,name,section,archived_at,timezone,default_latitude,default_longitude,default_radius_m,default_max_accuracy_m')
         .single()
       if (error) throw error
       const index = classes.value.findIndex((item) => item.id === data.id)
@@ -823,11 +931,12 @@ async function saveClass() {
 
     const { data, error } = await supabase.rpc('create_class', {
       p_name: name,
-      p_section: classForm.section.trim() || null,
+      p_section: null,
       p_timezone: MANILA_TIME_ZONE,
     })
     if (error) throw error
     const created = (Array.isArray(data) ? data[0] : data) as ClassRow | null
+    classFilter.value = 'active'
     await loadClasses()
     if (created?.id) selectedClassId.value = created.id
     saved = true
@@ -854,7 +963,6 @@ function beginClassCreate() {
 function beginClassEdit(item: ClassRow) {
   editingClassId.value = item.id
   classForm.name = item.name
-  classForm.section = item.section ?? ''
   clearMessage()
   classModalOpen.value = true
 }
@@ -867,7 +975,32 @@ function cancelClassEdit() {
 
 function resetClassForm() {
   classForm.name = ''
-  classForm.section = ''
+}
+
+async function setClassArchived(item: ClassRow, archived: boolean) {
+  const confirmed = await confirmAction({
+    header: archived ? 'Archive class?' : 'Restore class?',
+    message: archived
+      ? 'Attendance and enrollment history stay saved. New check-ins, generated meetings, and reminders stop until you restore the class.'
+      : 'The class becomes active again and resumes weekly meetings, check-ins, and reminders.',
+    confirmText: archived ? 'Archive class' : 'Restore class',
+  })
+  if (!confirmed) return
+  savingClass.value = true
+  clearMessage()
+  try {
+    const { error } = await supabase.rpc('set_class_archived', { p_class_id: item.id, p_archived: archived })
+    if (error) throw error
+    item.archived_at = archived ? new Date().toISOString() : null
+    classFilter.value = archived ? 'archived' : 'active'
+    selectedClassId.value = item.id
+    await loadClasses(true)
+    showSuccess(archived ? 'Class archived. Its attendance history is preserved.' : 'Class restored.')
+  } catch (error) {
+    showError(error)
+  } finally {
+    savingClass.value = false
+  }
 }
 
 async function deleteClass(item: ClassRow) {
@@ -885,7 +1018,7 @@ async function deleteClass(item: ClassRow) {
     if (error) throw error
     if (editingClassId.value === item.id) cancelClassEdit()
     classes.value = classes.value.filter((entry) => entry.id !== item.id)
-    selectedClassId.value = classes.value[0]?.id ?? ''
+    selectedClassId.value = visibleClasses.value[0]?.id ?? ''
     showSuccess('Class deleted.')
   } catch (error) {
     showError(error)
@@ -894,14 +1027,16 @@ async function deleteClass(item: ClassRow) {
   }
 }
 
-async function loadClassDetails(classId: string) {
+async function loadClassDetails(classId: string, options: { generate?: boolean; silent?: boolean } = {}) {
   const request = ++classDetailsRequest
   const isCurrent = () => request === classDetailsRequest && classId === selectedClassId.value
-  loadingDetails.value = true
+  if (!options.silent) loadingDetails.value = true
   try {
-    const { error: ensureError } = await supabase.rpc('ensure_current_week_meetings', { p_class_id: classId })
-    if (!isCurrent()) return
-    if (ensureError) throw ensureError
+    if (options.generate !== false && isCurrentSchoolWeek.value && !activeClass.value?.archived_at) {
+      const { error: ensureError } = await supabase.rpc('ensure_current_week_meetings', { p_class_id: classId })
+      if (!isCurrent()) return
+      if (ensureError) throw ensureError
+    }
 
     const [scheduleResult, meetingResult, enrollmentResult] = await Promise.all([
       supabase
@@ -924,7 +1059,7 @@ async function loadClassDetails(classId: string) {
     if (!isCurrent()) return
 
     schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[])
-      .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_before: schedule.check_in_minutes_before ?? 15 }))
+      .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_before: schedule.check_in_minutes_before ?? 15, check_in_minutes_after_start: schedule.check_in_minutes_after_start ?? null }))
       .sort((a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at))
     meetings.value = (meetingResult.data ?? []) as MeetingRow[]
     students.value = enrolledStudents
@@ -933,13 +1068,14 @@ async function loadClassDetails(classId: string) {
     const selectionStillExists = meetings.value.some((item) => item.id === previousMeetingId)
     selectedMeetingId.value = selectionStillExists ? previousMeetingId : meetings.value[0]?.id ?? ''
     if (selectedMeetingId.value && selectedMeetingId.value === previousMeetingId) {
-      await loadAttendance(selectedMeetingId.value)
+      await loadAttendance(selectedMeetingId.value, options.silent)
     } else if (!selectedMeetingId.value) {
       attendanceRecords.value = []
     }
+    await loadCalendar()
   } catch (error) {
     if (!isCurrent()) return
-    clearClassDetails()
+    if (!options.silent) clearClassDetails()
     showError(error)
   } finally {
     if (isCurrent()) loadingDetails.value = false
@@ -979,15 +1115,19 @@ async function saveSchedule() {
     if (scheduleForm.ends_at <= scheduleForm.starts_at) throw new Error('Schedule end must be after its start.')
     const checkInMinutes = Number(scheduleForm.check_in_minutes_before)
     if (!Number.isInteger(checkInMinutes) || checkInMinutes < 0 || checkInMinutes > 120) throw new Error('Check-in must open between 0 and 120 whole minutes before class.')
+    const closesAtClassEnd = String(scheduleForm.check_in_minutes_after_start).trim() === ''
+    const checkInClosingMinutes = closesAtClassEnd ? null : Number(scheduleForm.check_in_minutes_after_start)
+    if (checkInClosingMinutes != null && (!Number.isInteger(checkInClosingMinutes) || checkInClosingMinutes < 1 || checkInClosingMinutes > 1440)) throw new Error('Check-in must close between 1 and 1440 whole minutes after class starts, or leave it empty to close at class end.')
     const payload = {
       class_id: selectedClassId.value,
       day_of_week: scheduleForm.day_of_week,
       starts_at: scheduleForm.starts_at,
       ends_at: scheduleForm.ends_at,
       room: scheduleForm.room.trim() || null,
-      is_active: scheduleForm.is_active,
+      is_active: true,
       attendance_mode: scheduleForm.attendance_mode,
       check_in_minutes_before: checkInMinutes,
+      check_in_minutes_after_start: checkInClosingMinutes,
     }
 
     const wasEditing = Boolean(editingScheduleId.value)
@@ -1006,8 +1146,8 @@ async function saveSchedule() {
     saved = true
     showSuccess(
       wasEditing
-        ? "Weekly schedule updated. This week's generated meeting keeps any teacher edits already made."
-        : "Weekly schedule added and this week's meeting created.",
+        ? 'Weekly schedule updated. Existing meeting changes are preserved.'
+        : 'Weekly schedule added. Meetings are generated automatically during their school week.',
     )
   } catch (error) {
     showError(error)
@@ -1032,6 +1172,7 @@ function beginScheduleEdit(schedule: ScheduleRow) {
   scheduleForm.room = schedule.room ?? ''
   scheduleForm.attendance_mode = schedule.attendance_mode
   scheduleForm.check_in_minutes_before = schedule.check_in_minutes_before
+  scheduleForm.check_in_minutes_after_start = schedule.check_in_minutes_after_start ?? ''
   scheduleForm.is_active = schedule.is_active
   clearMessage()
   scheduleModalOpen.value = true
@@ -1050,6 +1191,7 @@ function resetScheduleForm() {
   scheduleForm.room = ''
   scheduleForm.attendance_mode = 'teacher_manual'
   scheduleForm.check_in_minutes_before = 15
+  scheduleForm.check_in_minutes_after_start = ''
   scheduleForm.is_active = true
 }
 
@@ -1071,6 +1213,7 @@ async function deleteSchedule(schedule: ScheduleRow) {
     meetings.value.forEach((meeting) => {
       if (meeting.schedule_id === schedule.id) meeting.schedule_id = null
     })
+    await loadCalendar()
     showSuccess('Weekly schedule deleted.')
   } catch (error) {
     showError(error)
@@ -1122,6 +1265,7 @@ async function saveMeeting() {
         selectedMeetingId.value = meetings.value[0]?.id ?? ''
       }
       saved = true
+      await loadCalendar()
       showSuccess(
         updated.starts_at >= week.startIso && updated.starts_at < week.endIso
           ? 'Meeting updated.'
@@ -1148,6 +1292,7 @@ async function saveMeeting() {
       showSuccess('Meeting created. It will appear in the list during its scheduled week.')
     }
     saved = true
+    await loadCalendar()
   } catch (error) {
     showError(error)
   } finally {
@@ -1184,10 +1329,10 @@ function cancelMeetingEdit() {
 function resetMeetingForm() {
   meetingForm.title = ''
   meetingForm.mode = 'teacher_manual'
-  meetingForm.starts_at = ''
-  meetingForm.ends_at = ''
-  meetingForm.check_in_opens_at = ''
-  meetingForm.check_in_closes_at = ''
+  meetingForm.starts_at = `${calendarDate.value}T08:00`
+  meetingForm.ends_at = `${calendarDate.value}T09:00`
+  meetingForm.check_in_opens_at = `${calendarDate.value}T07:45`
+  meetingForm.check_in_closes_at = `${calendarDate.value}T09:00`
 }
 
 async function toggleAttendance(meeting: MeetingRow) {
@@ -1207,6 +1352,7 @@ async function toggleAttendance(meeting: MeetingRow) {
     const { error } = await supabase.from('meetings').update({ attendance_enabled: attendanceEnabled }).eq('id', meeting.id)
     if (error) throw error
     meeting.attendance_enabled = attendanceEnabled
+    await loadCalendar()
     showSuccess(attendanceEnabled ? 'Attendance will count for this meeting.' : 'Attendance will not count for this meeting.')
   } catch (error) {
     showError(error)
@@ -1231,6 +1377,7 @@ async function deleteMeeting(meeting: MeetingRow) {
     if (editingMeetingId.value === meeting.id) cancelMeetingEdit()
     meetings.value = meetings.value.filter((item) => item.id !== meeting.id)
     selectedMeetingId.value = meetings.value[0]?.id ?? ''
+    await loadCalendar()
     showSuccess('Meeting deleted.')
   } catch (error) {
     showError(error)
@@ -1239,11 +1386,13 @@ async function deleteMeeting(meeting: MeetingRow) {
   }
 }
 
-async function loadAttendance(meetingId: string) {
+async function loadAttendance(meetingId: string, silent = false) {
   const request = ++attendanceRequest
   const isCurrent = () => request === attendanceRequest && meetingId === selectedMeetingId.value
-  attendanceRecords.value = []
-  loadingAttendance.value = true
+  if (!silent) {
+    attendanceRecords.value = []
+    loadingAttendance.value = true
+  }
   try {
     const { data, error } = await supabase
       .from('attendance_records')
@@ -1252,19 +1401,21 @@ async function loadAttendance(meetingId: string) {
     if (error) throw error
     if (!isCurrent()) return
     const records = (data ?? []) as AttendanceRow[]
-    await Promise.all(
-      records.map(async (record) => {
-        if (!record.selfie_path) return
-        const { data: signed, error: signedError } = await supabase.storage
-          .from('attendance-selfies')
-          .createSignedUrl(record.selfie_path, 900)
-        if (!signedError) record.selfie_url = signed?.signedUrl ?? null
-      }),
-    )
-    if (isCurrent()) attendanceRecords.value = records
+    if (isCurrent()) {
+      attendanceRecords.value = records
+      if (selectedEvidence.value) {
+        const current = records.find(record => record.id === selectedEvidence.value?.id)
+        if (current) {
+          const { review_note: _note, ...updates } = current
+          const onlineLocation = selectedMeeting.value?.attendance_mode === 'self_online' ? { latitude: null, longitude: null, distance_m: null } : {}
+          Object.assign(selectedEvidence.value, updates, onlineLocation)
+        }
+        else closeEvidence()
+      }
+    }
   } catch (error) {
     if (!isCurrent()) return
-    attendanceRecords.value = []
+    if (!silent) attendanceRecords.value = []
     showError(error)
   } finally {
     if (isCurrent()) loadingAttendance.value = false
@@ -1315,7 +1466,8 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
 
 function openEvidence(record: AttendanceRow) {
   evidenceError.value = ''
-  selectedEvidence.value = { ...record, meeting_title: selectedMeeting.value?.title, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled }
+  const onlineLocation = selectedMeeting.value?.attendance_mode === 'self_online' ? { latitude: null, longitude: null, distance_m: null } : {}
+  selectedEvidence.value = { ...record, ...onlineLocation, meeting_title: selectedMeeting.value?.title, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled }
 }
 
 function closeEvidence() {
@@ -1350,14 +1502,14 @@ function validateMeetingWindow() {
   const closes = new Date(manilaInputToIso(meetingForm.check_in_closes_at)).getTime()
   if ([starts, ends, opens, closes].some(Number.isNaN)) throw new Error('Complete all meeting date and time fields.')
   if (starts < new Date(week.startIso).getTime() || starts >= new Date(week.endIso).getTime()) {
-    throw new Error('Meetings created here must start within the current school week.')
+    throw new Error('The meeting must start within the selected school week. Select another week in the calendar to create it there.')
   }
   if (ends <= starts) throw new Error('Meeting end must be after its start.')
   if (closes <= opens) throw new Error('Check-in close must be after check-in open.')
 }
 
-function currentManilaWeek() {
-  const parts = datePartsInManila(new Date())
+function currentManilaWeek(anchor = new Date()) {
+  const parts = datePartsInManila(anchor)
   const today = new Date(Date.UTC(parts.year, parts.month - 1, parts.day))
   const daysSinceMonday = (today.getUTCDay() + 6) % 7
   const monday = new Date(today)
@@ -1400,6 +1552,24 @@ function scheduleDateLabel(dayOfWeek: number) {
   const date = new Date(`${week.startDate}T00:00:00Z`)
   date.setUTCDate(date.getUTCDate() + offsetFromMonday)
   return displayDate(dateKey(date))
+}
+
+function scheduleCheckInWindow(schedule: { starts_at: string; ends_at: string; check_in_minutes_before: number | string; check_in_minutes_after_start: number | string | null }) {
+  const [hour, minute] = schedule.starts_at.split(':').map(Number)
+  const startMinutes = hour * 60 + minute
+  if (!Number.isFinite(startMinutes)) return 'opens before class and closes at class end'
+  const openingMinutes = Number(schedule.check_in_minutes_before)
+  const closingOffset = schedule.check_in_minutes_after_start
+  const closesAtClassEnd = closingOffset == null || String(closingOffset).trim() === ''
+  const formatMinutes = (minutes: number) => {
+    const dayOffset = Math.floor(minutes / 1440)
+    const normalized = ((minutes % 1440) + 1440) % 1440
+    const clock = `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`
+    return `${formatTime(clock)}${dayOffset < 0 ? ' (previous day)' : dayOffset > 0 ? ' (next day)' : ''}`
+  }
+  const opening = Number.isFinite(openingMinutes) ? formatMinutes(startMinutes - openingMinutes) : 'before class'
+  const closing = closesAtClassEnd ? formatTime(schedule.ends_at) : formatMinutes(startMinutes + Number(closingOffset))
+  return `${opening} – ${closing}`
 }
 
 function displayDate(dateValue: string) {
@@ -1813,6 +1983,13 @@ async function logout() {
 .join-code-block { display: grid; gap: 3px; margin-left: auto; padding-left: 16px; text-align: right; }
 .join-code-block strong { color: var(--page-blue); font-size: 1.06rem; letter-spacing: 0.12em; }
 .class-actions { justify-content: flex-start; }
+.class-filters { display: flex; flex-wrap: wrap; gap: 8px; }
+.class-filters button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 9px 16px; border: 1px solid var(--page-border); border-radius: 11px; background: var(--page-surface); color: var(--page-muted); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
+.class-filters button.selected { border-color: var(--page-blue); background: var(--page-blue-soft); color: var(--page-blue); }
+.class-filters button:focus-visible { outline: 3px solid var(--page-blue); outline-offset: 2px; }
+.class-filters button span { display: grid; place-items: center; min-width: 22px; height: 22px; border-radius: 7px; background: var(--page-surface-soft); font-size: 12px; }
+.archived-notice { margin: 0 0 18px; padding: 14px 16px; border: 1px solid var(--page-border); border-radius: 12px; background: var(--page-surface-soft); color: var(--page-muted); font-size: 13px; line-height: 1.6; }
+.approval-live-note { margin: 20px 0 0; color: var(--page-muted); font-size: 13px; line-height: 1.6; }
 .location-note {
   display: flex;
   align-items: flex-start;
@@ -1848,8 +2025,8 @@ async function logout() {
   border-radius: 50%;
   font-size: 0.75rem;
 }
-.status-message.success .status-message-icon { background: var(--page-success); color: #fff; }
-.status-message.error .status-message-icon { background: var(--page-danger); color: #fff; }
+.status-message.success .status-message-icon { background: var(--page-success); color: var(--campus-on-accent); }
+.status-message.error .status-message-icon { background: var(--page-danger); color: var(--ion-color-danger-contrast); }
 .approval-message { margin: 18px 0; text-align: left; }
 
 .stats-grid {
@@ -1931,6 +2108,9 @@ async function logout() {
 .review-buttons,
 .badge-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .attendance-buttons { justify-content: flex-end; }
+.self-check-lock { color: var(--page-muted); font-size: 11px; line-height: 1.6; }
+.attendance-buttons ion-button { margin: 0; min-width: 90px; }
+.row-actions ion-button, .item-actions ion-button { margin: 0; }
 .attendance-side { display: grid; gap: 18px; }
 .meeting-control .section-heading,
 .week-overview .section-heading { margin-bottom: 16px; }
@@ -1976,6 +2156,7 @@ async function logout() {
 .mini-meeting small { color: var(--page-muted); font-size: 0.7rem; }
 
 .planning-section { margin-top: 34px; }
+.collective-calendar { display: grid; gap: 12px; margin: 0 0 24px; }
 .planning-heading { align-items: flex-end; margin-bottom: 17px; }
 .planning-heading > p { max-width: 520px; text-align: right; }
 .planning-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; align-items: start; }
@@ -2143,12 +2324,17 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
   .meeting-form-card,
   .evidence-section { padding: 17px; }
   .student-row { grid-template-columns: auto minmax(0, 1fr); }
-  .attendance-buttons { grid-column: 1 / -1; justify-content: stretch; }
-  .attendance-buttons ion-button { flex: 1 1 120px; }
+  .attendance-buttons { display: grid; grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; justify-content: stretch; gap: 8px; }
+  .attendance-buttons.evidence-actions { grid-template-columns: 1fr; }
+  .attendance-buttons ion-button { width: 100%; min-width: 0; min-height: 42px; font-size: 12px; }
+  .class-actions, .meeting-edit-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .class-actions ion-button:last-child { grid-column: 1 / -1; }
+  .class-actions ion-button, .meeting-edit-actions ion-button { width: 100%; min-width: 0; }
   .form-grid { grid-template-columns: 1fr; }
   .full-row { grid-column: auto; }
   .schedule-row { grid-template-columns: 40px minmax(0, 1fr); }
-  .schedule-row .item-actions { grid-column: 1 / -1; justify-content: flex-end; }
+  .schedule-row .item-actions { display: grid; grid-column: 2; grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; gap: 8px; }
+  .schedule-row .item-actions ion-button { width: 100%; min-height: 40px; }
 }
 
 @media (max-width: 450px) {

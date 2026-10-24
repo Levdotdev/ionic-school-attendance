@@ -1,8 +1,6 @@
 <template>
   <ion-page class="tasks-page">
-    <portal-header portal="Student planner" :busy="loggingOut" @logout="logout">
-      <ion-button :disabled="refreshing" aria-label="Refresh tasks" @click="loadData"><ion-icon slot="icon-only" :icon="refreshOutline" /></ion-button>
-    </portal-header>
+    <portal-header portal="Student planner" :busy="loggingOut" @logout="logout" />
     <ion-content class="tasks-content">
       <div v-if="loading" class="loading-state" role="status"><ion-spinner name="crescent" /><span>Loading your tasks…</span></div>
       <main v-else class="tasks-shell">
@@ -64,8 +62,8 @@
 </template>
 
 <script setup lang="ts">
-import { IonButton, IonContent, IonIcon, IonPage, IonSpinner, IonToast, onIonViewWillEnter } from '@ionic/vue'
-import { addOutline, alertCircleOutline, arrowUndoOutline, calendarOutline, checkboxOutline, checkmarkCircleOutline, closeOutline, documentTextOutline, gridOutline, leafOutline, notificationsOutline, pricetagsOutline, refreshOutline, reorderThreeOutline, searchOutline, timeOutline, trashOutline } from 'ionicons/icons'
+import { IonContent, IonIcon, IonPage, IonSpinner, IonToast, onIonViewWillEnter } from '@ionic/vue'
+import { addOutline, alertCircleOutline, arrowUndoOutline, calendarOutline, checkboxOutline, checkmarkCircleOutline, closeOutline, documentTextOutline, gridOutline, leafOutline, notificationsOutline, pricetagsOutline, reorderThreeOutline, searchOutline, timeOutline, trashOutline } from 'ionicons/icons'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import PortalHeader from '@/components/PortalHeader.vue'
@@ -75,6 +73,7 @@ import TaskDialog from '@/components/student-tasks/TaskDialog.vue'
 import TaskEditorModal from '@/components/student-tasks/TaskEditorModal.vue'
 import TaskTile from '@/components/student-tasks/TaskTile.vue'
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { completeStudentTaskOccurrence, createStudentTask, createStudentTaskCategory, deleteStudentTask, deleteStudentTaskCategory, loadStudentTaskData, reopenStudentTaskOccurrence, reorderStudentTasks, skipStudentTaskOccurrence, stopStudentTaskRepeats, updateStudentTask, updateStudentTaskCategory } from '@/services/studentTasks'
 import { isNativeTaskReminders, syncStudentTaskReminders, type TaskReminderState } from '@/services/studentTaskReminders'
 import type { DisplayedStudentTask, StudentCourse, StudentTask, StudentTaskCategory, StudentTaskDisplayStatus, StudentTaskPriority, StudentTaskRecurrence, StudentTaskSaveInput } from '@/types/studentTasks'
@@ -103,6 +102,14 @@ const enablingReminders = ref(false), reminderMessage = ref('')
 const categoryError = ref('')
 const reminderState = ref<TaskReminderState>({ native: isNativeTaskReminders(), granted: false, scheduled: 0, deferred: 0 })
 let taskLoadGeneration = 0
+let appliedCourseQuery: string | null = null
+function applyCourseQuery() {
+  const courseId = typeof route.query.course === 'string' ? route.query.course : null
+  if (courseId === appliedCourseQuery) return
+  if (courseId && !courses.value.some(course => course.id === courseId)) return
+  groupFilter.value = courseId ? `course:${courseId}` : 'all'
+  appliedCourseQuery = courseId
+}
 const statuses: { value: StatusFilter; label: string }[] = [{ value: 'all', label: 'All' }, { value: 'pending', label: 'Pending' }, { value: 'overdue', label: 'Missed' }, { value: 'completed', label: 'Completed' }]
 const listTasks = computed(() => {
   const end = new Date(now.value); end.setDate(end.getDate() + 30)
@@ -182,7 +189,7 @@ async function loadData() {
   try {
     const data = await loadStudentTaskData(studentId)
     if (generation !== taskLoadGeneration || user.value?.id !== studentId || profile.value?.role !== 'student') return
-    tasks.value = data.tasks; courses.value = data.courses; categories.value = data.categories; void syncReminders()
+    tasks.value = data.tasks; courses.value = data.courses; categories.value = data.categories; applyCourseQuery(); void syncReminders()
   }
   catch (error) { if (generation === taskLoadGeneration) pageMessage.value = toUserFacingErrorMessage(error, 'Your tasks could not be loaded. Please try again.') }
   finally { if (generation === taskLoadGeneration) refreshing.value = false }
@@ -262,14 +269,16 @@ function openNotificationTask() {
   } else openEditTask(task)
 }
 watch(() => [route.query.task, route.query.due], openNotificationTask)
+watch(() => route.query.course, applyCourseQuery)
 watch(() => user.value?.id, (studentId, previous) => {
   if (studentId === previous) return
-  taskLoadGeneration++; refreshing.value = false
+  taskLoadGeneration++; refreshing.value = false; appliedCourseQuery = null
   tasks.value = []; courses.value = []; categories.value = []
   taskModalOpen.value = false; categoryModalOpen.value = false; confirmation.value = null
   editingTask.value = null; pageMessage.value = ''; saveError.value = ''; categoryError.value = ''
 })
 onMounted(async () => { try { await initializeSession(); if (user.value && profile.value?.role === 'student') { await loadData(); openNotificationTask() } } finally { loading.value = false } })
+useRealtimeRefresh({ channel: 'student-tasks', onChange: loadData, enabled: () => profile.value?.role === 'student' && !loading.value })
 onIonViewWillEnter(() => { if (!loading.value) void loadData() })
 const clock = setInterval(() => { now.value = new Date(); void syncReminders() }, 60_000)
 onBeforeUnmount(() => clearInterval(clock))

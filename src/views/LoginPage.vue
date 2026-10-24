@@ -203,17 +203,15 @@
           </div>
         </section>
       </main>
-      <ion-modal class="recovery-modal" :is-open="recoveryOpen" :backdrop-dismiss="!recoveryBusy" @didDismiss="recoveryOpen = false">
-        <ion-header class="ion-no-border"><ion-toolbar><ion-title>Reset your password</ion-title><ion-buttons slot="end"><ion-button :disabled="recoveryBusy" @click="recoveryOpen = false">Close</ion-button></ion-buttons></ion-toolbar></ion-header>
-        <ion-content class="recovery-content">
+      <app-modal :open="recoveryOpen" title="Reset your password" :busy="recoveryBusy" @close="recoveryOpen = false">
           <form class="recovery-form" @submit.prevent="sendRecoveryEmail">
-            <p>Enter the email linked to your account. We’ll send a secure link to choose a new password.</p>
+            <p>Enter your account email to request a password reset link. Check your inbox and spam folder, then open the link on this device and browser.</p>
             <ion-input v-model="recoveryEmail" type="email" label="Email address" label-placement="stacked" fill="outline" autocomplete="email" :disabled="recoveryBusy" required />
             <p v-if="recoveryMessage" :class="recoveryError ? 'recovery-error' : 'recovery-success'" :role="recoveryError ? 'alert' : 'status'">{{ recoveryMessage }}</p>
-            <ion-button type="submit" expand="block" :disabled="recoveryBusy"><ion-spinner v-if="recoveryBusy" name="crescent" /><template v-else>Send reset link</template></ion-button>
+            <ion-button type="submit" expand="block" :disabled="recoveryBusy || recoveryCooldown > 0"><ion-spinner v-if="recoveryBusy" name="crescent" /><template v-else>{{ recoveryCooldown ? `Request again in ${recoveryCooldown}s` : 'Send reset link' }}</template></ion-button>
+            <p v-if="recoveryRequested" class="recovery-help">No email? Confirm the address, check spam, or use your linked Google/Facebook sign-in. If it still does not arrive, contact the administrator to check email delivery.</p>
           </form>
-        </ion-content>
-      </ion-modal>
+      </app-modal>
     </ion-content>
   </ion-page>
 </template>
@@ -221,19 +219,14 @@
 <script setup lang="ts">
 import {
   IonButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonIcon,
   IonInput,
   IonLabel,
-  IonModal,
   IonPage,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -248,7 +241,7 @@ import {
   shieldCheckmarkOutline,
   sunnyOutline,
 } from 'ionicons/icons'
-import { computed, onMounted, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
 import { accountPathForProfile, useSession } from '@/composables/useSession'
@@ -261,6 +254,8 @@ import {
   type SocialProvider,
 } from '@/services/oauth'
 import { toUserFacingErrorMessage } from '@/utils/errors'
+import AppModal from '@/components/AppModal.vue'
+import { authActionError, requestPasswordReset } from '@/services/account'
 
 type AuthMode = 'signin' | 'signup'
 
@@ -282,6 +277,10 @@ const recoveryEmail = ref('')
 const recoveryBusy = ref(false)
 const recoveryMessage = ref('')
 const recoveryError = ref(false)
+const recoveryCooldown = ref(0)
+const recoveryRequested = ref(false)
+let recoveryTimer: ReturnType<typeof setInterval> | undefined
+onBeforeUnmount(() => { clearInterval(recoveryTimer) })
 
 function openRecovery() {
   recoveryEmail.value = email.value
@@ -291,17 +290,20 @@ function openRecovery() {
 }
 
 async function sendRecoveryEmail() {
-  if (recoveryBusy.value) return
+  if (recoveryBusy.value || recoveryCooldown.value > 0) return
   recoveryBusy.value = true
   recoveryMessage.value = ''
   recoveryError.value = false
   try {
-    const { error } = await supabase.auth.resetPasswordForEmail(recoveryEmail.value.trim().toLowerCase(), { redirectTo: oauthRedirectUrl() })
-    if (error) throw error
-    recoveryMessage.value = 'If an account uses this email, a reset link will arrive shortly. Open it on this device and browser to continue.'
+    await requestPasswordReset(recoveryEmail.value)
+    recoveryRequested.value = true
+    recoveryMessage.value = 'Reset request accepted. If an account uses this email, check its inbox and spam folder for the link. This response does not confirm email delivery.'
+    recoveryCooldown.value = 60
+    clearInterval(recoveryTimer)
+    recoveryTimer = setInterval(() => { recoveryCooldown.value--; if (recoveryCooldown.value <= 0) clearInterval(recoveryTimer) }, 1000)
   } catch (error) {
     recoveryError.value = true
-    recoveryMessage.value = toUserFacingErrorMessage(error, 'The reset email could not be sent. Please try again.')
+    recoveryMessage.value = authActionError(error, 'The reset email could not be requested. Please try again.')
   } finally { recoveryBusy.value = false }
 }
 
@@ -897,13 +899,12 @@ onMounted(async () => {
 }
 
 .forgot-password { justify-self: end; margin: -8px 0 0; --padding-start: 0; --padding-end: 0; text-transform: none; font-size: 12px; }
-.recovery-modal { --width: 480px; --height: 380px; --border-radius: 20px; }
-.recovery-content { --background: var(--campus-surface); }
-.recovery-form { display: grid; gap: 20px; padding: 24px; }
+.recovery-form { display: grid; gap: 18px; }
 .recovery-form > p { margin: 0; color: var(--campus-muted); font-size: 14px; line-height: 1.6; }
 .recovery-form .recovery-error { color: var(--campus-danger); }
 .recovery-form .recovery-success { color: var(--campus-green); }
 .recovery-form ion-button { min-height: 44px; margin: 0; text-transform: none; }
+.recovery-form .recovery-help { font-size: 12px; }
 
 @media (max-width: 900px) {
   .auth-content {

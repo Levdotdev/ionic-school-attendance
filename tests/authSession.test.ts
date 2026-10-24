@@ -107,4 +107,21 @@ describe('session recovery and cleanup', () => {
     await expect(signOut()).resolves.toBeUndefined()
     expect(mocks.signOut).toHaveBeenCalledOnce()
   })
+
+  it('clears stale local credentials when the server session is already gone', async () => {
+    mocks.signOut.mockResolvedValueOnce({ error: { code: 'session_not_found', status: 403 } }).mockResolvedValueOnce({ error: null })
+    const { initializeSession, signOut, useSession } = await import('@/composables/useSession')
+    await initializeSession(); await signOut()
+    expect(mocks.signOut).toHaveBeenNthCalledWith(2, { scope: 'local' })
+    expect(useSession().session.value).toBeNull()
+  })
+
+  it('does not claim sign-out succeeded when a real network error remains', async () => {
+    const error = { code: 'unexpected_failure', message: 'Network failure' }
+    mocks.signOut.mockResolvedValueOnce({ error })
+    const { initializeSession, signOut, useSession } = await import('@/composables/useSession')
+    await initializeSession()
+    await expect(signOut()).rejects.toEqual(error)
+    expect(useSession().session.value).not.toBeNull()
+  })
 })

@@ -12,14 +12,9 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">Parent and guardian portal</p>
-            <h1>{{ activeSection === 'history' ? 'Attendance history' : 'Your child’s attendance' }}</h1>
-            <p>{{ activeSection === 'history' ? 'Review past classes, status changes, photos, and submitted locations.' : 'See the latest attendance status and submitted evidence.' }}</p>
+            <h1>{{ activeSection === 'history' ? 'Attendance history' : activeSection === 'schedule' ? 'This week’s classes' : 'Your child’s attendance' }}</h1>
+            <p>{{ activeSection === 'history' ? 'Every past class, including present, absent, and meetings that were not counted.' : activeSection === 'schedule' ? 'Your linked children’s current weekly schedule, updated automatically.' : 'Follow attendance and view check-in photos and locations.' }}</p>
           </div>
-          <ion-button class="secondary-button" fill="outline" :disabled="refreshing" @click="loadDashboard">
-            <ion-spinner v-if="refreshing" name="crescent" />
-            <ion-icon v-else slot="start" :icon="refreshOutline" aria-hidden="true" />
-            <span>Refresh</span>
-          </ion-button>
         </header>
 
         <div v-if="message" class="page-message" role="alert">
@@ -54,7 +49,13 @@
               <span class="linked-badge"><ion-icon :icon="linkOutline" /> Family access</span>
             </header>
 
-            <template v-if="dashboard.latest">
+            <section v-if="activeSection === 'overview' || activeSection === 'schedule'" class="weekly-schedule-card">
+              <div class="section-title"><div><p class="eyebrow">Current week · {{ weekLabel }}</p><h3>Weekly schedule</h3></div><span class="record-count">{{ dashboard.schedule.length }} meetings</span></div>
+              <div v-if="dashboard.schedule.length" class="weekly-schedule-list"><article v-for="meeting in dashboard.schedule" :key="meeting.id" class="weekly-meeting"><span class="weekly-day">{{ weekday(meeting.starts_at) }}</span><div><strong>{{ meeting.class_name }}</strong><span>{{ meeting.title }}</span><small>{{ formatDateTime(meeting.starts_at) }} – {{ formatTime(meeting.ends_at) }}</small></div><span class="attendance-pill" :class="meeting.attendance_enabled ? 'is-present' : 'is-not-counted'">{{ meeting.attendance_enabled ? 'Scheduled' : 'Not counted' }}</span></article></div>
+              <p v-else class="weekly-empty">No classes scheduled for this week.</p>
+            </section>
+
+            <template v-if="dashboard.latest && activeSection !== 'schedule'">
               <div v-if="activeSection === 'overview'" class="latest-grid">
                 <section
                   class="status-card"
@@ -85,7 +86,7 @@
                 >
                   <div class="section-title">
                     <div>
-                      <p class="eyebrow">Submitted evidence</p>
+                      <p class="eyebrow">Attendance details</p>
                       <h3 :id="`evidence-heading-${dashboard.student.id}`">Check-in details</h3>
                     </div>
                     <ion-button size="small" fill="outline" @click="openEvidence(dashboard.latest, dashboard.student.full_name)">View details</ion-button>
@@ -97,6 +98,7 @@
                         v-if="dashboard.latest.selfie_url"
                         :src="dashboard.latest.selfie_url"
                         :alt="`${dashboard.student.full_name}'s latest attendance check-in`"
+                        loading="lazy"
                       />
                       <div
                         v-else
@@ -140,7 +142,7 @@
 
                       <div v-else class="detail-row">
                         <span class="detail-icon"><ion-icon :icon="locationOutline" /></span>
-                        <span><small>Location</small><strong>Not required for this check-in</strong></span>
+                        <span><small>Location</small><strong>{{ dashboard.latest.attendance_mode === 'self_online' ? 'No location was saved for this record' : 'No submitted location' }}</strong></span>
                       </div>
                     </div>
                   </div>
@@ -151,37 +153,29 @@
                 <div class="section-title history-title">
                   <div>
                     <p class="eyebrow">Attendance history</p>
-                    <h3 :id="`history-${dashboard.student.id}`">Recent records</h3>
+                    <h3 :id="`history-${dashboard.student.id}`">All past meetings</h3>
                   </div>
                   <span class="record-count">{{ dashboard.records.length }} {{ dashboard.records.length === 1 ? 'record' : 'records' }}</span>
                 </div>
 
                 <div class="history-list">
                   <article v-for="record in dashboard.records" :key="record.id" class="history-row">
-                    <img
-                      v-if="record.selfie_url"
-                      :src="record.selfie_url"
-                      :alt="`${dashboard.student.full_name}'s attendance check-in`"
-                      class="history-photo"
-                      loading="lazy"
-                    />
                     <span
-                      v-else
                       class="history-photo is-placeholder"
-                      :class="{ 'is-unavailable': record.selfie_path }"
                       role="img"
-                      :aria-label="record.selfie_path ? 'Check-in photo could not be loaded' : 'No photo was required'"
-                      :title="record.selfie_path ? 'Check-in photo could not be loaded' : 'No photo was required'"
+                      :aria-label="record.selfie_path ? 'Attendance photo available in Details' : 'No photo was required'"
+                      :title="record.selfie_path ? 'Open Details to view the attendance photo' : 'No photo was required'"
                     >
-                      <ion-icon :icon="record.selfie_path ? alertCircleOutline : imageOutline" aria-hidden="true" />
+                      <ion-icon :icon="imageOutline" aria-hidden="true" />
                     </span>
 
                     <div class="history-copy">
                       <strong>{{ record.class_name }}</strong>
                       <span>{{ record.meeting_title }}</span>
                       <small>{{ formatDateTime(record.meeting_starts_at) }}</small>
-                      <small v-if="record.selfie_path && !record.selfie_url" class="photo-state">
-                        Check-in photo unavailable
+                      <small v-if="record.is_inferred">No check-in was recorded before the meeting ended.</small>
+                      <small v-if="record.selfie_path" class="photo-available">
+                        Photo available in Details
                       </small>
                     </div>
 
@@ -191,7 +185,7 @@
                         {{ attendanceLabel(record) }}
                       </span>
                       <small class="history-verification" :class="verificationClass(record.verification_status)">
-                        {{ verificationLabel(record.verification_status) }}
+                        {{ verificationLabel(record.verification_status, record.is_inferred) }}
                       </small>
                       <a
                         v-if="record.latitude != null && record.longitude != null"
@@ -208,11 +202,11 @@
               </section>
             </template>
 
-            <section v-else class="student-empty">
+            <section v-else-if="activeSection !== 'schedule'" class="student-empty">
               <div class="empty-icon" aria-hidden="true"><ion-icon :icon="calendarOutline" /></div>
               <div>
                 <h3>No attendance records yet</h3>
-                <p>This student’s completed attendance check-ins will appear here.</p>
+                <p>Present and absent attendance will appear here after meetings take place.</p>
               </div>
             </section>
           </article>
@@ -226,15 +220,10 @@
 <script setup lang="ts">
 import {
   IonButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonIcon,
-  IonMenuButton,
   IonPage,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
   onIonViewWillEnter,
 } from '@ionic/vue'
 import {
@@ -249,16 +238,17 @@ import {
   logOutOutline,
   openOutline,
   peopleOutline,
-  refreshOutline,
   schoolOutline,
   shieldCheckmarkOutline,
   timeOutline,
 } from 'ionicons/icons'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { supabase } from '@/lib/supabase'
+import { loadAttendanceHistory, loadParentOnlineLocations } from '@/services/attendanceHistory'
 import PortalHeader from '@/components/PortalHeader.vue'
 import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
 import { toUserFacingErrorMessage } from '@/utils/errors'
@@ -271,6 +261,8 @@ interface StudentRow {
 
 interface AttendanceDisplayRow {
   id: string
+  attendance_id: string | null
+  meeting_id: string
   student_id: string
   status: 'present' | 'absent'
   verification_status: 'pending' | 'approved' | 'rejected' | null
@@ -279,13 +271,16 @@ interface AttendanceDisplayRow {
   distance_m: number | null
   selfie_path: string | null
   selfie_url: string | null
-  submitted_at: string
+  submitted_at: string | null
   meeting_title: string
   meeting_starts_at: string
   class_name: string
   review_note: string | null
   attendance_enabled: boolean
+  attendance_mode: string
+  is_inferred: boolean
 }
+interface WeeklyMeeting { id: string; student_id: string; class_id: string; title: string; class_name: string; starts_at: string; ends_at: string; attendance_enabled: boolean }
 
 const router = useRouter()
 const route = useRoute()
@@ -295,17 +290,35 @@ const refreshing = ref(false)
 const signingOut = ref(false)
 const students = ref<StudentRow[]>([])
 const attendance = ref<AttendanceDisplayRow[]>([])
+const weeklyMeetings = ref<WeeklyMeeting[]>([])
 const message = ref('')
 const selectedEvidence = ref<AttendanceDisplayRow | null>(null)
 const selectedStudentName = ref('')
-const activeSection = computed(() => route.query.section === 'history' ? 'history' : 'overview')
+const activeSection = computed(() => route.query.section === 'history' ? 'history' : route.query.section === 'schedule' ? 'schedule' : 'overview')
+const weekLabel = ref('')
 
 const studentDashboards = computed(() => students.value.map((student) => {
   const records = attendance.value.filter((record) => record.student_id === student.id)
-  return { student, records, latest: records[0] ?? null }
+  return { student, records, latest: records[0] ?? null, schedule: weeklyMeetings.value.filter(meeting => meeting.student_id === student.id) }
 }))
 
+let dashboardRequest = 0
+const photoCache = new Map<string, { url: string; expires: number }>()
+async function latestPhoto(path: string, isCurrent: () => boolean): Promise<string | null> {
+  const cached = photoCache.get(path)
+  if (cached && cached.expires > Date.now()) return cached.url
+  const signed = await supabase.storage.from('attendance-selfies').createSignedUrl(path, 900)
+  if (!isCurrent() || signed.error || !signed.data?.signedUrl) return null
+  const url = signed.data.signedUrl
+  photoCache.set(path, { url, expires: Date.now() + 14 * 60_000 })
+  for (const [key, value] of photoCache) if (value.expires <= Date.now()) photoCache.delete(key)
+  return url
+}
 async function loadDashboard() {
+  const request = ++dashboardRequest
+  const parentId = profile.value?.id
+  if (!parentId || profile.value?.role !== 'parent') return
+  const isCurrent = () => request === dashboardRequest && profile.value?.id === parentId && profile.value?.role === 'parent'
   refreshing.value = true
   message.value = ''
 
@@ -313,14 +326,17 @@ async function loadDashboard() {
     const { data: links, error: linksError } = await supabase
       .from('guardian_links')
       .select('student_id')
-      .eq('parent_id', profile.value?.id ?? '')
+      .eq('parent_id', parentId)
       .order('created_at')
     if (linksError) throw linksError
+    if (!isCurrent()) return
 
     const studentIds = (links ?? []).map((link) => link.student_id)
     if (!studentIds.length) {
       students.value = []
       attendance.value = []
+      weeklyMeetings.value = []
+      selectedEvidence.value = null
       return
     }
 
@@ -329,81 +345,56 @@ async function loadDashboard() {
       .select('id,full_name,email')
       .in('id', studentIds)
     if (profilesError) throw profilesError
+    if (!isCurrent()) return
+    const week = currentWeek()
+    const results = await Promise.all(studentIds.map(async studentId => {
+      const [history, locations, enrollments] = await Promise.all([
+        loadAttendanceHistory<AttendanceDisplayRow>(studentId, isCurrent),
+        loadParentOnlineLocations<{ attendance_id: string; latitude: number; longitude: number }>(studentId, isCurrent),
+        supabase.from('class_enrollments').select('class_id,class:classes(id,name,archived_at)').eq('student_id', studentId).eq('is_active', true),
+      ])
+      if (!isCurrent()) return { records: [], schedule: [] }
+      if (enrollments.error) throw enrollments.error
+      const locationById = new Map<string, { latitude: number; longitude: number }>(locations.map(location => [location.attendance_id, location]))
+      const records = history.map(record => {
+        const location = record.attendance_id ? locationById.get(record.attendance_id) : null
+        return { ...record, latitude: location?.latitude ?? record.latitude, longitude: location?.longitude ?? record.longitude, selfie_url: null as string | null }
+      })
+      if (activeSection.value === 'overview' && records[0]?.selfie_path) records[0].selfie_url = await latestPhoto(records[0].selfie_path, isCurrent)
+      if (!isCurrent()) return { records: [], schedule: [] }
+      const classRows = (enrollments.data ?? []) as unknown as Array<{ class_id: string; class: { id: string; name: string; archived_at?: string | null } | Array<{ id: string; name: string; archived_at?: string | null }> | null }>
+      const courses = classRows.flatMap(row => Array.isArray(row.class) ? row.class : row.class ? [row.class] : []).filter(course => !course.archived_at)
+      let schedule: WeeklyMeeting[] = []
+      if (courses.length) {
+        const meetings = await supabase.from('meetings').select('id,class_id,title,starts_at,ends_at,attendance_enabled').in('class_id', courses.map(course => course.id)).gte('meeting_date', week.start).lte('meeting_date', week.end).order('starts_at')
+        if (meetings.error) throw meetings.error
+        const names = new Map(courses.map(course => [course.id, course.name]))
+        schedule = (meetings.data ?? []).map(meeting => ({ ...meeting, student_id: studentId, class_name: names.get(meeting.class_id) ?? 'Class' })) as WeeklyMeeting[]
+      }
+      return { records, schedule }
+    }))
+    if (!isCurrent()) return
     students.value = (profiles ?? []) as StudentRow[]
-
-    const { data: records, error: recordsError } = await supabase
-      .from('attendance_records')
-      .select(
-        'id,meeting_id,student_id,status,verification_status,latitude,longitude,distance_m,selfie_path,submitted_at,created_at,review_note',
-      )
-      .in('student_id', studentIds)
-      .order('submitted_at', { ascending: false })
-    if (recordsError) throw recordsError
-
-    const selfieUrlByRecordId = new Map<string, string>()
-    await Promise.all(
-      (records ?? []).map(async (record) => {
-        if (!record.selfie_path) return
-
-        const { data: signed, error: signedError } = await supabase.storage
-          .from('attendance-selfies')
-          .createSignedUrl(record.selfie_path, 900)
-        if (!signedError && signed?.signedUrl) selfieUrlByRecordId.set(record.id, signed.signedUrl)
-      }),
-    )
-
-    const meetingIds = [...new Set((records ?? []).map((record) => record.meeting_id))]
-    if (!meetingIds.length) {
-      attendance.value = []
-      return
-    }
-
-    const { data: meetings, error: meetingsError } = await supabase
-      .from('meetings')
-      .select('id,class_id,title,starts_at,attendance_enabled')
-      .in('id', meetingIds)
-    if (meetingsError) throw meetingsError
-
-    const classIds = [...new Set((meetings ?? []).map((meeting) => meeting.class_id))]
-    const { data: classes, error: classesError } = await supabase
-      .from('classes')
-      .select('id,name')
-      .in('id', classIds)
-    if (classesError) throw classesError
-
-    const meetingById = new Map((meetings ?? []).map((meeting) => [meeting.id, meeting]))
-    const classById = new Map((classes ?? []).map((schoolClass) => [schoolClass.id, schoolClass]))
-
-    attendance.value = (records ?? []).flatMap((record) => {
-      const meeting = meetingById.get(record.meeting_id)
-      const schoolClass = meeting ? classById.get(meeting.class_id) : null
-      if (!meeting || !schoolClass) return []
-      return [{
-        id: record.id,
-        student_id: record.student_id,
-        status: record.status,
-        verification_status: record.verification_status,
-        latitude: record.latitude,
-        longitude: record.longitude,
-        distance_m: record.distance_m,
-        selfie_path: record.selfie_path,
-        selfie_url: selfieUrlByRecordId.get(record.id) ?? null,
-        submitted_at: record.submitted_at || record.created_at,
-        meeting_title: meeting.title,
-        meeting_starts_at: meeting.starts_at,
-        class_name: schoolClass.name,
-        review_note: record.review_note,
-        attendance_enabled: meeting.attendance_enabled,
-      } as AttendanceDisplayRow]
-    })
+    attendance.value = results.flatMap(result => result.records).sort((a, b) => b.meeting_starts_at.localeCompare(a.meeting_starts_at))
+    weeklyMeetings.value = results.flatMap(result => result.schedule)
+    weekLabel.value = `${week.start} – ${week.end}`
+    if (selectedEvidence.value) selectedEvidence.value = attendance.value.find(record => record.id === selectedEvidence.value?.id) ?? null
   } catch (error) {
-    students.value = []
-    attendance.value = []
-    message.value = toUserFacingErrorMessage(error, 'Unable to load parent attendance.')
+    if (isCurrent()) message.value = toUserFacingErrorMessage(error, 'Unable to load parent attendance.')
   } finally {
-    refreshing.value = false
+    if (isCurrent()) refreshing.value = false
   }
 }
+
+function currentWeek() {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
+  const start = new Date(`${today}T00:00:00Z`)
+  start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7)
+  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6)
+  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
+}
+function weekday(value: string) { return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', weekday: 'short' }).format(new Date(value)) }
+function formatTime(value: string) { return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }).format(new Date(value)) }
 
 function openEvidence(record: AttendanceDisplayRow, name: string) {
   selectedStudentName.value = name
@@ -425,7 +416,8 @@ function attendanceLabel(record: AttendanceDisplayRow) {
   return record.status === 'present' ? 'Present' : 'Absent'
 }
 
-function verificationLabel(status: AttendanceDisplayRow['verification_status']) {
+function verificationLabel(status: AttendanceDisplayRow['verification_status'], inferred = false) {
+  if (inferred) return 'No check-in recorded'
   if (status === 'approved') return 'Self-check accepted'
   if (status === 'rejected') return 'Voided by teacher'
   if (status === 'pending') return 'Legacy review pending'
@@ -446,7 +438,8 @@ function verificationIcon(status: AttendanceDisplayRow['verification_status']) {
   return checkmarkCircleOutline
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string | null) {
+  if (!value || Number.isNaN(new Date(value).getTime())) return 'Not submitted'
   return new Intl.DateTimeFormat(undefined, {
     timeZone: 'Asia/Manila',
     dateStyle: 'medium',
@@ -483,9 +476,30 @@ onIonViewWillEnter(async () => {
   if (loading.value || refreshing.value || signingOut.value || selectedEvidence.value || profile.value?.role !== 'parent') return
   await loadDashboard()
 })
+useRealtimeRefresh({ channel: 'family-attendance', enabled: () => profile.value?.role === 'parent', onChange: loadDashboard })
+watch(() => profile.value?.id, () => {
+  dashboardRequest++
+  photoCache.clear()
+  students.value = []
+  attendance.value = []
+  weeklyMeetings.value = []
+  selectedEvidence.value = null
+  refreshing.value = false
+})
+watch(activeSection, () => { if (!loading.value && profile.value?.role === 'parent') void loadDashboard() })
+onBeforeUnmount(() => { dashboardRequest++; photoCache.clear() })
 </script>
 
 <style scoped>
+.weekly-schedule-card { border: 1px solid var(--campus-border); border-radius: 16px; background: var(--campus-surface); padding: 22px; margin: 0 0 22px; }
+.weekly-schedule-list { display: grid; margin-top: 16px; }
+.weekly-meeting { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--campus-border); }
+.weekly-day { width: 42px; flex: 0 0 auto; color: var(--campus-green); font-size: 12px; font-weight: 700; }
+.weekly-meeting > div { display: grid; flex: 1; min-width: 0; gap: 4px; }
+.weekly-meeting strong { font-size: 13px; color: var(--campus-text); }
+.weekly-meeting span:not(.attendance-pill):not(.weekly-day), .weekly-meeting small { font-size: 12px; color: var(--campus-muted); }
+.weekly-empty { margin: 16px 0 0; color: var(--campus-muted); font-size: 13px; }
+@media (max-width: 600px) { .weekly-schedule-card { padding: 16px; } .weekly-meeting { flex-wrap: wrap; gap: 9px; } .weekly-meeting .attendance-pill { margin-left: 51px; } }
 .is-not-counted { background: var(--campus-surface-soft) !important; color: var(--campus-muted) !important; }
 .is-not-counted .status-icon { color: var(--campus-muted); background: var(--campus-surface); }
 .dashboard-page {

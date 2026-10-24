@@ -7,14 +7,9 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">School administration</p>
-            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : 'Administration overview' }}</h1>
-            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : 'Monitor the current teacher registration totals.' }}</p>
+            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : activeSection === 'verification' ? 'Student face verification' : 'Administration overview' }}</h1>
+            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : activeSection === 'verification' ? 'Face enrollment is completed once. Authorize a new enrollment only when a student needs to replace it.' : 'Manage teacher access and student verification.' }}</p>
           </div>
-          <ion-button class="secondary-button" fill="outline" :disabled="loading" @click="loadApplicants">
-            <ion-spinner v-if="loading" name="crescent" />
-            <ion-icon v-else slot="start" :icon="refreshOutline" aria-hidden="true" />
-            <span>Refresh</span>
-          </ion-button>
         </header>
 
         <section v-if="activeSection === 'overview'" class="summary-grid" aria-label="Teacher registration totals">
@@ -36,6 +31,7 @@
           <div><p class="eyebrow">Teacher access</p><h2>{{ pendingCount ? 'Registrations need your review' : 'Your approval queue is clear' }}</h2><p>Review teachers before they can create classes and record student attendance.</p></div>
           <ion-button @click="router.push({ path: '/admin', query: { section: 'teachers' } })">Open teacher approvals</ion-button>
         </section>
+        <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Student identity</p><h2>Face verification access</h2><p>Manage one-time face enrollment and authorize a retake when needed.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'verification' } })">Manage verification</ion-button></section>
 
         <div
           v-if="message"
@@ -46,6 +42,13 @@
           <ion-icon :icon="messageKind === 'error' ? alertCircleOutline : checkmarkCircleOutline" aria-hidden="true" />
           <span>{{ message }}</span>
         </div>
+
+        <section v-if="activeSection === 'verification'" class="queue-card" aria-labelledby="verification-heading">
+          <header class="queue-heading"><div><p class="eyebrow">Student identity</p><h2 id="verification-heading">Face enrollment</h2></div><label class="student-search"><span class="sr-only">Find a student</span><input v-model="studentSearch" type="search" placeholder="Search student name or email" /></label></header>
+          <div v-if="loadingFaces" class="loading-state" role="status"><ion-spinner name="crescent" /><p>Loading verification access…</p></div>
+          <div v-else-if="!visibleStudents.length" class="queue-empty"><span class="empty-icon"><ion-icon :icon="peopleOutline" /></span><h3>{{ studentSearch ? 'No matching students' : 'No registered students yet' }}</h3></div>
+          <div v-else class="applicant-list"><article v-for="student in visibleStudents" :key="student.student_id" class="applicant-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><small>{{ student.enrolled ? `Enrolled ${formatDateTime(student.enrolled_at)}` : 'Face enrollment not completed' }}</small><small v-if="student.can_retake">A one-time retake is authorized.</small></div></div><div class="review-panel"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.enrolled ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'Retake authorized' : student.enrolled ? 'Enrolled' : 'Not enrolled' }}</span><ion-button v-if="student.enrolled && !student.can_retake" fill="outline" class="approve-button" @click="openRetake(student)">Authorize retake</ion-button></div></article></div>
+        </section>
 
         <section v-if="activeSection === 'teachers'" class="queue-card" aria-labelledby="queue-heading">
           <header class="queue-heading">
@@ -181,26 +184,24 @@
         </div>
       </template>
     </app-modal>
+    <app-modal :open="Boolean(selectedStudent)" title="Authorize one face retake?" :busy="grantingRetake" @close="selectedStudent = null">
+      <template v-if="selectedStudent"><p class="retake-description">{{ selectedStudent.full_name }} can replace their face enrollment once. Their existing enrollment remains active until they complete the new one.</p><ion-textarea v-model="retakeNote" label="Reason (optional)" label-placement="stacked" fill="outline" auto-grow :maxlength="500" :disabled="grantingRetake" /><p v-if="retakeError" class="retake-error" role="alert">{{ retakeError }}</p></template>
+      <template #actions><ion-button fill="outline" :disabled="grantingRetake" @click="selectedStudent = null">Cancel</ion-button><ion-button :disabled="grantingRetake" @click="grantRetake">{{ grantingRetake ? 'Authorizing…' : 'Authorize retake' }}</ion-button></template>
+    </app-modal>
   </ion-page>
 </template>
 
 <script setup lang="ts">
 import {
   IonButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonIcon,
-  IonMenuButton,
-  IonModal,
   IonLabel,
   IonPage,
   IonSegment,
   IonSegmentButton,
   IonSpinner,
   IonTextarea,
-  IonTitle,
-  IonToolbar,
   onIonViewWillEnter,
 } from '@ionic/vue'
 import {
@@ -211,7 +212,6 @@ import {
   logOutOutline,
   mailOutline,
   peopleOutline,
-  refreshOutline,
   schoolOutline,
   shieldCheckmarkOutline,
   timeOutline,
@@ -220,6 +220,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { supabase } from '@/lib/supabase'
 import type { TeacherApprovalStatus } from '@/types/database'
 import PortalHeader from '@/components/PortalHeader.vue'
@@ -235,6 +236,7 @@ interface TeacherApplicant {
   teacher_approved_at: string | null
   created_at: string
 }
+interface FaceEnrollment { student_id: string; full_name: string; email: string; enrolled: boolean; can_retake: boolean; granted_at: string | null; enrolled_at: string | null }
 
 type QueueView = 'pending' | 'all'
 
@@ -251,7 +253,12 @@ const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
 const selectedView = ref<QueueView>('pending')
 const selectedApplicant = ref<TeacherApplicant | null>(null)
-const activeSection = computed(() => route.query.section === 'teachers' ? 'teachers' : 'overview')
+const activeSection = computed(() => route.query.section === 'teachers' ? 'teachers' : route.query.section === 'verification' ? 'verification' : 'overview')
+const faceStudents = ref<FaceEnrollment[]>([])
+const selectedStudent = ref<FaceEnrollment | null>(null)
+const studentSearch = ref(''), retakeNote = ref(''), retakeError = ref('')
+const loadingFaces = ref(false), grantingRetake = ref(false)
+const visibleStudents = computed(() => faceStudents.value.filter(student => `${student.full_name} ${student.email}`.toLowerCase().includes(studentSearch.value.trim().toLowerCase())))
 
 const pendingCount = computed(() => applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending').length)
 const approvedCount = computed(() => applicants.value.filter((applicant) => applicant.teacher_approval_status === 'approved').length)
@@ -260,9 +267,8 @@ const visibleApplicants = computed(() => selectedView.value === 'all'
   ? applicants.value
   : applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending'))
 
-async function loadApplicants() {
-  loading.value = true
-  clearMessage()
+async function loadApplicants(background = false) {
+  if (!background) { loading.value = true; clearMessage() }
 
   try {
     const { data, error } = await supabase
@@ -280,14 +286,35 @@ async function loadApplicants() {
         || second.created_at.localeCompare(first.created_at),
     )
     for (const applicant of applicants.value) {
-      reviewNotes[applicant.id] = applicant.teacher_approval_note ?? ''
+      if (selectedApplicant.value?.id !== applicant.id) reviewNotes[applicant.id] = applicant.teacher_approval_note ?? ''
     }
   } catch (error) {
-    applicants.value = []
     showError(error)
   } finally {
     loading.value = false
   }
+}
+
+async function loadFaceStudents() {
+  loadingFaces.value = faceStudents.value.length === 0
+  try {
+    const { data, error } = await supabase.rpc('admin_student_face_enrollments')
+    if (error) throw error
+    faceStudents.value = (data ?? []) as FaceEnrollment[]
+  } catch (error) { showError(error) }
+  finally { loadingFaces.value = false }
+}
+function openRetake(student: FaceEnrollment) { selectedStudent.value = student; retakeNote.value = ''; retakeError.value = '' }
+async function grantRetake() {
+  if (!selectedStudent.value || grantingRetake.value) return
+  grantingRetake.value = true; retakeError.value = ''
+  try {
+    const { error } = await supabase.rpc('admin_grant_face_retake', { p_student_id: selectedStudent.value.student_id, p_note: retakeNote.value.trim() || null })
+    if (error) throw error
+    const name = selectedStudent.value.full_name
+    await loadFaceStudents(); selectedStudent.value = null; showSuccess(`A one-time face retake is now authorized for ${name}.`)
+  } catch (error) { retakeError.value = toUserFacingErrorMessage(error, 'Unable to authorize a face retake.') }
+  finally { grantingRetake.value = false }
 }
 
 async function reviewApplicant(
@@ -349,7 +376,8 @@ function statusLabel(status: TeacherApprovalStatus | null) {
   return 'Pending'
 }
 
-function formatDateTime(value: string) {
+function formatDateTime(value: string | null) {
+  if (!value || Number.isNaN(new Date(value).getTime())) return 'Not recorded'
   return new Intl.DateTimeFormat(undefined, {
     timeZone: 'Asia/Manila',
     dateStyle: 'medium',
@@ -383,14 +411,15 @@ async function logout() {
 
 onMounted(async () => {
   await initializeSession()
-  if (profile.value?.role === 'admin') await loadApplicants()
+  if (profile.value?.role === 'admin') await Promise.all([loadApplicants(), loadFaceStudents()])
   else loading.value = false
 })
 
 onIonViewWillEnter(async () => {
   if (loading.value || signingOut.value || reviewingTeacherId.value || selectedApplicant.value || profile.value?.role !== 'admin') return
-  await loadApplicants()
+  await Promise.all([loadApplicants(true), loadFaceStudents()])
 })
+useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.role === 'admin', onChange: async () => { await Promise.all([loadApplicants(true), loadFaceStudents()]) } })
 </script>
 
 <style scoped>
@@ -866,15 +895,24 @@ ion-modal .review-buttons {
 }
 
 .approve-button {
-  --background: var(--campus-success-local);
-  --background-hover: var(--campus-success-local);
+  --background: var(--ion-color-primary);
+  --background-hover: var(--ion-color-primary);
   --background-hover-opacity: 0.88;
+  --color: var(--ion-color-primary-contrast);
 }
+.approve-button[fill="outline"] { --background: transparent; --color: var(--campus-green); --border-color: var(--campus-green); }
 
 .reject-button {
-  --border-color: var(--campus-danger-local);
-  --color: var(--campus-danger-local);
+  --border-color: var(--campus-danger);
+  --color: var(--campus-danger);
 }
+.review-modal-summary, .review-note, .review-buttons, .page-message { --campus-text-local: var(--campus-text); --campus-muted-local: var(--campus-muted); --campus-border-local: var(--campus-border); --campus-accent-local: var(--campus-accent); --campus-accent-soft-local: var(--campus-accent-soft); --campus-success-local: var(--campus-success); --campus-success-soft-local: var(--campus-success-soft); --campus-danger-local: var(--campus-danger); --campus-danger-soft-local: var(--campus-danger-soft); --campus-warning-local: var(--campus-warning); --campus-warning-soft-local: var(--campus-warning-soft); }
+.verification-overview { margin-top: 18px; }
+.student-search { min-width: min(100%, 270px); }
+.student-search input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--campus-border); border-radius: 10px; color: var(--campus-text); background: var(--campus-surface); font: inherit; font-size: 13px; }
+.retake-description { margin: 0 0 18px; color: var(--campus-muted); font-size: 14px; line-height: 1.6; }
+.retake-error { color: var(--campus-danger); font-size: 13px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
 
 @media (max-width: 820px) {
   .applicant-row {

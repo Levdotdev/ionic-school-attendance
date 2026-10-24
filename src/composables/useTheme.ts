@@ -16,20 +16,21 @@ function applyTheme(value: ColorTheme) {
   document.documentElement.style.colorScheme = value
 
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-  if (themeColor) themeColor.content = value === 'dark' ? '#0a2d20' : '#063f2a'
+  if (themeColor) themeColor.content = value === 'dark' ? '#111715' : '#f5f7f3'
 }
 
 export function initializeTheme() {
   if (initialized || typeof window === 'undefined') return
   initialized = true
 
-  const saved = window.localStorage.getItem(STORAGE_KEY)
+  let saved: string | null = null
+  try { saved = window.localStorage.getItem(STORAGE_KEY) } catch { /* Use the system theme when storage is unavailable. */ }
   applyTheme(saved === 'light' || saved === 'dark' ? saved : systemTheme())
 }
 
 export function setTheme(value: ColorTheme) {
   applyTheme(value)
-  window.localStorage.setItem(STORAGE_KEY, value)
+  try { window.localStorage.setItem(STORAGE_KEY, value) } catch { /* Keep this tab's selected theme. */ }
 }
 
 export function toggleTheme() {

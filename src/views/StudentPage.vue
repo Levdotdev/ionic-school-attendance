@@ -121,8 +121,8 @@
           <section class="welcome-banner">
             <div>
               <p class="eyebrow">{{ dashboardDate }}</p>
-              <h1>{{ activeSection === 'courses' ? 'My courses' : activeSection === 'schedule' ? 'This week’s schedule' : `Welcome back, ${studentFirstName}` }}</h1>
-              <p>{{ activeSection === 'courses' ? 'Your subjects, enrollment, and connected coursework.' : activeSection === 'schedule' ? 'Plan your week and see which meetings count toward attendance.' : 'Check your open attendance windows and submit before they close.' }}</p>
+              <h1>{{ sectionTitle }}</h1>
+              <p>{{ sectionDescription }}</p>
             </div>
             <div class="availability-summary" :class="{ 'has-meetings': meetings.length > 0 }">
               <span class="summary-icon"><ion-icon :icon="meetings.length ? timeOutline : checkmarkCircleOutline" /></span>
@@ -142,7 +142,7 @@
             class="dashboard-grid"
             :class="{
               'courses-layout': activeSection === 'courses',
-              'single-section': activeSection === 'schedule',
+              'single-section': activeSection !== 'overview',
             }"
           >
             <section v-if="activeSection === 'overview'" class="campus-surface attendance-panel" aria-labelledby="self-checks-title">
@@ -152,16 +152,7 @@
                   <h2 id="self-checks-title">Available self-checks</h2>
                   <p>Only meetings assigned to you with an open check-in window are shown.</p>
                 </div>
-                <ion-button
-                  class="icon-action"
-                  fill="clear"
-                  :disabled="refreshing"
-                  aria-label="Refresh available self-checks"
-                  @click="loadAvailableMeetings"
-                >
-                  <ion-spinner v-if="refreshing" name="crescent" />
-                  <ion-icon v-else :icon="refreshOutline" />
-                </ion-button>
+                <span class="live-update-label"><span class="live-dot"></span> Live</span>
               </div>
 
               <div v-if="meetings.length" class="meeting-list">
@@ -176,10 +167,7 @@
                         <span class="class-name">{{ meeting.class_name }}</span>
                         <h3>{{ meeting.title }}</h3>
                       </div>
-                      <span v-if="meeting.existing_status" class="status-chip is-complete">
-                        <ion-icon :icon="checkmarkCircleOutline" /> Submitted
-                      </span>
-                      <span v-else class="status-chip is-open"><span class="live-dot"></span> Open</span>
+                      <span class="status-chip is-open"><span class="live-dot"></span> Open</span>
                     </div>
 
                     <div class="meeting-details">
@@ -189,12 +177,7 @@
                     <p>{{ meetingModeMeta(meeting.attendance_mode).detail }}</p>
 
                     <div class="meeting-actions">
-                      <span v-if="meeting.existing_status" class="submitted-time">
-                        Recorded as {{ meeting.existing_status }}
-                        <template v-if="meeting.submitted_at"> on {{ formatDateTime(meeting.submitted_at) }}</template>
-                      </span>
                       <ion-button
-                        v-else
                         class="check-in-button"
                         @click="openSelfCheck(meeting.id)"
                       >
@@ -209,11 +192,8 @@
               <div v-else class="empty-state">
                 <div class="empty-icon"><ion-icon :icon="checkmarkCircleOutline" /></div>
                 <h3>You're all caught up</h3>
-                <p>No self-check attendance is open right now. Check again when your teacher opens a meeting.</p>
-                <ion-button fill="outline" size="small" :disabled="refreshing" @click="loadAvailableMeetings">
-                  <ion-spinner v-if="refreshing" name="crescent" />
-                  <template v-else><ion-icon slot="start" :icon="refreshOutline" /> Check again</template>
-                </ion-button>
+                <p>No unsubmitted self-checks are open right now. New meetings appear here automatically.</p>
+                <ion-button fill="outline" size="small" @click="showHistory">View attendance history</ion-button>
               </div>
             </section>
 
@@ -224,99 +204,38 @@
                   <h2 id="student-courses-title">My courses</h2>
                   <p>Tasks can be connected directly to any course listed here.</p>
                 </div>
-                <span class="status-chip is-complete">{{ courses.length }} enrolled</span>
+                <div class="course-heading-actions"><span class="status-chip is-complete">{{ courses.length }} enrolled</span><ion-button size="small" @click="openJoinModal"><ion-icon slot="start" :icon="peopleOutline" />Join a class</ion-button></div>
               </div>
 
               <div v-if="courses.length" class="course-list">
                 <article v-for="course in courses" :key="course.id" class="course-card">
-                  <div class="meeting-icon"><ion-icon :icon="schoolOutline" /></div>
-                  <div>
+                  <div class="course-card-heading"><div class="meeting-icon"><ion-icon :icon="schoolOutline" /></div><span class="status-chip is-complete">Enrolled</span></div>
+                  <div class="course-card-copy">
                     <h3>{{ course.name }}</h3>
-                    <p>{{ course.section || 'No section specified' }}</p>
+                    <p>Your subject, attendance, and connected tasks in one place.</p>
                   </div>
+                  <div class="course-card-actions"><ion-button size="small" @click="openCourseTasks(course.id)">View tasks<ion-icon slot="end" :icon="arrowForwardOutline" /></ion-button><ion-button fill="clear" size="small" @click="showSchedule">Schedule & reminders</ion-button></div>
                 </article>
               </div>
               <div v-else class="empty-state compact-empty">
                 <div class="empty-icon"><ion-icon :icon="schoolOutline" /></div>
                 <h3>No courses yet</h3>
                 <p>Use your teacher's join code to enroll.</p>
+                <ion-button @click="openJoinModal">Join your first class</ion-button>
               </div>
             </section>
 
-            <section v-if="activeSection === 'schedule'" class="campus-surface attendance-panel" aria-labelledby="student-schedule-title">
-              <div class="surface-heading attendance-heading">
-                <div>
-                  <p class="eyebrow">Current week</p>
-                  <h2 id="student-schedule-title">This week's schedule</h2>
-                  <p>Only meetings from the current Monday-to-Sunday week are shown.</p>
-                </div>
-                <ion-button class="icon-action" fill="clear" :disabled="refreshingSchedule" aria-label="Refresh this week's schedule" @click="loadCoursesAndSchedule">
-                  <ion-spinner v-if="refreshingSchedule" name="crescent" />
-                  <ion-icon v-else :icon="refreshOutline" />
-                </ion-button>
-              </div>
-
-              <div v-if="weeklyMeetings.length" class="meeting-list">
-                <article v-for="meeting in weeklyMeetings" :key="meeting.id" class="meeting-card">
-                  <div class="meeting-icon" aria-hidden="true"><ion-icon :icon="calendarOutline" /></div>
-                  <div class="meeting-copy">
-                    <div class="meeting-title-row">
-                      <div>
-                        <span class="class-name">{{ meeting.class_name }}</span>
-                        <h3>{{ meeting.title }}</h3>
-                      </div>
-                      <span class="status-chip" :class="meeting.attendance_enabled ? 'is-open' : 'is-complete'">
-                        {{ meeting.attendance_enabled ? 'Counts' : 'Not counted' }}
-                      </span>
-                    </div>
-                    <div class="meeting-details">
-                      <span><ion-icon :icon="calendarOutline" /> {{ formatMeetingTime(meeting) }}</span>
-                      <span v-if="meeting.class_section"><ion-icon :icon="peopleOutline" /> {{ meeting.class_section }}</span>
-                    </div>
-                  </div>
-                </article>
-              </div>
-              <div v-else class="empty-state">
-                <div class="empty-icon"><ion-icon :icon="calendarOutline" /></div>
-                <h3>No meetings this week</h3>
-                <p>Your enrolled classes have no meeting scheduled for the current week.</p>
-              </div>
-            </section>
-
-            <aside class="student-sidebar">
-              <section v-if="activeSection === 'courses'" class="campus-surface join-panel" aria-labelledby="join-class-title">
-                <div class="panel-icon"><ion-icon :icon="peopleOutline" /></div>
-                <p class="eyebrow">Enrollment</p>
-                <h2 id="join-class-title">Join a class</h2>
-                <p>Enter the private join code shared by your teacher.</p>
-
-                <ion-button class="join-button" expand="block" @click="openJoinModal">
-                  Enter class code
-                  <ion-icon slot="end" :icon="arrowForwardOutline" />
-                </ion-button>
-
-                <div
-                  v-if="joinMessage"
-                  class="message-box compact"
-                  :class="joinFailed ? 'is-error' : 'is-success'"
-                  role="status"
-                >
-                  <ion-icon :icon="joinFailed ? alertCircleOutline : checkmarkCircleOutline" />
-                  <span>{{ joinMessage }}</span>
-                </div>
-              </section>
-
+            <student-schedule-panel v-if="activeSection === 'schedule' && user" :student-id="user.id" :courses="courses" />
+            <student-history-panel v-if="activeSection === 'history' && user" :student-id="user.id" :student-name="profile?.full_name || 'Student'" />
+            <aside v-if="activeSection === 'overview'" class="student-sidebar">
               <section v-if="activeSection === 'overview'" class="face-setup-card">
                 <ion-icon :icon="personCircleOutline" />
                 <div>
                   <strong>{{ faceEnrolled ? 'Face verification is active' : 'Face verification is not set up' }}</strong>
-                  <p>{{ faceEnrolled ? 'Your private template is ready for self-check attendance.' : 'Enroll once before using student self-check attendance.' }}</p>
+                  <p>{{ faceRetakeAllowed ? 'An administrator has approved one face enrollment retake.' : faceEnrolled ? 'Your one-time enrollment is locked. Contact an administrator if you need to retake it.' : 'Enroll once before using student self-check attendance.' }}</p>
                   <div class="face-actions">
-                    <ion-button size="small" fill="outline" @click="faceEnrollmentOpen = true">
-                      {{ faceEnrolled ? 'Re-enroll' : 'Set up now' }}
-                    </ion-button>
-                    <ion-button v-if="faceEnrolled" size="small" fill="clear" color="danger" @click="confirmRemoveFace">
-                      Remove
+                    <ion-button v-if="!faceEnrolled || faceRetakeAllowed" size="small" fill="outline" @click="faceEnrollmentOpen = true">
+                      {{ faceRetakeAllowed ? 'Retake face enrollment' : 'Set up now' }}
                     </ion-button>
                   </div>
                 </div>
@@ -326,7 +245,7 @@
                 <ion-icon :icon="shieldCheckmarkOutline" />
                 <div>
                   <strong>Your evidence is private</strong>
-                  <p>Only authorized teachers and your linked parent account can view attendance photos.</p>
+                  <p>Authorized teachers and linked parents can view attendance photos. Only verified linked parents can see your online check-in location.</p>
                 </div>
               </section>
             </aside>
@@ -385,19 +304,12 @@
 
 <script setup lang="ts">
 import {
-  alertController,
   IonButton,
-  IonButtons,
   IonContent,
-  IonHeader,
   IonIcon,
   IonInput,
-  IonMenuButton,
-  IonModal,
   IonPage,
   IonSpinner,
-  IonTitle,
-  IonToolbar,
   onIonViewWillEnter,
 } from '@ionic/vue'
 import {
@@ -407,10 +319,8 @@ import {
   calendarOutline,
   checkmarkCircleOutline,
   cloudOutline,
-  logOutOutline,
   peopleOutline,
   personCircleOutline,
-  refreshOutline,
   scanOutline,
   schoolOutline,
   shieldCheckmarkOutline,
@@ -422,7 +332,10 @@ import { useRoute, useRouter } from 'vue-router'
 import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
 import PortalHeader from '@/components/PortalHeader.vue'
 import AppModal from '@/components/AppModal.vue'
+import StudentHistoryPanel from '@/components/StudentHistoryPanel.vue'
+import StudentSchedulePanel from '@/components/StudentSchedulePanel.vue'
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
 import { toUserFacingErrorMessage } from '@/utils/errors'
@@ -456,17 +369,7 @@ interface StudentCourse {
   name: string
   section: string | null
   timezone: string
-}
-
-interface WeeklyMeeting {
-  id: string
-  title: string
-  meeting_date: string
-  starts_at: string
-  ends_at: string
-  attendance_enabled: boolean
-  class_name: string
-  class_section: string | null
+  archived_at?: string | null
 }
 
 const router = useRouter()
@@ -483,7 +386,6 @@ const joiningClass = ref(false)
 const studentProfile = ref<StudentProfileRow | null>(null)
 const meetings = ref<AvailableMeeting[]>([])
 const courses = ref<StudentCourse[]>([])
-const weeklyMeetings = ref<WeeklyMeeting[]>([])
 const fullName = ref('')
 const guardianEmail = ref('')
 const rawBarcode = ref<string | null>(null)
@@ -493,6 +395,7 @@ const joinFailed = ref(false)
 const registrationMessage = ref('')
 const pageMessage = ref('')
 const faceEnrolled = ref(false)
+const faceRetakeAllowed = ref(false)
 const faceEnrollmentOpen = ref(false)
 const joinModalOpen = ref(false)
 
@@ -500,12 +403,14 @@ const registrationCompleted = computed(() => Boolean(studentProfile.value?.regis
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
 const studentFirstName = computed(() => profile.value?.full_name?.trim().split(/\s+/)[0] || 'student')
 const dashboardDate = computed(() =>
-  new Intl.DateTimeFormat(undefined, { weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()),
+  new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', weekday: 'long', month: 'long', day: 'numeric' }).format(new Date()),
 )
 const activeSection = computed(() => {
   const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
-  return value === 'courses' || value === 'schedule' ? value : 'overview'
+  return value === 'courses' || value === 'schedule' || value === 'history' ? value : 'overview'
 })
+const sectionTitle = computed(() => activeSection.value === 'courses' ? 'My courses' : activeSection.value === 'schedule' ? 'My schedule' : activeSection.value === 'history' ? 'Attendance history' : `Welcome back, ${studentFirstName.value}`)
+const sectionDescription = computed(() => activeSection.value === 'courses' ? 'Your subjects, attendance, and connected coursework.' : activeSection.value === 'schedule' ? 'Your classes and task deadlines together. Choose the reminders that work for you.' : activeSection.value === 'history' ? 'Review your past attendance, teacher updates, and submitted photos.' : 'Open self-checks update automatically. Your completed attendance is saved in history.')
 
 function acceptBarcode(value: string) {
   rawBarcode.value = value
@@ -545,16 +450,22 @@ async function loadStudentProfile() {
 }
 
 async function loadFaceEnrollmentStatus() {
-  const { data, error } = await supabase.rpc('my_face_enrollment_status')
+  let { data, error } = await supabase.rpc('my_face_enrollment_access')
   if (error) {
-    // The UI remains usable while a migration is being deployed, but self-check
-    // will still be protected by the server once face verification is enabled.
+    if (error.code === '42883' || error.code === 'PGRST202') {
+      const fallback = await supabase.rpc('my_face_enrollment_status')
+      data = fallback.data
+      error = fallback.error
+    }
+  }
+  if (error) {
     if (error.code === '42883' || error.code === 'PGRST202') return
     throw error
   }
 
   const status = Array.isArray(data) ? data[0] : data
-  faceEnrolled.value = Boolean(status?.enrolled)
+  faceEnrolled.value = Boolean(status?.is_enrolled ?? status?.enrolled)
+  faceRetakeAllowed.value = Boolean(status?.can_retake)
 }
 
 async function loadAvailableMeetings() {
@@ -570,32 +481,11 @@ async function loadAvailableMeetings() {
       .order('attendance_opens_at', { ascending: true })
 
     if (error) throw error
-    meetings.value = (data ?? []) as AvailableMeeting[]
+    meetings.value = ((data ?? []) as AvailableMeeting[]).filter(meeting => !meeting.existing_status && !meeting.submitted_at)
   } catch (error) {
     pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load attendance meetings.')
   } finally {
     refreshing.value = false
-  }
-}
-
-function currentManilaWeekRange(): { start: string; end: string } {
-  const parts = new Intl.DateTimeFormat('en-CA', {
-    timeZone: 'Asia/Manila',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-  }).formatToParts(new Date())
-  const numberPart = (type: Intl.DateTimeFormatPartTypes) =>
-    Number(parts.find((part) => part.type === type)?.value)
-  const today = new Date(Date.UTC(numberPart('year'), numberPart('month') - 1, numberPart('day')))
-  const mondayOffset = (today.getUTCDay() + 6) % 7
-  const start = new Date(today)
-  start.setUTCDate(today.getUTCDate() - mondayOffset)
-  const end = new Date(start)
-  end.setUTCDate(start.getUTCDate() + 6)
-  return {
-    start: start.toISOString().slice(0, 10),
-    end: end.toISOString().slice(0, 10),
   }
 }
 
@@ -604,55 +494,22 @@ async function loadCoursesAndSchedule() {
   refreshingSchedule.value = true
 
   try {
-    const week = currentManilaWeekRange()
-    const [enrollmentResult, meetingResult] = await Promise.all([
-      supabase
+    const enrollmentResult = await supabase
         .from('class_enrollments')
-        .select('class:classes(id,name,section,timezone)')
+        .select('class:classes(id,name,timezone,archived_at)')
         .eq('student_id', user.value.id)
-        .eq('is_active', true),
-      supabase
-        .from('meetings')
-        .select('id,title,meeting_date,starts_at,ends_at,attendance_enabled,class:classes!inner(name,section)')
-        .gte('meeting_date', week.start)
-        .lte('meeting_date', week.end)
-        .order('starts_at', { ascending: true }),
-    ])
+        .eq('is_active', true)
     if (enrollmentResult.error) throw enrollmentResult.error
-    if (meetingResult.error) throw meetingResult.error
 
     const enrollmentRows = (enrollmentResult.data ?? []) as unknown as Array<{
       class: StudentCourse | StudentCourse[] | null
     }>
     courses.value = enrollmentRows
       .flatMap((row) => Array.isArray(row.class) ? row.class : row.class ? [row.class] : [])
+      .filter(course => !course.archived_at)
       .sort((first, second) => first.name.localeCompare(second.name))
-
-    const meetingRows = (meetingResult.data ?? []) as unknown as Array<{
-      id: string
-      title: string
-      meeting_date: string
-      starts_at: string
-      ends_at: string
-      attendance_enabled: boolean
-      class: Pick<StudentCourse, 'name' | 'section'> | Array<Pick<StudentCourse, 'name' | 'section'>>
-    }>
-    weeklyMeetings.value = meetingRows.flatMap((row) => {
-      const course = Array.isArray(row.class) ? row.class[0] : row.class
-      if (!course) return []
-      return [{
-        id: row.id,
-        title: row.title,
-        meeting_date: row.meeting_date,
-        starts_at: row.starts_at,
-        ends_at: row.ends_at,
-        attendance_enabled: row.attendance_enabled,
-        class_name: course.name,
-        class_section: course.section,
-      }]
-    })
   } catch (error) {
-    pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load this week\'s classes.')
+    pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load your courses.')
   } finally {
     refreshingSchedule.value = false
   }
@@ -768,7 +625,7 @@ function meetingModeMeta(mode: SelfAttendanceMode) {
   if (mode === 'self_online') {
     return {
       label: 'Online class',
-      detail: 'Take a new timestamped selfie. Your check-in counts immediately.',
+      detail: 'Take a timestamped selfie and share your location privately with your linked parents.',
       icon: cloudOutline,
     }
   }
@@ -790,35 +647,14 @@ async function openSelfCheck(meetingId: string) {
 
 async function handleFaceEnrolled() {
   faceEnrolled.value = true
+  faceRetakeAllowed.value = false
   faceEnrollmentOpen.value = false
   pageMessage.value = ''
 }
 
-async function confirmRemoveFace() {
-  const alert = await alertController.create({
-    header: 'Remove face verification?',
-    message: 'You will not be able to use self-check attendance until you enroll again. Your past attendance photos are not deleted.',
-    buttons: [
-      { text: 'Cancel', role: 'cancel' },
-      {
-        text: 'Remove',
-        role: 'destructive',
-        handler: () => { void removeFaceEnrollment() },
-      },
-    ],
-  })
-  await alert.present()
-}
-
-async function removeFaceEnrollment() {
-  pageMessage.value = ''
-  const { error } = await supabase.rpc('delete_my_face')
-  if (error) {
-    pageMessage.value = toUserFacingErrorMessage(error, 'Face enrollment could not be removed.')
-    return
-  }
-  faceEnrolled.value = false
-}
+function showHistory() { void router.push({ path: '/student', query: { section: 'history' } }) }
+function showSchedule() { void router.push({ path: '/student', query: { section: 'schedule' } }) }
+function openCourseTasks(classId: string) { void router.push({ path: '/student/tasks', query: { course: classId } }) }
 
 async function logout() {
   signingOut.value = true
@@ -853,6 +689,7 @@ async function loadStudentDashboard(promptForFaceEnrollment = false) {
 }
 
 onMounted(() => loadStudentDashboard(true))
+useRealtimeRefresh({ channel: 'student-dashboard', enabled: () => registrationCompleted.value && !savingRegistration.value && !signingOut.value, onChange: () => loadStudentDashboard() })
 onIonViewWillEnter(async () => {
   if (loading.value || !registrationCompleted.value || refreshing.value || refreshingSchedule.value || signingOut.value || savingRegistration.value || joiningClass.value || faceEnrollmentOpen.value || joinModalOpen.value) return
   await loadStudentDashboard()
@@ -1246,7 +1083,7 @@ onIonViewWillEnter(async () => {
 }
 
 .dashboard-grid.courses-layout {
-  grid-template-columns: minmax(0, 1.45fr) minmax(270px, 0.65fr);
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .dashboard-grid.single-section {
@@ -1274,16 +1111,16 @@ onIonViewWillEnter(async () => {
 
 .course-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
-  gap: 12px;
+  grid-template-columns: repeat(auto-fill, minmax(min(100%, 280px), 1fr));
+  gap: 18px;
   padding-top: 18px;
 }
 
 .course-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  padding: 20px;
   border: 1px solid var(--campus-border);
   border-radius: var(--campus-radius-md);
   background: var(--campus-surface-subtle);
@@ -1296,14 +1133,21 @@ onIonViewWillEnter(async () => {
 
 .course-card h3 {
   color: var(--campus-text);
-  font-size: 0.9rem;
+  font-size: 1.1rem;
+  overflow-wrap: anywhere;
 }
 
 .course-card p {
   margin-top: 4px;
   color: var(--campus-muted);
   font-size: 0.75rem;
+  line-height: 1.6;
 }
+.course-card-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.course-card-actions { display:grid; gap:5px; margin-top:3px; }
+.course-card-actions ion-button { margin:0; min-height:40px; }
+.course-heading-actions { display:flex; flex-wrap:wrap; gap:10px; align-items:center; justify-content:flex-end; }
+.live-update-label { display:inline-flex; align-items:center; gap:7px; margin-top:4px; color:var(--campus-success); font-size:11px; font-weight:650; }
 
 .compact-empty {
   padding-top: 2.4rem;

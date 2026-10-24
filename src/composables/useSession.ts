@@ -17,6 +17,7 @@ export interface AppProfile {
   teacher_approval_note: string | null
   teacher_approved_at: string | null
   onboarding_completed_at: string | null
+  avatar_path?: string | null
 }
 
 const session = shallowRef<Session | null>(null)
@@ -59,7 +60,10 @@ function isTeacherApprovalStatus(value: unknown): value is TeacherApprovalStatus
 
 export async function readAccountProfile(userId: string) {
   const columns = 'id,role,full_name,email,teacher_approval_status,teacher_approval_note,teacher_approved_at,created_at'
-  const result = await supabase.from('profiles').select(`${columns},onboarding_completed_at`).eq('id', userId).maybeSingle()
+  let result = await supabase.from('profiles').select(`${columns},onboarding_completed_at,avatar_path`).eq('id', userId).maybeSingle()
+  if (result.error && ['42703', 'PGRST204'].includes(result.error.code) && result.error.message.includes('avatar_path')) {
+    result = await supabase.from('profiles').select(`${columns},onboarding_completed_at`).eq('id', userId).maybeSingle()
+  }
   const missingSetupColumn = result.error
     && ['42703', 'PGRST204'].includes(result.error.code)
     && result.error.message.includes('onboarding_completed_at')
@@ -71,7 +75,7 @@ export async function readAccountProfile(userId: string) {
   const legacy = await supabase.from('profiles').select(columns).eq('id', userId).maybeSingle()
   return {
     ...legacy,
-    data: legacy.data ? { ...legacy.data, onboarding_completed_at: legacy.data.created_at ?? 'legacy' } : null,
+    data: legacy.data ? { ...legacy.data, onboarding_completed_at: legacy.data.created_at ?? 'legacy', avatar_path: null } : null,
   }
 }
 
@@ -102,16 +106,27 @@ export async function refreshProfile(): Promise<AppProfile | null> {
     id: data.id,
     role: data.role,
     full_name: data.full_name,
-    email: data.email || currentUser.email || '',
+    email: currentUser.email || data.email || '',
     teacher_approval_status: isTeacherApprovalStatus(data.teacher_approval_status)
       ? data.teacher_approval_status
       : null,
     teacher_approval_note: data.teacher_approval_note ?? null,
     teacher_approved_at: data.teacher_approved_at ?? null,
     onboarding_completed_at: data.onboarding_completed_at ?? null,
+    avatar_path: data.avatar_path ?? null,
   }
   errorMessage.value = ''
   return profile.value
+}
+
+export async function refreshAuthUser(): Promise<User | null> {
+  const previousId = user.value?.id
+  if (!previousId) return null
+  const { data, error } = await supabase.auth.getUser()
+  if (error) throw error
+  if (user.value?.id !== previousId || data.user?.id !== previousId) return null
+  user.value = data.user
+  return data.user
 }
 
 function installAuthListener() {
@@ -182,7 +197,13 @@ export async function signOut(): Promise<void> {
   await cancelStudentTaskReminders().catch(() => undefined)
 
   const { error } = await supabase.auth.signOut()
-  if (error) throw error
+  if (error) {
+    if (error.code !== 'session_not_found') throw error
+    // The server already removed this session. Clear this device's stale
+    // credentials too, rather than trapping the person in an expired account.
+    const local = await supabase.auth.signOut({ scope: 'local' })
+    if (local.error && local.error.code !== 'session_not_found') throw local.error
+  }
 
   session.value = null
   user.value = null
@@ -211,6 +232,7 @@ export function useSession() {
     isAuthenticated: computed(() => Boolean(session.value)),
     initializeSession,
     refreshProfile,
+    refreshAuthUser,
     signOut,
   }
 }

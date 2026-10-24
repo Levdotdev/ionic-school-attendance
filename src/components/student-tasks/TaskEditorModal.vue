@@ -4,7 +4,7 @@
       <label class="field"><span>Task title</span><input v-model="title" maxlength="160" placeholder="What needs to get done?" required :disabled="saving" /></label>
       <label class="field"><span>Notes</span><textarea v-model="description" rows="3" maxlength="5000" placeholder="A few details to help you get started…" :disabled="saving" /></label>
       <div class="form-row">
-        <label class="field"><span>Due date &amp; time</span><input v-model="dueAtInput" type="datetime-local" required :disabled="saving" /></label>
+        <label class="field"><span>Due date &amp; time</span><day-date-input v-model="dueAtInput" type="datetime-local" required :disabled="saving" /></label>
         <label class="field"><span>Priority</span><select v-model="priority" :disabled="saving"><option v-for="option in STUDENT_TASK_PRIORITY_OPTIONS" :key="option.value" :value="option.value">{{ option.label }} priority</option></select></label>
       </div>
       <div class="form-row">
@@ -13,7 +13,7 @@
       </div>
       <button type="button" class="inline-button" :disabled="saving" @click="$emit('create-category')">Manage custom categories</button>
       <p v-if="recurrence !== 'none'" class="field-hint">Repeats appear automatically in your calendar. Complete each date separately. Editing updates the recurring schedule.</p>
-      <label v-if="recurrence !== 'none'" class="field"><span>Repeat until <small>Optional</small></span><input v-model="recurrenceUntilInput" type="datetime-local" :min="dueAtInput" :disabled="saving" /></label>
+      <label v-if="recurrence !== 'none'" class="field"><span>Repeat until <small>Optional</small></span><day-date-input v-model="recurrenceUntilInput" type="datetime-local" :min="dueAtInput" :disabled="saving" /></label>
       <fieldset class="reminder-section" :disabled="saving">
         <legend><ion-icon :icon="notificationsOutline" />Remind me before it’s due</legend>
         <div class="reminder-options"><label v-for="option in STUDENT_TASK_REMINDER_OPTIONS" :key="option.value" :class="{ checked: reminderMinutes.includes(option.value) }"><input v-model="reminderMinutes" type="checkbox" :value="option.value" /><span>{{ option.label }}</span></label></div>
@@ -51,6 +51,7 @@ import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import { addOutline, attachOutline, cameraOutline, checkmarkOutline, closeOutline, createOutline, documentAttachOutline, notificationsOutline } from 'ionicons/icons'
 import { computed, ref, watch, onBeforeUnmount } from 'vue'
 import TaskDialog from './TaskDialog.vue'
+import DayDateInput from '@/components/DayDateInput.vue'
 import type { StudentCourse, StudentTask, StudentTaskCategory, StudentTaskLinkDraft, StudentTaskPriority, StudentTaskRecurrence, StudentTaskReminderMinutes, StudentTaskSaveInput } from '@/types/studentTasks'
 import { STUDENT_TASK_PRIORITY_OPTIONS, STUDENT_TASK_RECURRENCE_OPTIONS, STUDENT_TASK_REMINDER_OPTIONS } from '@/types/studentTasks'
 import { fromLocalDateTimeInput, toLocalDateTimeInput } from '@/utils/studentTasks'

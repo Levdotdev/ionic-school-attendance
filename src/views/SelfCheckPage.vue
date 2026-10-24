@@ -131,7 +131,7 @@
               <p class="eyebrow">Step {{ currentStepIndex + 1 }} of {{ checkInSteps.length }}</p>
               <h2 id="current-step-title" ref="stageTitle" tabindex="-1">Take a clear selfie</h2>
               <p class="stage-copy">
-                Face the camera in good lighting. The capture time{{ requiresLocation ? ' and verified location' : '' }}
+                Face the camera in good lighting. The capture time{{ requiresSchoolLocation ? ' and verified location' : '' }}
                 will be stamped directly on the submitted photo.
               </p>
 
@@ -158,10 +158,11 @@
               <div class="stage-icon"><ion-icon :icon="locationOutline" /></div>
               <p class="eyebrow">Step {{ currentStepIndex + 1 }} of {{ checkInSteps.length }}</p>
               <h2 id="current-step-title" ref="stageTitle" tabindex="-1">Confirm your location</h2>
-              <p class="stage-copy">
+              <p v-if="requiresSchoolLocation" class="stage-copy">
                 Allow precise location while you are at school. The server securely checks whether you are within
                 the approved 180-meter school area.
               </p>
+              <p v-else class="stage-copy">Share your current location privately with your linked parent or guardian. Online classes do not require you to be at school. Your teacher cannot view this location, and it will not be printed on your photo.</p>
 
               <div class="location-tip">
                 <ion-icon :icon="informationCircleOutline" />
@@ -177,7 +178,7 @@
                 <ion-spinner v-if="locating" name="crescent" />
                 <template v-else>
                   <ion-icon slot="start" :icon="locationOutline" />
-                  {{ location ? 'Refresh location' : 'Use current location' }}
+                  {{ location ? 'Update captured location' : 'Use current location' }}
                 </template>
               </ion-button>
             </section>
@@ -205,7 +206,7 @@
                   <span class="evidence-icon"><ion-icon :icon="locationOutline" /></span>
                   <div>
                     <strong>Current location</strong>
-                    <small>About {{ Math.round(location?.accuracyM ?? 0) }} m accuracy</small>
+                    <small>{{ requiresSchoolLocation ? `About ${Math.round(location?.accuracyM ?? 0)} m accuracy` : 'Shared privately with your linked parent only' }}</small>
                   </div>
                   <ion-icon class="evidence-check" :icon="checkmarkCircleOutline" />
                 </div>
@@ -232,7 +233,7 @@
                   {{ uploadedSelfiePath ? 'Selfie uploaded' : 'Retake selfie' }}
                 </button>
                 <button v-if="requiresLocation" type="button" :disabled="submitting || locating || Boolean(uploadedSelfiePath)" @click="captureLocation">
-                  Refresh location
+                  Update captured location
                 </button>
               </div>
 
@@ -262,7 +263,7 @@
           <aside class="check-in-sidebar">
             <section class="campus-surface requirement-card">
               <p class="eyebrow">Check-in requirements</p>
-              <h2>{{ requiresLocation ? 'On-site verification' : 'Online verification' }}</h2>
+              <h2>{{ requiresSchoolLocation ? 'On-site verification' : 'Online verification' }}</h2>
               <div class="requirement-list">
                 <div v-if="requiresBarcode" :class="{ 'is-complete': barcodeCaptured }">
                   <span><ion-icon :icon="barcodeOutline" /></span>
@@ -271,12 +272,12 @@
                 </div>
                 <div :class="{ 'is-complete': Boolean(selfie) }">
                   <span><ion-icon :icon="cameraOutline" /></span>
-                  <div><strong>New selfie</strong><small>Timestamp{{ requiresLocation ? ' and location' : '' }} stamped</small></div>
+                  <div><strong>New selfie</strong><small>Timestamp{{ requiresSchoolLocation ? ' and location' : '' }} stamped</small></div>
                   <ion-icon v-if="selfie" class="requirement-check" :icon="checkmarkCircleOutline" />
                 </div>
                 <div v-if="requiresLocation" :class="{ 'is-complete': Boolean(location) }">
                   <span><ion-icon :icon="locationOutline" /></span>
-                  <div><strong>Precise location</strong><small>Within the school area</small></div>
+                  <div><strong>{{ requiresSchoolLocation ? 'Precise location' : 'Private location' }}</strong><small>{{ requiresSchoolLocation ? 'Within the school area' : 'Only your linked parent can view it' }}</small></div>
                   <ion-icon v-if="location" class="requirement-check" :icon="checkmarkCircleOutline" />
                 </div>
               </div>
@@ -286,7 +287,7 @@
               <ion-icon :icon="shieldCheckmarkOutline" />
               <div>
                 <strong>Private attendance evidence</strong>
-                <p>Your photo and location are visible only to authorized school staff and your linked parent.</p>
+                <p>{{ requiresSchoolLocation ? 'Your photo and school-location evidence are visible only to authorized staff and your linked parent.' : 'Your teacher can verify your selfie. Only your linked parent can view your online-class location.' }}</p>
               </div>
             </section>
           </aside>
@@ -332,6 +333,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
+import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
@@ -385,7 +387,8 @@ const meetingId = computed(() => {
   return Array.isArray(value) ? value[0] : value
 })
 const requiresBarcode = computed(() => meeting.value?.attendance_mode !== 'self_online')
-const requiresLocation = computed(() => meeting.value?.attendance_mode !== 'self_online')
+const requiresSchoolLocation = computed(() => meeting.value?.attendance_mode !== 'self_online')
+const requiresLocation = computed(() => Boolean(meeting.value))
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
 const checkInSteps = computed<Array<{ key: CheckInStage; label: string }>>(() =>
   requiresBarcode.value
@@ -397,6 +400,7 @@ const checkInSteps = computed<Array<{ key: CheckInStage; label: string }>>(() =>
       ]
     : [
         { key: 'selfie', label: 'Selfie' },
+        { key: 'location', label: 'Private location' },
         { key: 'submit', label: 'Submit' },
       ],
 )
@@ -472,7 +476,7 @@ async function takeSelfie() {
     selfie.value = nextSelfie
     faceAnalysis.value = nextFace
     uploadedSelfiePath.value = null
-    if (!requiresLocation.value || location.value) await preparePhotoPreview()
+    if (!requiresSchoolLocation.value || location.value) await preparePhotoPreview()
   } catch (error) {
     showError(error)
   } finally {
@@ -489,7 +493,7 @@ async function captureLocation() {
     const nextLocation = await captureAttendanceLocation()
     const maxAccuracy = meeting.value?.max_accuracy_m
 
-    if (maxAccuracy && nextLocation.accuracyM > maxAccuracy) {
+    if (requiresSchoolLocation.value && maxAccuracy && nextLocation.accuracyM > maxAccuracy) {
       location.value = null
       throw new Error(
         `Location accuracy is ${Math.round(nextLocation.accuracyM)} m; ${Math.round(maxAccuracy)} m or better is required. Move outdoors and try again.`,
@@ -542,7 +546,7 @@ function clearStampedSelfie() {
 async function preparePhotoPreview() {
   if (!selfie.value) return
   const prepared = await watermarkAttendanceSelfie(selfie.value, {
-    location: requiresLocation.value ? location.value : null,
+    location: requiresSchoolLocation.value ? location.value : null,
   })
   clearStampedSelfie()
   stampedSelfie.value = prepared
@@ -604,7 +608,7 @@ async function submitAttendance() {
 }
 
 function formatMode(mode: SelfAttendanceMode): string {
-  if (mode === 'self_online') return 'Online class - a timestamped selfie is required.'
+  if (mode === 'self_online') return 'Online class — timestamped selfie and parent-only private location.'
   return 'On-site class - ID, timestamped selfie, and verified location required.'
 }
 
@@ -647,6 +651,8 @@ function clearEvidence() {
   uploadedSelfiePath.value = null
 }
 
+useRealtimeRefresh({ channel: 'attendance-check-in', enabled: () => !loading.value && !submitting.value, onChange: async () => { await loadMeeting() } })
+
 onMounted(refreshMeeting)
 onIonViewWillEnter(() => { if (!loading.value) void refreshMeeting() })
 onIonViewDidLeave(() => {
@@ -671,6 +677,7 @@ onBeforeUnmount(clearEvidence)
 }
 
 .face-required { max-width: 580px; margin: 32px auto; padding: 36px; text-align: center; }
+.self-check-page .primary-action { --color: var(--campus-on-accent); }
 .face-required > ion-icon { color: var(--campus-green); font-size: 2.4rem; }
 .face-required h2 { font-family: var(--campus-heading-font); font-weight: 500; }
 .face-required p { color: var(--campus-muted); line-height: 1.7; }

@@ -28,6 +28,10 @@ vi.mock('@/composables/useSession', () => ({
   accountPathForProfile: (profile: { role: string; onboarding_completed_at: string | null }) => profile.onboarding_completed_at ? `/${profile.role}` : '/account/setup',
 }))
 vi.mock('@/composables/useTheme', () => ({ useTheme: () => ({ isDark: false, toggleTheme: vi.fn() }) }))
+vi.mock('@/components/AppModal.vue', async () => {
+  const { defineComponent, h } = await import('vue')
+  return { default: defineComponent({ props: ['open', 'title'], setup: (props, { slots }) => () => props.open ? h('section', [h('h2', String(props.title)), slots.default?.()]) : null }) }
+})
 vi.mock('@/lib/supabase', () => ({ supabase: { auth: {
   signUp: mocks.signUp, signInWithPassword: mocks.signIn, resetPasswordForEmail: mocks.resetPassword,
 } } }))
@@ -110,7 +114,34 @@ describe('shared email and social registration', () => {
     await form.trigger('submit')
     await flushPromises()
     expect(mocks.resetPassword).toHaveBeenCalledWith('teacher@example.com', { redirectTo: 'https://ionic-school-attendance.vercel.app/auth/callback' })
-    expect(wrapper.text()).toContain('If an account uses this email')
+    expect(wrapper.text()).toContain('Reset request accepted. If an account uses this email')
+    expect(wrapper.text()).toContain('does not confirm email delivery')
+    wrapper.unmount()
+  })
+
+  it('shows email rate-limit errors without claiming that a reset link was delivered', async () => {
+    mocks.resetPassword.mockResolvedValue({ error: { code: 'over_email_send_rate_limit', message: 'Email rate limit exceeded' } })
+    const wrapper = mount(LoginPage)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Forgot password?')!.trigger('click')
+    const form = wrapper.findAll('form')[1]
+    await form.find('input').setValue('teacher@example.com')
+    await form.trigger('submit'); await flushPromises()
+    expect(wrapper.text()).toContain('email service has reached its sending limit')
+    expect(wrapper.text()).not.toContain('Reset request accepted')
+    wrapper.unmount()
+  })
+
+  it('prevents repeated reset requests during the send cooldown', async () => {
+    const wrapper = mount(LoginPage)
+    await flushPromises()
+    await wrapper.findAll('button').find((button) => button.text() === 'Forgot password?')!.trigger('click')
+    const form = wrapper.findAll('form')[1]
+    await form.find('input').setValue('teacher@example.com')
+    await form.trigger('submit'); await flushPromises()
+    await form.trigger('submit'); await flushPromises()
+    expect(mocks.resetPassword).toHaveBeenCalledOnce()
+    expect(wrapper.text()).toContain('Request again in 60s')
     wrapper.unmount()
   })
 })
