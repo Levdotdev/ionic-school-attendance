@@ -181,6 +181,8 @@ Custom SMTP credentials and sender/domain verification are external setup requir
 
 Read-only checks on October 24 confirmed that the connected School Attendance Project already has Gmail SMTP enabled (`smtp.gmail.com`, port `587`) and a Supabase email quota of `1000` per hour. Those settings were not changed. Reset requests returned HTTP 200 without SMTP errors; mailbox delivery and provider-side quotas still require recipient-specific verification. Do not diagnose this project as using the default two-emails-per-hour service.
 
+A recipient-approved production test later confirmed reset-email delivery: Supabase recorded the send, and the recipient found the message in Gmail Spam. Mark the message as **Not spam** and use the latest recovery link in the requesting browser. A different address that has not registered cannot receive a password reset; the public response intentionally does not reveal account existence.
+
 ## Verification
 
 ```bash

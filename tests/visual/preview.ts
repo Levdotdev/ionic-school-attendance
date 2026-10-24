@@ -98,7 +98,8 @@ client.rpc = (name: string, args?: Row) => {
   if (name === 'my_face_enrollment_access') return { data: [{ is_enrolled: true, can_retake: false, granted_at: null }], error: null }
   if (name === 'my_face_enrollment_status') return { data: { enrolled: true }, error: null }
   if (name === 'student_attendance_history') { tables.fixture_attendance_history = history; return query('fixture_attendance_history') }
-  if (name === 'parent_online_attendance_locations' || name === 'visible_schedule_meeting_exceptions') return { data: [], error: null }
+  if (name === 'parent_online_attendance_locations') { tables.fixture_online_locations = []; return query('fixture_online_locations') }
+  if (name === 'visible_schedule_meeting_exceptions') return { data: [], error: null }
   if (name === 'admin_student_face_enrollments') return { data: students.map((student, index) => ({ student_id: student.id, full_name: student.full_name, email: student.email, enrolled: index !== 3, can_retake: index === 2, granted_at: index === 2 ? created : null, enrolled_at: index === 3 ? null : created })), error: null }
   if (name === 'review_teacher_registration') { const teacher = teachers.find(row => row.id === args?.p_teacher_id); if (teacher) Object.assign(teacher, { teacher_approval_status: args?.p_decision, teacher_approval_note: args?.p_note }) }
   if (name === 'record_manual_attendance') { const record = attendance.find(row => row.student_id === args?.p_student_id); if (record) record.status = args?.p_status }
