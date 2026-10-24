@@ -39,6 +39,10 @@
 
         <footer class="menu-footer">
           <ion-list lines="none">
+            <ion-item button :detail="false" @click="settingsOpen = true">
+              <ion-icon slot="start" :icon="settingsOutline" aria-hidden="true" />
+              <ion-label>Account & preferences</ion-label>
+            </ion-item>
             <ion-item button :detail="false" @click="toggleTheme">
               <ion-icon slot="start" :icon="isDark ? sunnyOutline : moonOutline" aria-hidden="true" />
               <ion-label>{{ isDark ? 'Light mode' : 'Dark mode' }}</ion-label>
@@ -51,6 +55,7 @@
           <p>Mindoro State University · Attendance and student work</p>
         </footer>
       </div>
+      <account-settings-modal :open="settingsOpen" @close="settingsOpen = false" />
     </ion-content>
   </ion-menu>
 </template>
@@ -74,6 +79,7 @@ import {
   moonOutline,
   peopleOutline,
   schoolOutline,
+  settingsOutline,
   shieldCheckmarkOutline,
   sunnyOutline,
 } from 'ionicons/icons'
@@ -82,6 +88,7 @@ import { useRoute, useRouter, type RouteLocationRaw } from 'vue-router'
 
 import { useSession, type AppRole } from '@/composables/useSession'
 import { useTheme } from '@/composables/useTheme'
+import AccountSettingsModal from '@/components/AccountSettingsModal.vue'
 
 interface NavigationItem {
   label: string
@@ -95,6 +102,7 @@ const router = useRouter()
 const { profile, signOut } = useSession()
 const { isDark, toggleTheme } = useTheme()
 const signingOut = ref(false)
+const settingsOpen = ref(false)
 
 const navigation = computed<NavigationItem[]>(() => {
   if (profile.value?.role === 'teacher') {
@@ -175,7 +183,7 @@ async function logout() {
 
 .portal-menu::part(container) {
   border-right: 1px solid var(--campus-border);
-  box-shadow: 12px 0 34px rgba(6, 63, 42, 0.09);
+  box-shadow: none;
 }
 
 .menu-shell {
@@ -228,7 +236,7 @@ async function logout() {
   margin-bottom: 22px;
   padding: 12px;
   border: 1px solid var(--campus-border);
-  border-radius: 15px;
+  border-radius: 10px;
   background: var(--campus-surface-soft);
 }
 
@@ -270,7 +278,7 @@ ion-list {
 
 ion-item {
   --background: transparent;
-  --border-radius: 12px;
+  --border-radius: 8px;
   --color: var(--campus-muted);
   --min-height: 46px;
   --padding-start: 12px;

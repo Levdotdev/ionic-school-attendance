@@ -2,7 +2,7 @@
   <ion-app>
     <ion-split-pane content-id="portal-content" when="lg" :disabled="!showPortalMenu">
       <app-menu v-if="showPortalMenu" />
-      <ion-router-outlet id="portal-content" />
+      <ion-router-outlet id="portal-content" :key="user?.id ?? 'signed-out'" />
     </ion-split-pane>
   </ion-app>
 </template>
@@ -14,6 +14,9 @@ import { useRoute, useRouter } from 'vue-router'
 
 import AppMenu from '@/components/AppMenu.vue'
 import { useSession } from '@/composables/useSession'
+import { loadStudentTaskData } from '@/services/studentTasks'
+import { isNativeTaskReminders, listenForStudentTaskReminderActions, syncStudentTaskReminders } from '@/services/studentTaskReminders'
+import { initializeNativeOAuthCallback } from '@/services/oauth'
 import {
   listenForClassNotificationActions,
   registerForClassNotifications,
@@ -23,23 +26,28 @@ const route = useRoute()
 const router = useRouter()
 const { initializeSession, profile, user } = useSession()
 const showPortalMenu = computed(
-  () => Boolean(profile.value) && route.path !== '/login' && !route.path.startsWith('/student/check-in/'),
+  () => Boolean(profile.value?.onboarding_completed_at)
+    && /^\/(student|teacher|parent|admin)(\/|$)/.test(route.path)
+    && !route.path.startsWith('/student/check-in/'),
 )
 
 let stopNotificationActions: (() => Promise<void>) | undefined
+let stopTaskActions: (() => Promise<void>) | undefined
 let notificationUserId: string | null = null
 let notificationAttempt = 0
 
 watch(
-  () => [user.value?.id ?? null, profile.value?.role ?? null] as const,
-  ([userId, role]) => {
-    if (!userId || (role !== 'teacher' && role !== 'student')) {
+  () => [user.value?.id ?? null, profile.value?.role ?? null, profile.value?.onboarding_completed_at ?? null] as const,
+  ([userId, role, completed]) => {
+    if (!userId || !completed || (role !== 'teacher' && role !== 'student')) {
       notificationUserId = null
+      notificationAttempt++
       return
     }
-    if (notificationUserId === userId) return
+    const accountKey = `${userId}:${role}`
+    if (notificationUserId === accountKey) return
 
-    notificationUserId = userId
+    notificationUserId = accountKey
     const attempt = ++notificationAttempt
     void registerForClassNotifications().catch((error) => {
       // Notification setup must never block the portal. Leave the current
@@ -47,12 +55,19 @@ watch(
       if (attempt === notificationAttempt) notificationUserId = null
       console.warn('Class notifications could not be enabled.', error)
     })
+    if (role === 'student' && isNativeTaskReminders()) {
+      void loadStudentTaskData(userId).then(async ({ tasks }) => {
+        if (user.value?.id !== userId || profile.value?.role !== 'student' || attempt !== notificationAttempt) return
+        await syncStudentTaskReminders(userId, tasks)
+      }).catch((error) => console.warn('Task reminders could not be refreshed.', error))
+    }
   },
   { immediate: true },
 )
 
 onMounted(() => {
   void initializeSession()
+  void initializeNativeOAuthCallback().catch(error => console.warn('Sign-in callback handling could not be enabled.', error))
   void listenForClassNotificationActions(async (destination) => {
     await router.push(destination)
   })
@@ -62,9 +77,14 @@ onMounted(() => {
     .catch((error) => {
       console.warn('Notification tap handling could not be enabled.', error)
     })
+  void listenForStudentTaskReminderActions(async (taskId, dueAt) => {
+    await router.push({ path: '/student/tasks', query: { task: taskId, due: dueAt } })
+  }).then(stop => { stopTaskActions = stop })
+    .catch(error => console.warn('Task notification tap handling could not be enabled.', error))
 })
 
 onBeforeUnmount(() => {
   void stopNotificationActions?.()
+  void stopTaskActions?.()
 })
 </script>

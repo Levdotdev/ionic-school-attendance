@@ -123,7 +123,7 @@ export async function watermarkAttendanceSelfie(
   context.shadowBlur = 3
 
   lines.forEach((line, index) => {
-    context.fillText(line, padding, canvas.height - panelHeight + padding + index * lineHeight)
+    context.fillText(line, padding, canvas.height - panelHeight + padding + index * lineHeight, canvas.width - padding * 2)
   })
 
   const blob = await new Promise<Blob>((resolve, reject) => {

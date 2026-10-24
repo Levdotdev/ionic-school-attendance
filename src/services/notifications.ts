@@ -40,6 +40,9 @@ export interface LocalReminderScheduleResult {
 const INSTALLATION_STORAGE_KEY = 'minsu-notification-installation-id'
 const CLASS_REMINDERS_CHANNEL_ID = 'class-reminders'
 const PUSH_REGISTRATION_TIMEOUT_MS = 20_000
+let registrationEpoch = 0
+let registrationPromise: Promise<NotificationRegistrationResult> | null = null
+const pendingTokenSaves = new Set<Promise<void>>()
 
 function isNativeNotificationPlatform(): boolean {
   return Capacitor.isNativePlatform()
@@ -94,9 +97,8 @@ function notificationId(input: ClassReminderInput, offsetMinutes: number): numbe
     hash = Math.imul(hash, 0x01000193)
   }
 
-  // Android notification IDs are signed 32-bit integers. Keep IDs positive
-  // and reserve zero, which some OEM implementations treat specially.
-  return (hash >>> 0) % 2_147_483_646 + 1
+  // Reserve the upper billion for task reminders so neither replaces the other.
+  return (hash >>> 0) % 999_999_999 + 1
 }
 
 async function ensureClassReminderChannel(): Promise<void> {
@@ -114,11 +116,11 @@ async function ensureClassReminderChannel(): Promise<void> {
   })
 }
 
-async function saveNativePushToken(token: string): Promise<void> {
+async function saveNativePushToken(token: string, expectedUserId: string, epoch: number): Promise<void> {
   const userResult = await supabase.auth.getUser()
   if (userResult.error) throw userResult.error
-  if (!userResult.data.user) {
-    throw new Error('Sign in before enabling class notifications.')
+  if (userResult.data.user?.id !== expectedUserId || epoch !== registrationEpoch) {
+    throw new Error('Your account changed before notifications were enabled. Try again.')
   }
 
   const platform = Capacitor.getPlatform()
@@ -142,10 +144,25 @@ async function saveNativePushToken(token: string): Promise<void> {
  * calling this safely on each authenticated app launch does not accumulate
  * duplicate handlers.
  */
-export async function registerForClassNotifications(): Promise<NotificationRegistrationResult> {
+export function registerForClassNotifications(): Promise<NotificationRegistrationResult> {
   if (!isNativeNotificationPlatform()) {
-    return { supported: false, permission: 'unsupported', tokenRegistered: false }
+    return Promise.resolve({ supported: false, permission: 'unsupported', tokenRegistered: false })
   }
+  if (!registrationPromise) {
+    const epoch = registrationEpoch
+    const pending = registerNativeNotifications(epoch).finally(() => {
+      if (registrationPromise === pending) registrationPromise = null
+    })
+    registrationPromise = pending
+  }
+  return registrationPromise
+}
+
+async function registerNativeNotifications(epoch: number): Promise<NotificationRegistrationResult> {
+  const currentUser = await supabase.auth.getUser()
+  if (currentUser.error) throw currentUser.error
+  const expectedUserId = currentUser.data.user?.id
+  if (!expectedUserId) throw new Error('Sign in before enabling class notifications.')
 
   let permission = await PushNotifications.checkPermissions()
   if (permission.receive === 'prompt' || permission.receive === 'prompt-with-rationale') {
@@ -155,6 +172,7 @@ export async function registerForClassNotifications(): Promise<NotificationRegis
   if (permission.receive !== 'granted') {
     return { supported: true, permission: 'denied', tokenRegistered: false }
   }
+  if (epoch !== registrationEpoch) throw new Error('Notification registration was cancelled because the account changed.')
 
   await ensureClassReminderChannel()
 
@@ -171,9 +189,11 @@ export async function registerForClassNotifications(): Promise<NotificationRegis
     })
 
     registrationHandle = await PushNotifications.addListener('registration', (token) => {
-      void saveNativePushToken(token.value).then(
-        () => resolveRegistration(true),
-        rejectRegistration,
+      const saving = saveNativePushToken(token.value, expectedUserId, epoch)
+      pendingTokenSaves.add(saving)
+      void saving.then(
+        () => { pendingTokenSaves.delete(saving); resolveRegistration(true) },
+        error => { pendingTokenSaves.delete(saving); rejectRegistration(error) },
       )
     })
     errorHandle = await PushNotifications.addListener('registrationError', (registrationError) => {
@@ -185,8 +205,7 @@ export async function registerForClassNotifications(): Promise<NotificationRegis
       rejectRegistration(new Error('Notification registration timed out. Please try again.'))
     }, PUSH_REGISTRATION_TIMEOUT_MS)
 
-    await PushNotifications.register()
-    await tokenRegistered
+    await Promise.all([PushNotifications.register(), tokenRegistered])
 
     return { supported: true, permission: 'granted', tokenRegistered: true }
   } finally {
@@ -203,7 +222,13 @@ export async function registerForClassNotifications(): Promise<NotificationRegis
  * invalidate its native registration token.
  */
 export async function unregisterFromClassNotifications(): Promise<void> {
+  registrationEpoch++
+  registrationPromise = null
   if (!isNativeNotificationPlatform()) return
+
+  // Finish any already-sent registration before removing this installation.
+  // The epoch check rejects callbacks that arrive after sign-out starts.
+  await Promise.allSettled([...pendingTokenSaves])
 
   const installationId = getStoredInstallationId()
   let serverError: unknown
@@ -241,7 +266,7 @@ export async function listenForClassNotificationActions(
 ): Promise<() => Promise<void>> {
   if (!isNativeNotificationPlatform()) return async () => undefined
 
-  const handle = await PushNotifications.addListener(
+  const pushHandle = await PushNotifications.addListener(
     'pushNotificationActionPerformed',
     (action) => {
       const route = classReminderRoute(action.notification.data)
@@ -249,7 +274,13 @@ export async function listenForClassNotificationActions(
     },
   )
 
-  return async () => handle.remove()
+  const localHandle = await LocalNotifications.addListener('localNotificationActionPerformed', action => {
+    const route = classReminderRoute(action.notification.extra)
+    if (route) void navigate(route)
+  })
+  return async () => {
+    await Promise.all([pushHandle.remove(), localHandle.remove()])
+  }
 }
 
 async function requestLocalNotificationPermission(): Promise<boolean> {

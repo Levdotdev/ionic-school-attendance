@@ -18,6 +18,7 @@ export interface Profile {
   teacher_approval_status: TeacherApprovalStatus | null
   teacher_approval_note: string | null
   teacher_approved_at: string | null
+  onboarding_completed_at: string | null
   created_at: string
   updated_at: string
 }

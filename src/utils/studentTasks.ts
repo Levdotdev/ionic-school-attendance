@@ -8,6 +8,25 @@ import type {
 const DAY_MS = 86_400_000
 const MAX_GENERATED_OCCURRENCES = 10_000
 
+export function localTaskDateKey(value: string | Date): string {
+  const date = value instanceof Date ? value : new Date(value)
+  return [date.getFullYear(), String(date.getMonth() + 1).padStart(2, '0'), String(date.getDate()).padStart(2, '0')].join('-')
+}
+
+/** Preserve the positions of tasks hidden by filters when the visible set is reordered. */
+export function mergeStudentTaskOrder(allIds: string[], visibleIds: string[]): string[] {
+  const known = new Set(allIds)
+  const orderedVisible = [...new Set(visibleIds)].filter(id => known.has(id))
+  const visible = new Set(orderedVisible)
+  let next = 0
+  return allIds.map(id => visible.has(id) ? orderedVisible[next++] : id)
+}
+
+export function manualStudentTaskOrder(tasks: StudentTask[]): StudentTask[] {
+  return [...tasks].sort((left, right) => left.sort_order - right.sort_order
+    || left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id))
+}
+
 export function toLocalDateTimeInput(value: string | Date): string {
   const date = value instanceof Date ? value : new Date(value)
   if (Number.isNaN(date.getTime())) return ''
@@ -121,6 +140,12 @@ export function expandStudentTasks(
     const recurrenceEnd = task.recurrence_until
       ? new Date(task.recurrence_until)
       : windowEnd
+    // Keep the original deadline visible even when a long-running recurring
+    // schedule began before the generated window.
+    if (base <= recurrenceEnd) {
+      const original = displayed(task, task.due_at, now)
+      if (original) result.set(original.key, original)
+    }
     let occurrence = new Date(base)
     let generated = 0
 
@@ -142,6 +167,7 @@ export function expandStudentTasks(
 
     for (const state of task.occurrences) {
       if (state.status !== 'completed') continue
+      if (task.recurrence_until && new Date(state.due_at) > recurrenceEnd) continue
       const item = displayed(task, state.due_at, now)
       if (item) result.set(item.key, item)
     }
@@ -184,7 +210,10 @@ export function compareStudentTasks(
     return right.task.created_at.localeCompare(left.task.created_at)
       || left.due_at.localeCompare(right.due_at)
   }
+  const priorityRank = { high: 0, medium: 1, low: 2 }
   return left.due_at.localeCompare(right.due_at)
+    || priorityRank[left.task.priority] - priorityRank[right.task.priority]
+    || left.task.id.localeCompare(right.task.id)
 }
 
 export function taskStatusLabel(status: StudentTaskDisplayStatus): string {

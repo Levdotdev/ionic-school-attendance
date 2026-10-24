@@ -1,29 +1,6 @@
 <template>
   <ion-page class="dashboard-page">
-    <ion-header class="app-header">
-      <ion-toolbar class="app-toolbar">
-        <ion-buttons slot="start">
-          <ion-menu-button aria-label="Open navigation menu" />
-        </ion-buttons>
-        <ion-title>
-          <span class="toolbar-brand">
-            <span class="toolbar-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
-            <span><strong>MinSU Attendance</strong><small>Family portal</small></span>
-          </span>
-        </ion-title>
-        <ion-buttons slot="end">
-          <ion-button
-            class="sign-out-button"
-            aria-label="Sign out of the family portal"
-            :disabled="signingOut"
-            @click="logout"
-          >
-            <ion-icon slot="start" :icon="logOutOutline" aria-hidden="true" />
-            <span class="button-label">Sign out</span>
-          </ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
+    <portal-header portal="Family portal" :busy="signingOut" @logout="logout" />
 
     <ion-content class="dashboard-content">
       <div v-if="loading" class="loading-state" role="status" aria-label="Loading family attendance">
@@ -81,7 +58,7 @@
               <div v-if="activeSection === 'overview'" class="latest-grid">
                 <section
                   class="status-card"
-                  :class="dashboard.latest.status === 'present' ? 'is-present' : 'is-absent'"
+                  :class="dashboard.latest.attendance_enabled === false ? 'is-not-counted' : dashboard.latest.status === 'present' ? 'is-present' : 'is-absent'"
                   :aria-labelledby="`latest-status-heading-${dashboard.student.id}`"
                 >
                   <div class="status-icon" aria-hidden="true">
@@ -89,7 +66,7 @@
                   </div>
                   <p class="eyebrow">Latest attendance</p>
                   <h3 :id="`latest-status-heading-${dashboard.student.id}`">
-                    {{ statusLabel(dashboard.latest.status) }}
+                    {{ attendanceLabel(dashboard.latest) }}
                   </h3>
                   <p class="meeting-name">{{ dashboard.latest.class_name }} · {{ dashboard.latest.meeting_title }}</p>
                   <p class="meeting-time">
@@ -111,7 +88,7 @@
                       <p class="eyebrow">Submitted evidence</p>
                       <h3 :id="`evidence-heading-${dashboard.student.id}`">Check-in details</h3>
                     </div>
-                    <ion-icon :icon="shieldCheckmarkOutline" aria-hidden="true" />
+                    <ion-button size="small" fill="outline" @click="openEvidence(dashboard.latest, dashboard.student.full_name)">View details</ion-button>
                   </div>
 
                   <div class="evidence-body">
@@ -209,8 +186,9 @@
                     </div>
 
                     <div class="history-meta">
-                      <span class="attendance-pill" :class="record.status === 'present' ? 'is-present' : 'is-absent'">
-                        {{ statusLabel(record.status) }}
+                      <ion-button size="small" fill="outline" @click="openEvidence(record, dashboard.student.full_name)">Details</ion-button>
+                      <span class="attendance-pill" :class="record.attendance_enabled === false ? 'is-not-counted' : record.status === 'present' ? 'is-present' : 'is-absent'">
+                        {{ attendanceLabel(record) }}
                       </span>
                       <small class="history-verification" :class="verificationClass(record.verification_status)">
                         {{ verificationLabel(record.verification_status) }}
@@ -241,6 +219,7 @@
         </div>
       </main>
     </ion-content>
+    <evidence-detail-modal :record="selectedEvidence" :student-name="selectedStudentName" @close="selectedEvidence = null" />
   </ion-page>
 </template>
 
@@ -256,6 +235,7 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
+  onIonViewWillEnter,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -279,6 +259,9 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
+import PortalHeader from '@/components/PortalHeader.vue'
+import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 interface StudentRow {
   id: string
@@ -300,6 +283,8 @@ interface AttendanceDisplayRow {
   meeting_title: string
   meeting_starts_at: string
   class_name: string
+  review_note: string | null
+  attendance_enabled: boolean
 }
 
 const router = useRouter()
@@ -311,6 +296,8 @@ const signingOut = ref(false)
 const students = ref<StudentRow[]>([])
 const attendance = ref<AttendanceDisplayRow[]>([])
 const message = ref('')
+const selectedEvidence = ref<AttendanceDisplayRow | null>(null)
+const selectedStudentName = ref('')
 const activeSection = computed(() => route.query.section === 'history' ? 'history' : 'overview')
 
 const studentDashboards = computed(() => students.value.map((student) => {
@@ -326,6 +313,7 @@ async function loadDashboard() {
     const { data: links, error: linksError } = await supabase
       .from('guardian_links')
       .select('student_id')
+      .eq('parent_id', profile.value?.id ?? '')
       .order('created_at')
     if (linksError) throw linksError
 
@@ -346,7 +334,7 @@ async function loadDashboard() {
     const { data: records, error: recordsError } = await supabase
       .from('attendance_records')
       .select(
-        'id,meeting_id,student_id,status,verification_status,latitude,longitude,distance_m,selfie_path,submitted_at',
+        'id,meeting_id,student_id,status,verification_status,latitude,longitude,distance_m,selfie_path,submitted_at,created_at,review_note',
       )
       .in('student_id', studentIds)
       .order('submitted_at', { ascending: false })
@@ -372,7 +360,7 @@ async function loadDashboard() {
 
     const { data: meetings, error: meetingsError } = await supabase
       .from('meetings')
-      .select('id,class_id,title,starts_at')
+      .select('id,class_id,title,starts_at,attendance_enabled')
       .in('id', meetingIds)
     if (meetingsError) throw meetingsError
 
@@ -400,19 +388,26 @@ async function loadDashboard() {
         distance_m: record.distance_m,
         selfie_path: record.selfie_path,
         selfie_url: selfieUrlByRecordId.get(record.id) ?? null,
-        submitted_at: record.submitted_at,
+        submitted_at: record.submitted_at || record.created_at,
         meeting_title: meeting.title,
         meeting_starts_at: meeting.starts_at,
         class_name: schoolClass.name,
+        review_note: record.review_note,
+        attendance_enabled: meeting.attendance_enabled,
       } as AttendanceDisplayRow]
     })
   } catch (error) {
     students.value = []
     attendance.value = []
-    message.value = error instanceof Error ? error.message : 'Unable to load parent attendance.'
+    message.value = toUserFacingErrorMessage(error, 'Unable to load parent attendance.')
   } finally {
     refreshing.value = false
   }
+}
+
+function openEvidence(record: AttendanceDisplayRow, name: string) {
+  selectedStudentName.value = name
+  selectedEvidence.value = record
 }
 
 function initials(name: string) {
@@ -424,8 +419,10 @@ function initials(name: string) {
     .join('') || 'ST'
 }
 
-function statusLabel(status: AttendanceDisplayRow['status']) {
-  return status === 'present' ? 'Present' : 'Absent'
+function attendanceLabel(record: AttendanceDisplayRow) {
+  if (!record.attendance_enabled) return 'Meeting not counted'
+  if (record.verification_status === 'rejected') return 'Voided by teacher'
+  return record.status === 'present' ? 'Present' : 'Absent'
 }
 
 function verificationLabel(status: AttendanceDisplayRow['verification_status']) {
@@ -451,6 +448,7 @@ function verificationIcon(status: AttendanceDisplayRow['verification_status']) {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Asia/Manila',
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
@@ -475,21 +473,28 @@ onMounted(async () => {
     await initializeSession()
     if (profile.value?.role === 'parent') await loadDashboard()
   } catch (error) {
-    message.value = error instanceof Error ? error.message : 'Unable to load the parent account.'
+    message.value = toUserFacingErrorMessage(error, 'Unable to load the parent account.')
   } finally {
     loading.value = false
   }
 })
+
+onIonViewWillEnter(async () => {
+  if (loading.value || refreshing.value || signingOut.value || selectedEvidence.value || profile.value?.role !== 'parent') return
+  await loadDashboard()
+})
 </script>
 
 <style scoped>
+.is-not-counted { background: var(--campus-surface-soft) !important; color: var(--campus-muted) !important; }
+.is-not-counted .status-icon { color: var(--campus-muted); background: var(--campus-surface); }
 .dashboard-page {
   --campus-accent-local: var(--campus-accent, #087443);
   --campus-navy-local: var(--campus-navy, #063f2a);
-  --campus-bg-local: var(--campus-bg, #eef3f7);
+  --campus-bg-local: var(--campus-bg, #f5f5ef);
   --campus-surface-local: var(--campus-surface, #ffffff);
   --campus-surface-soft-local: var(--campus-surface-soft, #f5f8fa);
-  --campus-accent-soft-local: var(--campus-accent-soft, #e1edf5);
+  --campus-accent-soft-local: var(--campus-accent-soft, #e6f0e9);
   --campus-text-local: var(--campus-text, #182632);
   --campus-muted-local: var(--campus-muted, #62727f);
   --campus-border-local: var(--campus-border, #d9e2e9);
@@ -557,9 +562,9 @@ onMounted(async () => {
 }
 
 .dashboard-shell {
-  width: min(100%, 1120px);
+  width: min(100%, 1180px);
   margin: 0 auto;
-  padding: 34px 20px 64px;
+  padding: 32px 28px 56px;
 }
 
 .loading-state {

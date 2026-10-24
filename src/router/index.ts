@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from '@ionic/vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import type { AppRole } from '@/types/database'
 import { supabase } from '@/lib/supabase'
+import { readAccountProfile, useSession } from '@/composables/useSession'
 
 const routes = [
   {
@@ -17,6 +18,14 @@ const routes = [
     path: '/auth/callback',
     component: () => import('@/views/AuthCallbackPage.vue'),
     meta: { public: true },
+  },
+  {
+    path: '/account/setup',
+    component: () => import('@/views/AccountSetupPage.vue'),
+  },
+  {
+    path: '/account/recover',
+    component: () => import('@/views/PasswordRecoveryPage.vue'),
   },
   {
     path: '/student',
@@ -67,6 +76,9 @@ const roleDestination = (role?: AppRole | null): RouteLocationRaw => {
 }
 
 router.beforeEach(async (to) => {
+  // Let the callback finish exchanging its grant before checking the profile.
+  if (to.path === '/auth/callback') return true
+
   const {
     data: { session },
   } = await supabase.auth.getSession()
@@ -75,14 +87,24 @@ router.beforeEach(async (to) => {
     return to.meta.public ? true : '/login'
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('role')
-    .eq('id', session.user.id)
-    .maybeSingle()
+  if (to.path === '/account/recover') return true
+  const { initializeSession, passwordRecovery } = useSession()
+  await initializeSession()
+  if (passwordRecovery.value) return '/account/recover'
 
-  const role = profile?.role as AppRole | undefined
+  const { data: profile, error } = await readAccountProfile(session.user.id)
+
+  if (error || !profile) {
+    // Keep a recoverable sign-in screen rather than redirecting to an arbitrary
+    // student portal when account loading fails.
+    return to.path === '/login' || to.path === '/account/setup' ? true : '/account/setup'
+  }
+
+  const role = profile.role as AppRole | undefined
   const destination = roleDestination(role)
+
+  if (!profile.onboarding_completed_at) return to.path === '/account/setup' ? true : '/account/setup'
+  if (to.path === '/account/setup') return destination
 
   if (to.path === '/' || to.path === '/login') return destination
 

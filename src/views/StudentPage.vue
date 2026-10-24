@@ -1,30 +1,6 @@
 <template>
   <ion-page class="student-page">
-    <ion-header class="campus-header" :translucent="true">
-      <ion-toolbar>
-        <ion-buttons slot="start">
-          <ion-menu-button aria-label="Open navigation menu" />
-        </ion-buttons>
-        <ion-title>
-          <span class="toolbar-brand">
-            <span class="brand-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
-            <span>
-              <strong>MinSU Attendance</strong>
-              <small>Student portal</small>
-            </span>
-          </span>
-        </ion-title>
-        <ion-buttons slot="end">
-          <ion-button class="sign-out-button" :disabled="signingOut" aria-label="Sign out" @click="logout">
-            <ion-spinner v-if="signingOut" name="crescent" />
-            <template v-else>
-              <ion-icon slot="start" :icon="logOutOutline" />
-              <span class="sign-out-label">Sign out</span>
-            </template>
-          </ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
+    <portal-header portal="Student portal" :busy="signingOut" @logout="logout" />
 
     <ion-content class="student-content" :fullscreen="true">
       <div
@@ -145,8 +121,8 @@
           <section class="welcome-banner">
             <div>
               <p class="eyebrow">{{ dashboardDate }}</p>
-              <h1>Welcome back, {{ studentFirstName }}</h1>
-              <p>Check your open attendance windows and submit before they close.</p>
+              <h1>{{ activeSection === 'courses' ? 'My courses' : activeSection === 'schedule' ? 'This week’s schedule' : `Welcome back, ${studentFirstName}` }}</h1>
+              <p>{{ activeSection === 'courses' ? 'Your subjects, enrollment, and connected coursework.' : activeSection === 'schedule' ? 'Plan your week and see which meetings count toward attendance.' : 'Check your open attendance windows and submit before they close.' }}</p>
             </div>
             <div class="availability-summary" :class="{ 'has-meetings': meetings.length > 0 }">
               <span class="summary-icon"><ion-icon :icon="meetings.length ? timeOutline : checkmarkCircleOutline" /></span>
@@ -359,16 +335,7 @@
       </main>
     </ion-content>
 
-    <ion-modal :is-open="joinModalOpen" :can-dismiss="!joiningClass" @did-dismiss="closeJoinModal">
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>Join a class</ion-title>
-          <ion-buttons slot="end">
-            <ion-button :disabled="joiningClass" @click="closeJoinModal">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="ion-padding">
+    <app-modal :open="joinModalOpen" title="Join a class" :busy="joiningClass" @close="closeJoinModal">
         <div class="join-modal-copy">
           <div class="panel-icon"><ion-icon :icon="peopleOutline" /></div>
           <p class="eyebrow">Course enrollment</p>
@@ -406,8 +373,7 @@
           <ion-icon :icon="joinFailed ? alertCircleOutline : checkmarkCircleOutline" />
           <span>{{ joinMessage }}</span>
         </div>
-      </ion-content>
-    </ion-modal>
+    </app-modal>
 
     <face-enrollment-modal
       :open="faceEnrollmentOpen"
@@ -432,6 +398,7 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
+  onIonViewWillEnter,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -453,6 +420,8 @@ import { computed, onMounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
+import PortalHeader from '@/components/PortalHeader.vue'
+import AppModal from '@/components/AppModal.vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
@@ -772,6 +741,7 @@ function closeJoinModal() {
 
 function formatDateTime(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Asia/Manila',
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
@@ -779,6 +749,7 @@ function formatDateTime(value: string): string {
 
 function formatMeetingTime(meeting: Pick<AvailableMeeting, 'starts_at' | 'ends_at'>): string {
   const dateAndTime = new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Asia/Manila',
     weekday: 'short',
     month: 'short',
     day: 'numeric',
@@ -786,6 +757,7 @@ function formatMeetingTime(meeting: Pick<AvailableMeeting, 'starts_at' | 'ends_a
     minute: '2-digit',
   }).format(new Date(meeting.starts_at))
   const endTime = new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Asia/Manila',
     hour: 'numeric',
     minute: '2-digit',
   }).format(new Date(meeting.ends_at))
@@ -858,7 +830,7 @@ async function logout() {
   }
 }
 
-onMounted(async () => {
+async function loadStudentDashboard(promptForFaceEnrollment = false) {
   try {
     await initializeSession()
     if (!user.value || profile.value?.role !== 'student') return
@@ -871,13 +843,19 @@ onMounted(async () => {
         loadCoursesAndSchedule(),
         loadFaceEnrollmentStatus(),
       ])
-      faceEnrollmentOpen.value = !faceEnrolled.value
+      if (promptForFaceEnrollment) faceEnrollmentOpen.value = !faceEnrolled.value
     }
   } catch (error) {
     pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load the student account.')
   } finally {
     loading.value = false
   }
+}
+
+onMounted(() => loadStudentDashboard(true))
+onIonViewWillEnter(async () => {
+  if (loading.value || !registrationCompleted.value || refreshing.value || refreshingSchedule.value || signingOut.value || savingRegistration.value || joiningClass.value || faceEnrollmentOpen.value || joinModalOpen.value) return
+  await loadStudentDashboard()
 })
 </script>
 
@@ -1058,7 +1036,7 @@ onMounted(async () => {
   height: 2.15rem;
   place-items: center;
   border-radius: 50%;
-  background: #e5ebef;
+  background: var(--campus-surface-soft);
   font-size: 0.78rem;
   font-weight: 750;
 }
@@ -1175,7 +1153,7 @@ onMounted(async () => {
 }
 
 .capture-state {
-  background: #edf1f4;
+  background: var(--campus-surface-soft);
   color: var(--campus-muted);
 }
 
@@ -1359,8 +1337,8 @@ onMounted(async () => {
 }
 
 .meeting-icon.mode-self_online {
-  background: #ede9fb;
-  color: #7255b4;
+  background: var(--campus-accent-soft);
+  color: var(--campus-accent);
 }
 
 .meeting-copy {
@@ -1395,7 +1373,7 @@ onMounted(async () => {
 }
 
 .status-chip.is-complete {
-  background: #edf1f4;
+  background: var(--campus-surface-soft);
   color: var(--campus-muted);
 }
 

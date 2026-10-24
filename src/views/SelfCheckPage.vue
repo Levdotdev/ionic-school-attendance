@@ -60,7 +60,15 @@
           </div>
         </section>
 
-        <div class="check-in-layout">
+        <section v-if="!faceEnrolled" class="campus-surface face-required">
+          <ion-icon :icon="shieldCheckmarkOutline" />
+          <h2>Set up face verification first</h2>
+          <p>Register your face once so your check-in selfie can be matched to you. Your teacher can mark attendance manually if you prefer.</p>
+          <p v-if="message" class="face-error" role="alert">{{ message }}</p>
+          <ion-button @click="faceEnrollmentOpen = true">Set up face verification</ion-button>
+        </section>
+
+        <div v-else class="check-in-layout">
           <section class="campus-surface flow-card" aria-labelledby="current-step-title">
             <p class="sr-only" role="status" aria-live="polite" aria-atomic="true">
               {{ stageAnnouncement }}
@@ -128,7 +136,7 @@
               </p>
 
               <div v-if="selfie" class="selfie-frame">
-                <img :src="selfie.previewUrl" alt="Captured attendance selfie" />
+                <img :src="(stampedSelfie ?? selfie).previewUrl" alt="Captured attendance selfie" />
                 <span><ion-icon :icon="checkmarkCircleOutline" /> Photo captured</span>
               </div>
 
@@ -204,7 +212,7 @@
               </div>
 
               <div v-if="selfie" class="review-photo">
-                <img :src="selfie.previewUrl" alt="Attendance selfie ready for submission" />
+                <img :src="(stampedSelfie ?? selfie).previewUrl" alt="Timestamped attendance selfie ready for submission" />
               </div>
 
               <div class="review-edits">
@@ -223,7 +231,7 @@
                 >
                   {{ uploadedSelfiePath ? 'Selfie uploaded' : 'Retake selfie' }}
                 </button>
-                <button v-if="requiresLocation" type="button" :disabled="submitting || locating" @click="captureLocation">
+                <button v-if="requiresLocation" type="button" :disabled="submitting || locating || Boolean(uploadedSelfiePath)" @click="captureLocation">
                   Refresh location
                 </button>
               </div>
@@ -284,6 +292,7 @@
           </aside>
         </div>
       </main>
+      <face-enrollment-modal :open="faceEnrollmentOpen" @close="faceEnrollmentOpen = false" @enrolled="onFaceEnrolled" />
     </ion-content>
   </ion-page>
 </template>
@@ -300,6 +309,8 @@ import {
   IonSpinner,
   IonTitle,
   IonToolbar,
+  onIonViewWillEnter,
+  onIonViewDidLeave,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -321,6 +332,7 @@ import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
+import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
 import { supabase } from '@/lib/supabase'
 import { scanStudentBarcode } from '@/services/barcode'
 import { analyzeFace, FACE_MODEL_VERSION, type FaceAnalysis } from '@/services/faceRecognition'
@@ -359,6 +371,9 @@ const submitting = ref(false)
 const meeting = ref<AvailableMeeting | null>(null)
 const rawBarcode = ref<string | null>(null)
 const selfie = ref<CapturedSelfie | null>(null)
+const stampedSelfie = ref<CapturedSelfie | null>(null)
+const faceEnrolled = ref(false)
+const faceEnrollmentOpen = ref(false)
 const faceAnalysis = ref<FaceAnalysis | null>(null)
 const uploadedSelfiePath = ref<string | null>(null)
 const location = ref<AttendanceLocation | null>(null)
@@ -405,7 +420,7 @@ const stageAnnouncement = computed(() => {
   return `Step ${currentStepIndex.value + 1} of ${checkInSteps.value.length}: ${step?.label ?? 'Check-in'}.`
 })
 const canSubmit = computed(() => {
-  if (!meeting.value || !selfie.value || !faceAnalysis.value) return false
+  if (!meeting.value || !selfie.value || !faceAnalysis.value || !faceEnrolled.value || takingSelfie.value || locating.value) return false
   if (requiresBarcode.value && !rawBarcode.value) return false
   if (requiresLocation.value && !location.value) return false
   return true
@@ -453,9 +468,11 @@ async function takeSelfie() {
       throw error
     }
     releaseSelfiePreview(selfie.value)
+    clearStampedSelfie()
     selfie.value = nextSelfie
     faceAnalysis.value = nextFace
     uploadedSelfiePath.value = null
+    if (!requiresLocation.value || location.value) await preparePhotoPreview()
   } catch (error) {
     showError(error)
   } finally {
@@ -464,6 +481,7 @@ async function takeSelfie() {
 }
 
 async function captureLocation() {
+  if (uploadedSelfiePath.value) return
   locating.value = true
   message.value = ''
 
@@ -479,6 +497,8 @@ async function captureLocation() {
     }
 
     location.value = nextLocation
+    clearStampedSelfie()
+    if (selfie.value) await preparePhotoPreview()
   } catch (error) {
     showError(error)
   } finally {
@@ -508,6 +528,29 @@ async function loadMeeting() {
   }
 
   meeting.value = data as AvailableMeeting
+  const { data: enrollment, error: enrollmentError } = await supabase.rpc('my_face_enrollment_status')
+  if (enrollmentError) throw enrollmentError
+  const status = Array.isArray(enrollment) ? enrollment[0] : enrollment
+  faceEnrolled.value = Boolean(status?.enrolled)
+}
+
+function clearStampedSelfie() {
+  releaseSelfiePreview(stampedSelfie.value)
+  stampedSelfie.value = null
+}
+
+async function preparePhotoPreview() {
+  if (!selfie.value) return
+  const prepared = await watermarkAttendanceSelfie(selfie.value, {
+    location: requiresLocation.value ? location.value : null,
+  })
+  clearStampedSelfie()
+  stampedSelfie.value = prepared
+}
+
+function onFaceEnrolled() {
+  faceEnrolled.value = true
+  faceEnrollmentOpen.value = false
 }
 
 async function submitAttendance() {
@@ -532,22 +575,10 @@ async function submitAttendance() {
     }
 
     if (!uploadedSelfiePath.value) {
-      if (!selfie.value.watermarkApplied) {
-        const watermarkedSelfie = await watermarkAttendanceSelfie(selfie.value, {
-          location: requiresLocation.value && location.value
-            ? {
-                latitude: location.value.latitude,
-                longitude: location.value.longitude,
-                accuracyM: location.value.accuracyM,
-              }
-            : null,
-        })
-        releaseSelfiePreview(selfie.value)
-        selfie.value = watermarkedSelfie
-      }
+      if (!stampedSelfie.value) await preparePhotoPreview()
 
       uploadedSelfiePath.value = await uploadAttendanceSelfie(
-        selfie.value,
+        stampedSelfie.value ?? selfie.value,
         user.value.id,
         meeting.value.id,
       )
@@ -593,7 +624,9 @@ watch(
   },
 )
 
-onMounted(async () => {
+async function refreshMeeting() {
+  loading.value = true
+  message.value = ''
   try {
     await initializeSession()
     await loadMeeting()
@@ -602,9 +635,26 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
+}
+
+function clearEvidence() {
+  releaseSelfiePreview(selfie.value)
+  clearStampedSelfie()
+  selfie.value = null
+  rawBarcode.value = null
+  faceAnalysis.value = null
+  location.value = null
+  uploadedSelfiePath.value = null
+}
+
+onMounted(refreshMeeting)
+onIonViewWillEnter(() => { if (!loading.value) void refreshMeeting() })
+onIonViewDidLeave(() => {
+  faceEnrollmentOpen.value = false
+  clearEvidence()
 })
 
-onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
+onBeforeUnmount(clearEvidence)
 </script>
 
 <style scoped>
@@ -619,6 +669,12 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   --campus-radius-lg: var(--campus-radius, 20px);
   --campus-radius-md: var(--campus-radius-sm, 14px);
 }
+
+.face-required { max-width: 580px; margin: 32px auto; padding: 36px; text-align: center; }
+.face-required > ion-icon { color: var(--campus-green); font-size: 2.4rem; }
+.face-required h2 { font-family: var(--campus-heading-font); font-weight: 500; }
+.face-required p { color: var(--campus-muted); line-height: 1.7; }
+.face-required .face-error { color: var(--campus-danger); }
 
 .campus-header ion-toolbar {
   --background: var(--campus-surface);
@@ -835,7 +891,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   height: 1.9rem;
   place-items: center;
   border-radius: 50%;
-  background: #edf1f4;
+  background: var(--campus-surface-soft);
   font-size: 0.72rem;
   font-weight: 750;
 }
@@ -851,7 +907,7 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
 
 .stepper li.is-current .step-number {
   background: var(--campus-accent);
-  color: #fff;
+  color: var(--ion-color-primary-contrast);
   box-shadow: 0 0 0 5px color-mix(in srgb, var(--campus-accent) 12%, transparent);
 }
 
@@ -929,7 +985,8 @@ onBeforeUnmount(() => releaseSelfiePreview(selfie.value))
   margin-right: 0;
   margin-left: 0;
   --background: var(--campus-accent);
-  --background-hover: #1c506f;
+  --background-hover: var(--ion-color-primary-shade);
+  --color: var(--ion-color-primary-contrast);
   --border-radius: 11px;
   --box-shadow: none;
   font-weight: 700;

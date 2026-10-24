@@ -6,25 +6,25 @@ An Ionic Vue school attendance system backed by Supabase Auth, PostgreSQL, Row L
 
 ### Accounts and access
 
-- Student, parent, and teacher registration with email and password.
+- Email/password registration asks only for credentials. A shared account-setup dialog follows authentication.
 - Google and Facebook sign-in support through Supabase OAuth.
 - New teacher accounts remain pending until an administrator approves them.
 - Role-based side menus for administrators, teachers, students, and parents.
 - MinSU green-and-gold light and dark themes.
 - Responsive sign-in and registration layout with a fixed information panel on wide screens.
 
-Social sign-in creates a student account by default. Teachers and parents should use the role-aware email registration form so the teacher-approval and parent-linking workflows are applied.
+Email, Google, and Facebook use the same one-time student, teacher, or parent setup. Teacher accounts always require administrator approval. Administrators are provisioned separately and cannot be selected during signup. The provider-neutral database setup is applied to the connected project.
 
 ### Attendance
 
 - Camera-only scanning for long 1D student ID barcodes: Code 128, Code 39, Code 93, Codabar, ITF, EAN, and UPC.
 - Raw barcode values are not stored in browser storage or public tables. PostgreSQL stores a one-way hash in a private schema.
 - Manual teacher attendance with present and absent controls.
-- On-site self-check requires the physical ID barcode, a newly captured selfie, the school geofence, and face verification when a template is enrolled.
-- Online self-check requires a newly captured selfie and face verification when a template is enrolled.
+- On-site self-check requires the physical ID barcode, a newly captured selfie, the school geofence, and face verification against the enrolled template.
+- Online self-check requires a newly captured selfie and face verification; it does not request an ID barcode or location.
 - Event self-check is disabled; event attendance is handled manually by the teacher.
 - Self-check submissions are accepted immediately. The teacher can inspect the evidence photo, void an invalid submission, or restore it.
-- The captured photo contains a visible Manila timestamp and submitted coordinates/accuracy.
+- The actual submitted photo is previewed with a Manila timestamp and, on site, submitted coordinates/accuracy burned into its pixels.
 - Evidence photos are stored privately and are available only to the student, approved class teacher, and verified linked parent as authorized by database policies.
 - The school geofence is fixed at `13.387419, 121.162494` with a `180` meter radius.
 
@@ -43,6 +43,7 @@ Face matching is an attendance aid, not a guarantee of identity. Teachers should
 - A weekly schedule automatically produces the current week's meeting.
 - Only the current Monday-to-Sunday schedule is shown to users.
 - Teachers can disable, restore, edit, or remove one meeting without changing the repeating schedule.
+- Weekly schedules save the default attendance mode and check-in opening interval. Changes apply to new occurrences and preserve existing meeting overrides.
 - The database uses the Asia/Manila timezone when creating weekly occurrences and reminders.
 
 ### Notifications
@@ -62,7 +63,23 @@ The notification code, schema, queue, and Edge Function are deployed, but actual
 - Create, edit, delete, complete, and reopen tasks.
 - Priority, due date/time, recurrence, notes, links, search, filtering, and sorting.
 - Private task attachments with database and Storage access policies.
-- Task summary and occurrence tracking.
+- The original task manager's date-grouped cards, list/calendar views, summary filters, manual drag ordering, priorities, and recurrence filters.
+- Complete/reopen a date, skip one repeat, stop future repeats, or delete an entire series through confirmation dialogs.
+- Camera photos, private attachment downloads, and Android's save-file picker.
+- Device-local task reminders, notification tap navigation, and sign-out cleanup.
+- Task, category, edit, and confirmation dialogs; account/preferences and evidence dialogs use the same campus theme.
+
+## Applied database release
+
+These three migrations were applied to the connected production project on October 24, 2026, with explicit approval. Their local versions match Supabase's recorded versions:
+
+1. `20261024050436_provider_neutral_account_setup.sql` — adds protected one-time role setup; preserves existing roles/approvals; untouched social accounts can select their intended role.
+2. `20261024050508_recurring_schedule_attendance_defaults.sql` — saves weekly attendance defaults in both current-week and early-reminder meeting generators.
+3. `20261024050518_fix_reminder_delivery_claim_conflict.sql` — fixes the confirmed `push_token_id is ambiguous` delivery-claim failure.
+
+Post-release read-only checks confirmed that existing roles and teacher approval decisions were unchanged, setup and dispatcher permissions remain restricted, and both weekly generators use the new defaults. The first scheduled reminder dispatch after the fix returned HTTP 200 with no due deliveries. No credentials or production data are included in local tests.
+
+Local PostgreSQL regression tests use an in-memory PGlite database with actual application migrations. The harness supplies minimal Auth/Storage fixtures and substitutes Cron scheduling functions; it does not test hosted Auth providers, FCM delivery, or device hardware.
 
 ## Local setup
 
@@ -95,7 +112,7 @@ pnpm exec supabase link --project-ref your-project-ref
 pnpm exec supabase db push
 ```
 
-The currently connected School Attendance Project already has all checked-in migrations and the `dispatch-class-reminders` Edge Function deployed.
+The connected project has all checked-in migrations and `dispatch-class-reminders` deployed, including the three rebuild migrations listed above.
 
 ### Create the first administrator
 

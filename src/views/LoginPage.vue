@@ -52,7 +52,7 @@
             </li>
           </ul>
 
-          <p class="story-foot"><span aria-hidden="true"></span> Secure system online</p>
+          <p class="story-foot"><span aria-hidden="true"></span> Mindoro State University · Academic portal</p>
         </section>
 
         <section class="auth-panel" aria-labelledby="auth-heading">
@@ -88,7 +88,7 @@
               <p>
                 {{ mode === 'signin'
                   ? 'Use your registered email and password to continue.'
-                  : 'Choose your role and enter your information to get started.' }}
+                  : 'Start with your email and password. Set up your account after signing in.' }}
               </p>
             </div>
 
@@ -132,46 +132,12 @@
                 </ion-button>
               </div>
 
-              <p v-if="mode === 'signup'" class="social-role-note">
-                New social accounts start as student accounts. Teachers and parents should register with email below.
-              </p>
+              <p class="social-role-note">For students, teachers, and parents / guardians.</p>
             </div>
 
             <div class="auth-divider"><span>or continue with email</span></div>
 
             <form class="auth-form" @submit.prevent="submit">
-              <template v-if="mode === 'signup'">
-                <ion-input
-                  v-model="fullName"
-                  class="form-control"
-                  label="Full name"
-                  label-placement="stacked"
-                  fill="outline"
-                  autocomplete="name"
-                  :disabled="authBusy"
-                  required
-                />
-
-                <ion-select
-                  v-model="registrationRole"
-                  class="form-control"
-                  label="Account type"
-                  label-placement="stacked"
-                  fill="outline"
-                  interface="popover"
-                  :disabled="authBusy"
-                >
-                  <ion-select-option value="student">Student</ion-select-option>
-                  <ion-select-option value="teacher">Teacher</ion-select-option>
-                  <ion-select-option value="parent">Parent / guardian</ion-select-option>
-                </ion-select>
-
-                <p v-if="registrationRole === 'teacher'" class="role-notice">
-                  <ion-icon :icon="shieldCheckmarkOutline" aria-hidden="true" />
-                  Teacher accounts require administrator approval before class tools become available.
-                </p>
-              </template>
-
               <ion-input
                 v-model="email"
                 class="form-control"
@@ -209,6 +175,8 @@
                 required
               />
 
+              <ion-button v-if="mode === 'signin'" fill="clear" size="small" class="forgot-password" :disabled="authBusy" @click="openRecovery">Forgot password?</ion-button>
+
               <div
                 v-if="message"
                 class="form-message"
@@ -235,6 +203,17 @@
           </div>
         </section>
       </main>
+      <ion-modal class="recovery-modal" :is-open="recoveryOpen" :backdrop-dismiss="!recoveryBusy" @didDismiss="recoveryOpen = false">
+        <ion-header class="ion-no-border"><ion-toolbar><ion-title>Reset your password</ion-title><ion-buttons slot="end"><ion-button :disabled="recoveryBusy" @click="recoveryOpen = false">Close</ion-button></ion-buttons></ion-toolbar></ion-header>
+        <ion-content class="recovery-content">
+          <form class="recovery-form" @submit.prevent="sendRecoveryEmail">
+            <p>Enter the email linked to your account. We’ll send a secure link to choose a new password.</p>
+            <ion-input v-model="recoveryEmail" type="email" label="Email address" label-placement="stacked" fill="outline" autocomplete="email" :disabled="recoveryBusy" required />
+            <p v-if="recoveryMessage" :class="recoveryError ? 'recovery-error' : 'recovery-success'" :role="recoveryError ? 'alert' : 'status'">{{ recoveryMessage }}</p>
+            <ion-button type="submit" expand="block" :disabled="recoveryBusy"><ion-spinner v-if="recoveryBusy" name="crescent" /><template v-else>Send reset link</template></ion-button>
+          </form>
+        </ion-content>
+      </ion-modal>
     </ion-content>
   </ion-page>
 </template>
@@ -242,16 +221,19 @@
 <script setup lang="ts">
 import {
   IonButton,
+  IonButtons,
   IonContent,
+  IonHeader,
   IonIcon,
   IonInput,
   IonLabel,
+  IonModal,
   IonPage,
   IonSegment,
   IonSegmentButton,
-  IonSelect,
-  IonSelectOption,
   IonSpinner,
+  IonTitle,
+  IonToolbar,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -269,25 +251,24 @@ import {
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 
-import { homePathForRole, useSession, type AppRole } from '@/composables/useSession'
+import { accountPathForProfile, useSession } from '@/composables/useSession'
 import { useTheme } from '@/composables/useTheme'
 import { supabase } from '@/lib/supabase'
 import {
   beginSocialSignIn,
   initializeNativeOAuthCallback,
+  oauthRedirectUrl,
   type SocialProvider,
 } from '@/services/oauth'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 type AuthMode = 'signin' | 'signup'
-type RegistrationRole = Extract<AppRole, 'student' | 'teacher' | 'parent'>
 
 const router = useRouter()
 const { initializeSession, refreshProfile, profile } = useSession()
 const { isDark, toggleTheme } = useTheme()
 
 const mode = ref<AuthMode>('signin')
-const registrationRole = ref<RegistrationRole>('student')
-const fullName = ref('')
 const email = ref('')
 const password = ref('')
 const passwordConfirmation = ref('')
@@ -296,13 +277,40 @@ const socialBusy = ref<SocialProvider | null>(null)
 const message = ref('')
 const hasError = ref(false)
 const authBusy = computed(() => busy.value || socialBusy.value !== null)
+const recoveryOpen = ref(false)
+const recoveryEmail = ref('')
+const recoveryBusy = ref(false)
+const recoveryMessage = ref('')
+const recoveryError = ref(false)
+
+function openRecovery() {
+  recoveryEmail.value = email.value
+  recoveryMessage.value = ''
+  recoveryError.value = false
+  recoveryOpen.value = true
+}
+
+async function sendRecoveryEmail() {
+  if (recoveryBusy.value) return
+  recoveryBusy.value = true
+  recoveryMessage.value = ''
+  recoveryError.value = false
+  try {
+    const { error } = await supabase.auth.resetPasswordForEmail(recoveryEmail.value.trim().toLowerCase(), { redirectTo: oauthRedirectUrl() })
+    if (error) throw error
+    recoveryMessage.value = 'If an account uses this email, a reset link will arrive shortly. Open it on this device and browser to continue.'
+  } catch (error) {
+    recoveryError.value = true
+    recoveryMessage.value = toUserFacingErrorMessage(error, 'The reset email could not be sent. Please try again.')
+  } finally { recoveryBusy.value = false }
+}
 
 function validate(): string | null {
   if (!email.value.trim() || !email.value.includes('@')) return 'Enter a valid email address.'
-  if (password.value.length < 8) return 'Password must contain at least 8 characters.'
+  if (!password.value) return 'Enter your password.'
 
   if (mode.value === 'signup') {
-    if (fullName.value.trim().length < 2) return 'Enter your full name.'
+    if (password.value.length < 8) return 'Password must contain at least 8 characters.'
     if (password.value !== passwordConfirmation.value) return 'The passwords do not match.'
   }
 
@@ -314,10 +322,11 @@ async function redirectSignedInUser() {
   if (!currentProfile) {
     throw new Error('Your account profile is not ready. Please sign in again in a moment.')
   }
-  await router.replace(homePathForRole(currentProfile.role))
+  await router.replace(accountPathForProfile(currentProfile))
 }
 
 async function submit() {
+  if (authBusy.value) return
   const validationMessage = validate()
   if (validationMessage) {
     hasError.value = true
@@ -345,10 +354,7 @@ async function submit() {
       email: email.value.trim().toLowerCase(),
       password: password.value,
       options: {
-        data: {
-          full_name: fullName.value.trim(),
-          role: registrationRole.value,
-        },
+        emailRedirectTo: oauthRedirectUrl(),
       },
     })
     if (error) throw error
@@ -358,20 +364,19 @@ async function submit() {
       return
     }
 
-    message.value = registrationRole.value === 'teacher'
-      ? 'Teacher account created. Confirm your email, then sign in to check the administrator approval status.'
-      : 'Account created. Check your email to confirm it, then return here to sign in.'
+    message.value = 'Check your email to confirm your account. After signing in, you can choose student, teacher, or parent and complete your information.'
     password.value = ''
     passwordConfirmation.value = ''
   } catch (error) {
     hasError.value = true
-    message.value = error instanceof Error ? error.message : 'Authentication failed. Please try again.'
+    message.value = toUserFacingErrorMessage(error, 'Authentication failed. Please try again.')
   } finally {
     busy.value = false
   }
 }
 
 async function signInWithProvider(provider: SocialProvider) {
+  if (authBusy.value) return
   socialBusy.value = provider
   hasError.value = false
   message.value = ''
@@ -380,9 +385,7 @@ async function signInWithProvider(provider: SocialProvider) {
     await beginSocialSignIn(provider)
   } catch (error) {
     hasError.value = true
-    message.value = error instanceof Error
-      ? error.message
-      : `Unable to continue with ${provider === 'google' ? 'Google' : 'Facebook'}. Please try again.`
+    message.value = toUserFacingErrorMessage(error, `Unable to continue with ${provider === 'google' ? 'Google' : 'Facebook'}. Please try again.`)
   } finally {
     socialBusy.value = null
   }
@@ -394,9 +397,14 @@ watch(mode, () => {
 })
 
 onMounted(async () => {
-  await initializeNativeOAuthCallback()
-  await initializeSession()
-  if (profile.value) await router.replace(homePathForRole(profile.value.role))
+  try {
+    await initializeNativeOAuthCallback()
+    await initializeSession()
+    if (profile.value) await router.replace(accountPathForProfile(profile.value))
+  } catch (error) {
+    hasError.value = true
+    message.value = toUserFacingErrorMessage(error, 'Unable to restore your account. Please sign in again.')
+  }
 })
 </script>
 
@@ -423,7 +431,12 @@ onMounted(async () => {
   --overflow: hidden;
 }
 
+.auth-content::part(scroll) {
+  overflow: hidden;
+}
+
 .auth-shell {
+  box-sizing: border-box;
   display: grid;
   height: 100dvh;
   overflow: hidden;
@@ -436,12 +449,11 @@ onMounted(async () => {
   height: 100%;
   min-height: 0;
   flex-direction: column;
-  overflow-x: hidden;
-  overflow-y: auto;
+  box-sizing: border-box;
+  overflow: hidden;
   padding: clamp(32px, 5vw, 68px);
   background: var(--campus-navy-local);
   color: #f4f9fc;
-  scrollbar-width: thin;
 }
 
 .auth-story::before,
@@ -648,9 +660,54 @@ onMounted(async () => {
   height: 100%;
   min-height: 0;
   overflow-y: auto;
-  place-items: center;
+  box-sizing: border-box;
+  align-content: start;
+  justify-items: center;
   padding: clamp(24px, 6vw, 84px);
   scrollbar-width: thin;
+}
+
+.auth-card {
+  margin-block: auto;
+}
+
+@media (min-width: 901px) and (max-height: 800px) {
+  .auth-story {
+    padding: 28px 36px;
+  }
+
+  .story-copy {
+    margin: auto 0 24px;
+  }
+
+  .story-copy h1 {
+    font-size: clamp(32px, 4vw, 48px);
+  }
+
+  .story-copy > p:last-child {
+    margin-top: 16px;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  .trust-list li {
+    padding: 10px 12px;
+  }
+
+  .story-foot {
+    margin-top: 18px;
+  }
+}
+
+@media (min-width: 901px) and (max-height: 560px) {
+  .trust-list,
+  .story-foot {
+    display: none;
+  }
+
+  .story-copy {
+    margin: auto 0;
+  }
 }
 
 .mobile-top {
@@ -839,9 +896,22 @@ onMounted(async () => {
   text-align: center;
 }
 
+.forgot-password { justify-self: end; margin: -8px 0 0; --padding-start: 0; --padding-end: 0; text-transform: none; font-size: 12px; }
+.recovery-modal { --width: 480px; --height: 380px; --border-radius: 20px; }
+.recovery-content { --background: var(--campus-surface); }
+.recovery-form { display: grid; gap: 20px; padding: 24px; }
+.recovery-form > p { margin: 0; color: var(--campus-muted); font-size: 14px; line-height: 1.6; }
+.recovery-form .recovery-error { color: var(--campus-danger); }
+.recovery-form .recovery-success { color: var(--campus-green); }
+.recovery-form ion-button { min-height: 44px; margin: 0; text-transform: none; }
+
 @media (max-width: 900px) {
   .auth-content {
     --overflow: auto;
+  }
+
+  .auth-content::part(scroll) {
+    overflow: auto;
   }
 
   .auth-shell {

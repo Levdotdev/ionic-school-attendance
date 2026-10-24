@@ -1,26 +1,6 @@
 <template>
   <ion-page class="teacher-page">
-    <ion-header class="app-header">
-      <ion-toolbar class="app-toolbar">
-        <ion-buttons slot="start">
-          <ion-menu-button aria-label="Open navigation menu" />
-        </ion-buttons>
-        <ion-title>
-          <span class="brand-lockup">
-            <span class="brand-mark" aria-hidden="true">M</span>
-            <span>
-              <strong>MinSU Attendance</strong>
-              <small>Teacher portal</small>
-            </span>
-          </span>
-        </ion-title>
-        <ion-buttons slot="end">
-          <ion-button class="sign-out-button" :disabled="signingOut" @click="logout">
-            {{ signingOut ? 'Signing out…' : 'Sign out' }}
-          </ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
+    <portal-header portal="Teacher portal" :busy="signingOut" @logout="logout" />
 
     <ion-content class="teacher-content">
       <main class="dashboard-shell">
@@ -83,6 +63,19 @@
             <span class="status-message-icon" aria-hidden="true">{{ messageKind === 'error' ? '!' : '✓' }}</span>
             <span>{{ message }}</span>
           </div>
+
+          <section v-if="classes.length && activeSection !== 'classes'" class="workspace-switcher" aria-label="Choose class">
+            <ion-select v-model="selectedClassId" label="Class workspace" label-placement="stacked" fill="outline">
+              <ion-select-option v-for="item in classes" :key="item.id" :value="item.id">{{ item.name }}{{ item.section ? ` · ${item.section}` : '' }}</ion-select-option>
+            </ion-select>
+            <ion-select v-if="meetings.length && activeSection !== 'schedules'" v-model="selectedMeetingId" label="This week’s meeting" label-placement="stacked" fill="outline">
+              <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">{{ meeting.title }} · {{ formatDateTime(meeting.starts_at) }}{{ meeting.attendance_enabled ? '' : ' · Not counted' }}</ion-select-option>
+            </ion-select>
+          </section>
+          <section v-if="!loadingClasses && !classes.length && activeSection !== 'classes'" class="surface-card no-classes">
+            <h2>Start with your first class</h2><p>Create a class, share its join code, then add the weekly schedule.</p>
+            <ion-button @click="beginClassCreate">Create class</ion-button>
+          </section>
 
           <section v-if="activeSection === 'classes'" class="surface-card class-workspace" aria-labelledby="class-workspace-title">
             <div class="section-heading class-heading">
@@ -158,6 +151,12 @@
               </article>
             </section>
 
+            <section v-if="activeSection === 'overview'" class="overview-grid">
+              <article class="surface-card overview-card"><p class="eyebrow">Your class</p><h2>{{ activeClass.name }}</h2><p>{{ activeClass.section || 'No section specified' }} · {{ students.length }} enrolled students</p><p class="join-code-copy">Join code <strong>{{ activeClass.join_code }}</strong></p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'classes' } })">Manage classes</ion-button></article>
+              <article class="surface-card overview-card"><p class="eyebrow">Weekly plan</p><h2>{{ meetings.length }} meetings this week</h2><p>{{ countedMeetings }} {{ countedMeetings === 1 ? 'meeting counts' : 'meetings count' }} toward attendance. Disable a single meeting when class is cancelled.</p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'schedules' } })">Manage schedules</ion-button></article>
+              <article class="surface-card overview-card"><p class="eyebrow">{{ selectedMeeting ? 'Selected meeting' : 'Attendance' }}</p><h2>{{ selectedMeeting?.title || 'No meeting selected' }}</h2><p>{{ selectedMeeting ? formatDateTime(selectedMeeting.starts_at) : 'Add your weekly schedule to create meetings automatically.' }}</p><ion-button v-if="selectedMeeting" @click="router.push({ path: '/teacher', query: { section: 'attendance' } })">Open attendance</ion-button></article>
+            </section>
+
             <section v-if="activeSection === 'attendance'" class="attendance-layout">
               <article class="surface-card attendance-card" aria-labelledby="student-attendance-title">
                 <div class="section-heading attendance-heading">
@@ -188,9 +187,9 @@
                   <div><strong>No meeting this week</strong><p>Add a weekly schedule or create an additional meeting below.</p></div>
                 </div>
 
-                <div v-if="loadingDetails" class="inline-loading" role="status">
+                <div v-if="loadingDetails || loadingAttendance" class="inline-loading" role="status">
                   <ion-spinner name="crescent" />
-                  <span>Loading students…</span>
+                  <span>{{ loadingDetails ? 'Loading students…' : 'Loading attendance…' }}</span>
                 </div>
                 <div v-else-if="students.length" class="student-list">
                   <div v-for="student in students" :key="student.id" class="student-row">
@@ -216,7 +215,7 @@
                         :aria-label="`Mark ${student.full_name} present`"
                         :aria-pressed="attendanceByStudent[student.id]?.status === 'present'"
                         :fill="attendanceByStudent[student.id]?.status === 'present' ? 'solid' : 'outline'"
-                        :disabled="!canMarkAttendance || markingStudentId === student.id || attendanceByStudent[student.id]?.source === 'self_check'"
+                        :disabled="!canMarkAttendance || Boolean(markingStudentId) || attendanceByStudent[student.id]?.source === 'self_check'"
                         @click="markAttendance(student.id, 'present')"
                       >
                         Present
@@ -227,7 +226,7 @@
                         :aria-label="`Mark ${student.full_name} absent`"
                         :aria-pressed="attendanceByStudent[student.id]?.status === 'absent'"
                         :fill="attendanceByStudent[student.id]?.status === 'absent' ? 'solid' : 'outline'"
-                        :disabled="!canMarkAttendance || markingStudentId === student.id || attendanceByStudent[student.id]?.source === 'self_check'"
+                        :disabled="!canMarkAttendance || Boolean(markingStudentId) || attendanceByStudent[student.id]?.source === 'self_check'"
                         @click="markAttendance(student.id, 'absent')"
                       >
                         Absent
@@ -328,6 +327,7 @@
                       <div class="schedule-copy">
                         <strong>{{ dayLabel(schedule.day_of_week) }} · {{ scheduleDateLabel(schedule.day_of_week) }}</strong>
                         <span>{{ formatTime(schedule.starts_at) }} – {{ formatTime(schedule.ends_at) }}<template v-if="schedule.room"> · {{ schedule.room }}</template></span>
+                        <span>{{ modeLabel(schedule.attendance_mode) }} · Check-in opens {{ schedule.check_in_minutes_before }} min before</span>
                         <ion-badge v-if="!schedule.is_active" color="medium">Inactive</ion-badge>
                       </div>
                       <div class="item-actions">
@@ -387,29 +387,8 @@
                       <a v-if="record.latitude != null && record.longitude != null" :href="mapUrl(record.latitude, record.longitude)" target="_blank" rel="noopener">View submitted location</a>
                     </div>
                   </div>
-                  <ion-textarea v-model="record.review_note" :label="record.verification_status === 'rejected' ? 'Void reason / teacher note' : 'Reason if voiding (recommended)'" label-placement="stacked" fill="outline" auto-grow />
                   <div class="review-buttons" role="group" :aria-label="`Review evidence for ${studentName(record.student_id)}`">
-                    <ion-button
-                      v-if="record.verification_status === 'rejected'"
-                      color="success"
-                      size="small"
-                      :aria-label="`Restore self-check attendance for ${studentName(record.student_id)}`"
-                      :disabled="reviewingRecordId === record.id"
-                      @click="setEvidenceVoided(record, false)"
-                    >
-                      Restore attendance
-                    </ion-button>
-                    <ion-button
-                      v-else
-                      color="danger"
-                      fill="outline"
-                      size="small"
-                      :aria-label="`Void invalid self-check attendance for ${studentName(record.student_id)}`"
-                      :disabled="reviewingRecordId === record.id"
-                      @click="setEvidenceVoided(record, true)"
-                    >
-                      Void attendance
-                    </ion-button>
+                    <ion-button size="small" fill="outline" @click="openEvidence(record)">View photo & review</ion-button>
                   </div>
                 </article>
               </div>
@@ -419,21 +398,9 @@
       </main>
     </ion-content>
 
-    <ion-modal
-      :is-open="classModalOpen"
-      :can-dismiss="!savingClass"
-      class="management-modal compact-management-modal"
-      @did-dismiss="cancelClassEdit"
-    >
-      <ion-header>
-        <ion-toolbar>
-          <ion-buttons slot="start">
-            <ion-button :disabled="savingClass" @click="cancelClassEdit">Cancel</ion-button>
-          </ion-buttons>
-          <ion-title>{{ editingClassId ? 'Edit class' : 'Create class' }}</ion-title>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="modal-content">
+    <evidence-detail-modal :record="selectedEvidence" :student-name="selectedEvidence ? studentName(selectedEvidence.student_id) : ''" reviewable :busy="Boolean(reviewingRecordId)" :action-error="evidenceError" @close="closeEvidence" @review="reviewSelectedEvidence" />
+
+    <app-modal :open="classModalOpen" :title="editingClassId ? 'Edit class' : 'Create class'" :busy="savingClass" @close="cancelClassEdit">
         <form class="modal-form" @submit.prevent="saveClass">
           <div class="form-heading">
             <strong>{{ editingClassId ? 'Class details' : 'Create a new class' }}</strong>
@@ -450,24 +417,9 @@
             <span v-else>{{ editingClassId ? 'Save changes' : 'Create class' }}</span>
           </ion-button>
         </form>
-      </ion-content>
-    </ion-modal>
+    </app-modal>
 
-    <ion-modal
-      :is-open="scheduleModalOpen"
-      :can-dismiss="!savingSchedule"
-      class="management-modal"
-      @did-dismiss="cancelScheduleEdit"
-    >
-      <ion-header>
-        <ion-toolbar>
-          <ion-buttons slot="start">
-            <ion-button :disabled="savingSchedule" @click="cancelScheduleEdit">Cancel</ion-button>
-          </ion-buttons>
-          <ion-title>{{ editingScheduleId ? 'Edit weekly schedule' : 'Add weekly schedule' }}</ion-title>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="modal-content">
+    <app-modal :open="scheduleModalOpen" :title="editingScheduleId ? 'Edit weekly schedule' : 'Add weekly schedule'" :busy="savingSchedule" @close="cancelScheduleEdit">
         <form class="modal-form form-grid" @submit.prevent="saveSchedule">
           <div v-if="message && messageKind === 'error'" class="status-message error full-row" role="alert">
             <span class="status-message-icon" aria-hidden="true">!</span>
@@ -479,6 +431,14 @@
           <ion-input v-model="scheduleForm.starts_at" label="Starts" label-placement="stacked" fill="outline" type="time" :disabled="savingSchedule" required />
           <ion-input v-model="scheduleForm.ends_at" label="Ends" label-placement="stacked" fill="outline" type="time" :disabled="savingSchedule" required />
           <ion-input v-model="scheduleForm.room" label="Room (optional)" label-placement="stacked" fill="outline" :disabled="savingSchedule" />
+          <ion-select v-model="scheduleForm.attendance_mode" class="full-row" label="Default attendance mode" label-placement="stacked" fill="outline" :disabled="savingSchedule">
+            <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
+            <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
+            <ion-select-option value="self_online">Online class self-check</ion-select-option>
+          </ion-select>
+          <ion-input v-model="scheduleForm.check_in_minutes_before" type="number" min="0" max="120" step="1" label="Open check-in minutes before class" label-placement="stacked" fill="outline" :disabled="savingSchedule" required />
+          <ion-toggle v-model="scheduleForm.is_active" :disabled="savingSchedule">Repeat weekly</ion-toggle>
+          <p class="schedule-help full-row">Changes apply to future weekly occurrences. Use Edit meeting to change a meeting already created this week. Turning off repetition keeps existing meetings and attendance.</p>
           <div class="notification-note full-row">
             <strong>Automatic class reminders</strong>
             <span>Teachers: 5 minutes before and at start time. Students: 2 hours, 1 hour, 30, 15, and 5 minutes before, plus start time.</span>
@@ -488,24 +448,9 @@
             <span v-else>{{ editingScheduleId ? 'Save schedule' : 'Add schedule' }}</span>
           </ion-button>
         </form>
-      </ion-content>
-    </ion-modal>
+    </app-modal>
 
-    <ion-modal
-      :is-open="meetingModalOpen"
-      :can-dismiss="!savingMeeting"
-      class="management-modal meeting-editor-modal"
-      @did-dismiss="cancelMeetingEdit"
-    >
-      <ion-header>
-        <ion-toolbar>
-          <ion-buttons slot="start">
-            <ion-button :disabled="savingMeeting" @click="cancelMeetingEdit">Cancel</ion-button>
-          </ion-buttons>
-          <ion-title>{{ editingMeetingId ? 'Edit meeting' : 'Create meeting' }}</ion-title>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content class="modal-content">
+    <app-modal :open="meetingModalOpen" :title="editingMeetingId ? 'Edit meeting' : 'Create meeting'" :busy="savingMeeting" wide @close="cancelMeetingEdit">
         <form class="modal-form form-grid" @submit.prevent="saveMeeting">
           <div v-if="message && messageKind === 'error'" class="status-message error full-row" role="alert">
             <span class="status-message-icon" aria-hidden="true">!</span>
@@ -530,8 +475,7 @@
             <span v-else>{{ editingMeetingId ? 'Save meeting' : 'Create meeting' }}</span>
           </ion-button>
         </form>
-      </ion-content>
-    </ion-modal>
+    </app-modal>
   </ion-page>
 </template>
 
@@ -557,11 +501,16 @@ import {
   IonTextarea,
   IonTitle,
   IonToolbar,
+  IonToggle,
   alertController,
+  onIonViewWillEnter,
 } from '@ionic/vue'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import { toUserFacingErrorMessage } from '@/utils/errors'
+import PortalHeader from '@/components/PortalHeader.vue'
+import AppModal from '@/components/AppModal.vue'
+import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
 
 type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
@@ -589,6 +538,8 @@ interface ScheduleRow {
   ends_at: string
   room: string | null
   is_active: boolean
+  attendance_mode: MeetingMode
+  check_in_minutes_before: number
 }
 
 interface MeetingRow {
@@ -666,12 +617,17 @@ const meetingModalOpen = ref(false)
 const approvalLoading = ref(true)
 const loadingClasses = ref(true)
 const loadingDetails = ref(false)
+const loadingAttendance = ref(false)
+let classDetailsRequest = 0
+let attendanceRequest = 0
 const savingClass = ref(false)
 const savingSchedule = ref(false)
 const savingMeeting = ref(false)
 const updatingMeeting = ref(false)
 const markingStudentId = ref('')
 const reviewingRecordId = ref('')
+const selectedEvidence = ref<(AttendanceRow & { meeting_title?: string; meeting_starts_at?: string; class_name?: string; attendance_enabled?: boolean }) | null>(null)
+const evidenceError = ref('')
 const signingOut = ref(false)
 const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
@@ -681,7 +637,7 @@ const meetingInputMin = `${week.startDate}T00:00`
 const meetingInputMax = `${week.endDateInclusive}T23:59`
 
 const classForm = reactive({ name: '', section: '' })
-const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '' })
+const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '', attendance_mode: 'teacher_manual' as MeetingMode, check_in_minutes_before: 15 as number | string, is_active: true })
 const meetingForm = reactive({
   title: '',
   mode: 'teacher_manual' as MeetingMode,
@@ -697,6 +653,7 @@ const attendanceByStudent = computed<Record<string, AttendanceRow>>(() =>
   Object.fromEntries(attendanceRecords.value.map((record) => [record.student_id, record])),
 )
 const evidenceRows = computed(() => attendanceRecords.value.filter((record) => record.source === 'self_check'))
+const countedMeetings = computed(() => meetings.value.filter(meeting => meeting.attendance_enabled).length)
 const presentCount = computed(
   () =>
     attendanceRecords.value.filter(
@@ -711,7 +668,7 @@ const voidedEvidenceCount = computed(
   () => evidenceRows.value.filter((record) => record.verification_status === 'rejected').length,
 )
 const canMarkAttendance = computed(
-  () => Boolean(selectedMeeting.value?.attendance_enabled && selectedMeeting.value.attendance_mode === 'teacher_manual'),
+  () => Boolean(!loadingDetails.value && !loadingAttendance.value && selectedMeeting.value?.attendance_enabled && selectedMeeting.value.attendance_mode === 'teacher_manual'),
 )
 const teacherApproved = computed(
   () => profile.value?.role === 'teacher' && profile.value.teacher_approval_status === 'approved',
@@ -759,14 +716,17 @@ const sectionMeta = computed(() => {
 })
 
 watch(selectedClassId, async (classId) => {
+  closeEvidence()
   if (editingClassId.value && editingClassId.value !== classId) cancelClassEdit()
   cancelScheduleEdit()
   cancelMeetingEdit()
+  clearClassDetails()
   if (classId) await loadClassDetails(classId)
-  else clearClassDetails()
+  else loadingDetails.value = false
 })
 
 watch(selectedMeetingId, async (meetingId) => {
+  closeEvidence()
   if (meetingId) await loadAttendance(meetingId)
   else attendanceRecords.value = []
 })
@@ -774,6 +734,15 @@ watch(selectedMeetingId, async (meetingId) => {
 onMounted(async () => {
   await initializeSession()
   await checkApprovalStatus()
+})
+
+onIonViewWillEnter(async () => {
+  if (approvalLoading.value || loadingDetails.value || signingOut.value || classModalOpen.value || scheduleModalOpen.value || meetingModalOpen.value || selectedEvidence.value || markingStudentId.value || updatingMeeting.value || reviewingRecordId.value) return
+  const previousClassId = selectedClassId.value
+  await checkApprovalStatus()
+  // A new selection refreshes through its watcher. An existing selection
+  // needs an explicit refresh because Ionic keeps this page mounted.
+  if (teacherApproved.value && previousClassId && selectedClassId.value === previousClassId) await loadClassDetails(previousClassId)
 })
 
 async function checkApprovalStatus() {
@@ -926,15 +895,18 @@ async function deleteClass(item: ClassRow) {
 }
 
 async function loadClassDetails(classId: string) {
+  const request = ++classDetailsRequest
+  const isCurrent = () => request === classDetailsRequest && classId === selectedClassId.value
   loadingDetails.value = true
   try {
     const { error: ensureError } = await supabase.rpc('ensure_current_week_meetings', { p_class_id: classId })
+    if (!isCurrent()) return
     if (ensureError) throw ensureError
 
     const [scheduleResult, meetingResult, enrollmentResult] = await Promise.all([
       supabase
         .from('class_schedules')
-        .select('id,class_id,day_of_week,starts_at,ends_at,room,is_active')
+        .select('*')
         .eq('class_id', classId),
       supabase
         .from('meetings')
@@ -948,12 +920,14 @@ async function loadClassDetails(classId: string) {
     if (scheduleResult.error) throw scheduleResult.error
     if (meetingResult.error) throw meetingResult.error
     if (enrollmentResult.error) throw enrollmentResult.error
+    const enrolledStudents = await loadStudents((enrollmentResult.data ?? []).map((row) => row.student_id))
+    if (!isCurrent()) return
 
-    schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[]).sort(
-      (a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at),
-    )
+    schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[])
+      .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_before: schedule.check_in_minutes_before ?? 15 }))
+      .sort((a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at))
     meetings.value = (meetingResult.data ?? []) as MeetingRow[]
-    students.value = await loadStudents((enrollmentResult.data ?? []).map((row) => row.student_id))
+    students.value = enrolledStudents
 
     const previousMeetingId = selectedMeetingId.value
     const selectionStillExists = meetings.value.some((item) => item.id === previousMeetingId)
@@ -964,14 +938,17 @@ async function loadClassDetails(classId: string) {
       attendanceRecords.value = []
     }
   } catch (error) {
+    if (!isCurrent()) return
     clearClassDetails()
     showError(error)
   } finally {
-    loadingDetails.value = false
+    if (isCurrent()) loadingDetails.value = false
   }
 }
 
 function clearClassDetails() {
+  ++attendanceRequest
+  loadingAttendance.value = false
   schedules.value = []
   meetings.value = []
   students.value = []
@@ -998,26 +975,32 @@ async function saveSchedule() {
   let saved = false
   clearMessage()
   try {
+    if (!scheduleForm.starts_at || !scheduleForm.ends_at) throw new Error('Enter the schedule start and end times.')
     if (scheduleForm.ends_at <= scheduleForm.starts_at) throw new Error('Schedule end must be after its start.')
+    const checkInMinutes = Number(scheduleForm.check_in_minutes_before)
+    if (!Number.isInteger(checkInMinutes) || checkInMinutes < 0 || checkInMinutes > 120) throw new Error('Check-in must open between 0 and 120 whole minutes before class.')
     const payload = {
       class_id: selectedClassId.value,
       day_of_week: scheduleForm.day_of_week,
       starts_at: scheduleForm.starts_at,
       ends_at: scheduleForm.ends_at,
       room: scheduleForm.room.trim() || null,
-      is_active: editingScheduleId.value
-        ? schedules.value.find((item) => item.id === editingScheduleId.value)?.is_active ?? true
-        : true,
+      is_active: scheduleForm.is_active,
+      attendance_mode: scheduleForm.attendance_mode,
+      check_in_minutes_before: checkInMinutes,
     }
 
     const wasEditing = Boolean(editingScheduleId.value)
+    let saveError: { code?: string; message?: string } | null
     if (wasEditing) {
       const { error } = await supabase.from('class_schedules').update(payload).eq('id', editingScheduleId.value)
-      if (error) throw error
+      saveError = error
     } else {
       const { error } = await supabase.from('class_schedules').insert(payload)
-      if (error) throw error
+      saveError = error
     }
+    if (saveError?.code === 'PGRST204' || saveError?.code === '42703') throw new Error('The weekly schedule upgrade is not active on the server yet. Ask the administrator to apply the latest database update, then try again.')
+    if (saveError) throw saveError
 
     await loadClassDetails(selectedClassId.value)
     saved = true
@@ -1047,6 +1030,9 @@ function beginScheduleEdit(schedule: ScheduleRow) {
   scheduleForm.starts_at = schedule.starts_at.slice(0, 5)
   scheduleForm.ends_at = schedule.ends_at.slice(0, 5)
   scheduleForm.room = schedule.room ?? ''
+  scheduleForm.attendance_mode = schedule.attendance_mode
+  scheduleForm.check_in_minutes_before = schedule.check_in_minutes_before
+  scheduleForm.is_active = schedule.is_active
   clearMessage()
   scheduleModalOpen.value = true
 }
@@ -1062,6 +1048,9 @@ function resetScheduleForm() {
   scheduleForm.starts_at = '08:00'
   scheduleForm.ends_at = '09:00'
   scheduleForm.room = ''
+  scheduleForm.attendance_mode = 'teacher_manual'
+  scheduleForm.check_in_minutes_before = 15
+  scheduleForm.is_active = true
 }
 
 async function deleteSchedule(schedule: ScheduleRow) {
@@ -1251,12 +1240,17 @@ async function deleteMeeting(meeting: MeetingRow) {
 }
 
 async function loadAttendance(meetingId: string) {
+  const request = ++attendanceRequest
+  const isCurrent = () => request === attendanceRequest && meetingId === selectedMeetingId.value
+  attendanceRecords.value = []
+  loadingAttendance.value = true
   try {
     const { data, error } = await supabase
       .from('attendance_records')
       .select('id,meeting_id,student_id,status,source,selfie_path,latitude,longitude,accuracy_m,distance_m,barcode_verified,verification_status,teacher_note,review_note,submitted_at,created_at')
       .eq('meeting_id', meetingId)
     if (error) throw error
+    if (!isCurrent()) return
     const records = (data ?? []) as AttendanceRow[]
     await Promise.all(
       records.map(async (record) => {
@@ -1267,26 +1261,30 @@ async function loadAttendance(meetingId: string) {
         if (!signedError) record.selfie_url = signed?.signedUrl ?? null
       }),
     )
-    attendanceRecords.value = records
+    if (isCurrent()) attendanceRecords.value = records
   } catch (error) {
+    if (!isCurrent()) return
     attendanceRecords.value = []
     showError(error)
+  } finally {
+    if (isCurrent()) loadingAttendance.value = false
   }
 }
 
 async function markAttendance(studentId: string, status: AttendanceStatus) {
-  if (!selectedMeetingId.value) return
+  if (!selectedMeetingId.value || !canMarkAttendance.value || markingStudentId.value) return
+  const meetingId = selectedMeetingId.value
   markingStudentId.value = studentId
   clearMessage()
   try {
     const { error } = await supabase.rpc('record_manual_attendance', {
-      p_meeting_id: selectedMeetingId.value,
+      p_meeting_id: meetingId,
       p_student_id: studentId,
       p_status: status,
       p_note: null,
     })
     if (error) throw error
-    await loadAttendance(selectedMeetingId.value)
+    if (selectedMeetingId.value === meetingId) await loadAttendance(meetingId)
   } catch (error) {
     showError(error)
   } finally {
@@ -1304,13 +1302,32 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
       p_note: record.review_note?.trim() || null,
     })
     if (error) throw error
-    await loadAttendance(record.meeting_id)
-    showSuccess(`Evidence ${decision}.`)
+    if (selectedMeetingId.value === record.meeting_id) await loadAttendance(record.meeting_id)
+    selectedEvidence.value = null
+    showSuccess(decision === 'approved' ? 'Self-check attendance restored.' : 'Invalid self-check attendance voided.')
   } catch (error) {
+    evidenceError.value = toUserFacingErrorMessage(error)
     showError(error)
   } finally {
     reviewingRecordId.value = ''
   }
+}
+
+function openEvidence(record: AttendanceRow) {
+  evidenceError.value = ''
+  selectedEvidence.value = { ...record, meeting_title: selectedMeeting.value?.title, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled }
+}
+
+function closeEvidence() {
+  if (reviewingRecordId.value) return
+  selectedEvidence.value = null
+  evidenceError.value = ''
+}
+
+async function reviewSelectedEvidence(voided: boolean, note: string) {
+  if (!selectedEvidence.value) return
+  selectedEvidence.value.review_note = note
+  await setEvidenceVoided(selectedEvidence.value, voided)
 }
 
 async function setEvidenceVoided(record: AttendanceRow, voided: boolean) {
@@ -1628,8 +1645,8 @@ async function logout() {
 .teacher-page {
   --page-navy: var(--campus-navy, #063f2a);
   --page-blue: var(--campus-green, #087443);
-  --page-blue-soft: var(--campus-blue-soft, #e1edf5);
-  --page-bg: var(--campus-bg, #eef3f7);
+  --page-blue-soft: var(--campus-accent-soft, #e6f0e9);
+  --page-bg: var(--campus-bg, #f5f5ef);
   --page-surface: var(--campus-surface, #ffffff);
   --page-surface-soft: var(--campus-surface-soft, #f5f8fa);
   --page-text: var(--campus-text, #182632);
@@ -1678,6 +1695,16 @@ async function logout() {
 .sign-out-button { --border-radius: 10px; --color: #f7fbfd; font-weight: 600; }
 
 .dashboard-shell { width: min(100%, 1400px); margin: 0 auto; padding: clamp(20px, 3vw, 38px); }
+.dashboard-shell { max-width: 1180px; padding: 32px 28px 56px; }
+.workspace-switcher { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 18px; margin-bottom: 22px; border: 1px solid var(--page-border); border-radius: var(--page-radius); background: var(--page-surface); }
+.no-classes { display: grid; justify-items: start; gap: 12px; padding: 32px; }
+.no-classes h2, .no-classes p { margin: 0; } .no-classes p { color: var(--page-muted); }
+.overview-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+.overview-card { display: flex; flex-direction: column; align-items: start; padding: 24px; }
+.overview-card h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: -.025em; }
+.overview-card > p:not(.eyebrow) { margin: 0 0 18px; color: var(--page-muted); font-size: 13px; line-height: 1.6; }
+.overview-card ion-button { margin-top: auto; }
+.join-code-copy strong { margin-left: 8px; color: var(--page-blue); letter-spacing: .12em; }
 .dashboard-heading,
 .planning-heading,
 .section-heading,
@@ -1984,7 +2011,7 @@ async function logout() {
   font: inherit;
   font-size: 0.86rem;
 }
-.native-field input:focus { border-color: var(--page-blue); box-shadow: 0 0 0 3px rgba(36, 95, 134, 0.14); }
+.native-field input:focus { border-color: var(--page-blue); box-shadow: 0 0 0 3px rgba(var(--ion-color-primary-rgb), 0.14); }
 
 .evidence-section { margin-top: 18px; }
 .review-count { background: var(--page-warning-soft); color: var(--page-warning); }
@@ -2046,13 +2073,13 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
 
 .management-modal {
   --page-blue: var(--campus-green, #087443);
-  --page-blue-soft: var(--campus-blue-soft, #e1edf5);
-  --page-bg: var(--campus-bg, #eef3f7);
+  --page-blue-soft: var(--campus-accent-soft);
+  --page-bg: var(--campus-bg);
   --page-surface: var(--campus-surface, #ffffff);
-  --page-surface-soft: var(--campus-surface-soft, #f5f8fa);
-  --page-text: var(--campus-text, #182632);
-  --page-muted: var(--campus-muted, #62727f);
-  --page-border: var(--campus-border, #d9e2e9);
+  --page-surface-soft: var(--campus-surface-soft);
+  --page-text: var(--campus-text);
+  --page-muted: var(--campus-muted);
+  --page-border: var(--campus-border);
   --page-danger: var(--campus-danger, #bb3e45);
   --page-danger-soft: var(--campus-danger-soft, #fae9ea);
   --width: min(700px, calc(100% - 32px));
@@ -2064,7 +2091,7 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
 .management-modal.compact-management-modal { --height: min(500px, calc(100% - 32px)); }
 .management-modal.meeting-editor-modal { --height: min(780px, calc(100% - 32px)); }
 .modal-content { --background: var(--page-bg); }
-.modal-form { display: grid; gap: 14px; padding: 22px; }
+.modal-form { display: grid; gap: 14px; padding: 0; }
 .modal-form .status-message { margin-bottom: 0; }
 .notification-note {
   display: grid;
@@ -2077,6 +2104,7 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
   line-height: 1.45;
 }
 .notification-note strong { color: var(--page-text); font-size: 0.8rem; }
+.schedule-help { margin: 0; color: var(--campus-muted); font-size: 12px; line-height: 1.6; }
 
 @media (max-width: 1100px) {
   .attendance-layout { grid-template-columns: 1fr; }
@@ -2085,6 +2113,7 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
 }
 
 @media (max-width: 860px) {
+  .overview-grid { grid-template-columns: 1fr; }
   .class-workspace-grid,
   .planning-grid { grid-template-columns: 1fr; }
   .planning-heading { align-items: flex-start; flex-direction: column; }
@@ -2092,10 +2121,11 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
 }
 
 @media (max-width: 680px) {
+  .workspace-switcher { grid-template-columns: 1fr; padding: 14px; }
   .management-modal,
   .management-modal.compact-management-modal,
   .management-modal.meeting-editor-modal { --width: 100%; --height: 100%; --border-radius: 0; }
-  .modal-form { padding: 18px 14px 28px; }
+  .modal-form { padding: 0; }
   .app-toolbar { --min-height: 64px; }
   .dashboard-shell { padding: 18px 13px 34px; }
   .dashboard-heading { align-items: flex-start; flex-direction: column; }

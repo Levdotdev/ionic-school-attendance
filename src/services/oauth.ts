@@ -95,8 +95,11 @@ export async function initializeNativeOAuthCallback(): Promise<void> {
  */
 export async function completeSocialSignIn(): Promise<Session> {
   const callbackUrl = new URL(window.location.href)
+  const hash = new URLSearchParams(callbackUrl.hash.slice(1))
   const providerError = callbackUrl.searchParams.get('error_description')
     ?? callbackUrl.searchParams.get('error')
+    ?? hash.get('error_description')
+    ?? hash.get('error')
 
   if (providerError) {
     throw new Error(providerError.replaceAll('+', ' '))
@@ -113,7 +116,7 @@ export async function completeSocialSignIn(): Promise<Session> {
     if (exchangeResult.data.session) return exchangeResult.data.session
   }
 
-  throw new Error('The social sign-in could not be completed. Please return to sign in and try again.')
+  throw new Error('This sign-in link could not be completed. Open the email link on the same device and browser where you requested it, or return to sign in and request a new link.')
 }
 
 export function pendingSocialProvider(): SocialProvider | null {

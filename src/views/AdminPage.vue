@@ -1,29 +1,6 @@
 <template>
   <ion-page class="admin-page">
-    <ion-header class="app-header">
-      <ion-toolbar class="app-toolbar">
-        <ion-buttons slot="start">
-          <ion-menu-button aria-label="Open navigation menu" />
-        </ion-buttons>
-        <ion-title>
-          <span class="toolbar-brand">
-            <span class="toolbar-mark" aria-hidden="true"><ion-icon :icon="schoolOutline" /></span>
-            <span><strong>MinSU Attendance</strong><small>Administration</small></span>
-          </span>
-        </ion-title>
-        <ion-buttons slot="end">
-          <ion-button
-            class="sign-out-button"
-            aria-label="Sign out of the administration portal"
-            :disabled="signingOut"
-            @click="logout"
-          >
-            <ion-icon slot="start" :icon="logOutOutline" aria-hidden="true" />
-            <span class="button-label">Sign out</span>
-          </ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
+    <portal-header portal="Administration" :busy="signingOut" @logout="logout" />
 
     <ion-content class="admin-content">
       <main class="admin-shell">
@@ -53,6 +30,11 @@
             <span class="summary-icon"><ion-icon :icon="closeCircleOutline" /></span>
             <span><small>Rejected</small><strong>{{ rejectedCount }}</strong></span>
           </article>
+        </section>
+
+        <section v-if="activeSection === 'overview'" class="queue-card overview-next">
+          <div><p class="eyebrow">Teacher access</p><h2>{{ pendingCount ? 'Registrations need your review' : 'Your approval queue is clear' }}</h2><p>Review teachers before they can create classes and record student attendance.</p></div>
+          <ion-button @click="router.push({ path: '/admin', query: { section: 'teachers' } })">Open teacher approvals</ion-button>
         </section>
 
         <div
@@ -140,20 +122,8 @@
       </main>
     </ion-content>
 
-    <ion-modal
-      :is-open="Boolean(selectedApplicant)"
-      :can-dismiss="!reviewingTeacherId"
-      @did-dismiss="closeReviewModal"
-    >
-      <ion-header>
-        <ion-toolbar>
-          <ion-title>Teacher registration</ion-title>
-          <ion-buttons slot="end">
-            <ion-button :disabled="Boolean(reviewingTeacherId)" @click="closeReviewModal">Close</ion-button>
-          </ion-buttons>
-        </ion-toolbar>
-      </ion-header>
-      <ion-content v-if="selectedApplicant" class="ion-padding">
+    <app-modal :open="Boolean(selectedApplicant)" title="Teacher registration" :busy="Boolean(reviewingTeacherId)" @close="closeReviewModal">
+      <template v-if="selectedApplicant">
         <section class="review-modal-summary">
           <span class="applicant-avatar" aria-hidden="true">{{ initials(selectedApplicant.full_name) }}</span>
           <div>
@@ -177,6 +147,8 @@
           :disabled="reviewingTeacherId === selectedApplicant.id"
           placeholder="Add a short note the teacher can see"
         />
+
+        <p v-if="messageKind === 'error' && message" class="page-message is-error" role="alert">{{ message }}</p>
 
         <div
           class="review-buttons"
@@ -207,8 +179,8 @@
             </template>
           </ion-button>
         </div>
-      </ion-content>
-    </ion-modal>
+      </template>
+    </app-modal>
   </ion-page>
 </template>
 
@@ -229,6 +201,7 @@ import {
   IonTextarea,
   IonTitle,
   IonToolbar,
+  onIonViewWillEnter,
 } from '@ionic/vue'
 import {
   alertCircleOutline,
@@ -249,6 +222,9 @@ import { useRoute, useRouter } from 'vue-router'
 import { useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
 import type { TeacherApprovalStatus } from '@/types/database'
+import PortalHeader from '@/components/PortalHeader.vue'
+import AppModal from '@/components/AppModal.vue'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 
 interface TeacherApplicant {
   id: string
@@ -375,6 +351,7 @@ function statusLabel(status: TeacherApprovalStatus | null) {
 
 function formatDateTime(value: string) {
   return new Intl.DateTimeFormat(undefined, {
+    timeZone: 'Asia/Manila',
     dateStyle: 'medium',
     timeStyle: 'short',
   }).format(new Date(value))
@@ -382,7 +359,7 @@ function formatDateTime(value: string) {
 
 function showError(error: unknown) {
   messageKind.value = 'error'
-  message.value = error instanceof Error ? error.message : 'Unable to review teacher registrations.'
+  message.value = toUserFacingErrorMessage(error, 'Unable to review teacher registrations.')
 }
 
 function showSuccess(text: string) {
@@ -409,15 +386,20 @@ onMounted(async () => {
   if (profile.value?.role === 'admin') await loadApplicants()
   else loading.value = false
 })
+
+onIonViewWillEnter(async () => {
+  if (loading.value || signingOut.value || reviewingTeacherId.value || selectedApplicant.value || profile.value?.role !== 'admin') return
+  await loadApplicants()
+})
 </script>
 
 <style scoped>
 .admin-page {
   --campus-accent-local: var(--campus-accent, #087443);
   --campus-navy-local: var(--campus-navy, #063f2a);
-  --campus-bg-local: var(--campus-bg, #eef3f7);
+  --campus-bg-local: var(--campus-bg, #f5f5ef);
   --campus-surface-local: var(--campus-surface, #ffffff);
-  --campus-accent-soft-local: var(--campus-accent-soft, #e1edf5);
+  --campus-accent-soft-local: var(--campus-accent-soft, #e6f0e9);
   --campus-text-local: var(--campus-text, #182632);
   --campus-muted-local: var(--campus-muted, #62727f);
   --campus-border-local: var(--campus-border, #d9e2e9);
@@ -485,10 +467,13 @@ onMounted(async () => {
 }
 
 .admin-shell {
-  width: min(100%, 1120px);
+  width: min(100%, 1180px);
   margin: 0 auto;
-  padding: 34px 20px 64px;
+  padding: 32px 28px 56px;
 }
+.overview-next { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 24px; }
+.overview-next h2 { margin: 0; font-size: 18px; letter-spacing: -.025em; }
+.overview-next p:not(.eyebrow) { margin: 8px 0 0; color: var(--campus-muted); font-size: 13px; line-height: 1.5; }
 
 .page-heading,
 .queue-heading,
@@ -899,6 +884,7 @@ ion-modal .review-buttons {
 }
 
 @media (max-width: 600px) {
+  .overview-next { align-items: start; flex-direction: column; }
   .app-toolbar {
     --min-height: 62px;
   }

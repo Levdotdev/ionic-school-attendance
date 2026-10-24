@@ -1,4 +1,5 @@
 import { supabase } from '@/lib/supabase'
+import { studentTaskFileType, validateStudentTaskFiles } from '@/utils/studentTaskAttachments'
 import type {
   StudentCourse,
   StudentTask,
@@ -10,20 +11,6 @@ import type {
 } from '@/types/studentTasks'
 
 const TASK_FILE_BUCKET = 'student-task-files'
-const MAX_TASK_FILE_SIZE = 5 * 1024 * 1024
-const ACCEPTED_TASK_FILE_TYPES = new Set([
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'application/pdf',
-  'text/plain',
-  'application/msword',
-  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-  'application/vnd.ms-powerpoint',
-  'application/vnd.openxmlformats-officedocument.presentationml.presentation',
-  'application/vnd.ms-excel',
-  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-])
 
 interface TaskQueryRow {
   id: string
@@ -73,13 +60,8 @@ function cleanFileName(name: string): string {
   return normalized.slice(0, 120) || 'attachment'
 }
 
-function validateFile(file: File): void {
-  if (file.size < 1 || file.size > MAX_TASK_FILE_SIZE) {
-    throw new Error(`${file.name} must be smaller than 5 MB.`)
-  }
-  if (!ACCEPTED_TASK_FILE_TYPES.has(file.type)) {
-    throw new Error(`${file.name} is not a supported file type.`)
-  }
+function validateTaskAttachments(input: StudentTaskSaveInput, existing: StudentTaskFile[] = []): void {
+  validateStudentTaskFiles(input.newFiles, existing, input.removedFileIds)
 }
 
 function taskPayload(studentId: string, input: StudentTaskSaveInput) {
@@ -97,15 +79,36 @@ function taskPayload(studentId: string, input: StudentTaskSaveInput) {
   }
 }
 
-async function replaceTaskLinks(taskId: string, links: StudentTaskSaveInput['links']): Promise<void> {
-  const { error: deleteError } = await supabase
-    .from('student_task_links')
-    .delete()
-    .eq('task_id', taskId)
-  if (deleteError) throw deleteError
+export async function reorderStudentTasks(studentId: string, taskIds: string[]): Promise<void> {
+  const ids = [...new Set(taskIds)]
+  const results = await Promise.all(ids.map((id, sort_order) => supabase
+    .from('student_tasks').update({ sort_order }).eq('student_id', studentId).eq('id', id)))
+  const failure = results.find(result => result.error)
+  if (failure?.error) throw failure.error
+}
 
+export async function skipStudentTaskOccurrence(taskId: string, dueAt: string): Promise<void> {
+  const { error } = await supabase.from('student_task_occurrences').upsert({
+    task_id: taskId, due_at: dueAt, status: 'skipped', completed_at: null,
+  }, { onConflict: 'task_id,due_at' })
+  if (error) throw error
+}
+
+/** Keep earlier completions and the series' attachments when future dates are removed. */
+export async function stopStudentTaskRepeats(task: StudentTask, fromDueAt: string): Promise<void> {
+  const cutoff = new Date(fromDueAt).getTime() - 1
+  const firstDue = new Date(task.due_at).getTime()
+  const { error } = await supabase.from('student_tasks').update({
+    recurrence_until: new Date(Math.max(firstDue + 1, cutoff)).toISOString(),
+  }).eq('id', task.id).eq('student_id', task.student_id)
+  if (error) throw error
+  await skipStudentTaskOccurrence(task.id, fromDueAt)
+}
+
+async function replaceTaskLinks(taskId: string, links: StudentTaskSaveInput['links']): Promise<void> {
   const rows = links
     .map((link, position) => ({
+      id: link.id,
       task_id: taskId,
       title: link.title.trim(),
       url: link.url.trim(),
@@ -113,9 +116,20 @@ async function replaceTaskLinks(taskId: string, links: StudentTaskSaveInput['lin
     }))
     .filter((link) => link.title && link.url)
 
-  if (!rows.length) return
-  const { error } = await supabase.from('student_task_links').insert(rows)
-  if (error) throw error
+  // Save replacements before deleting removed links so a failed request
+  // cannot empty all of the student's existing references.
+  if (rows.length) {
+    const { error } = await supabase.from('student_task_links').upsert(rows, { onConflict: 'id' })
+    if (error) throw error
+  }
+  const current = await supabase.from('student_task_links').select('id').eq('task_id', taskId)
+  if (current.error) throw current.error
+  const keptIds = new Set(rows.map(row => row.id))
+  const removed = (current.data ?? []).filter(row => !keptIds.has(row.id)).map(row => row.id)
+  if (removed.length) {
+    const { error } = await supabase.from('student_task_links').delete().eq('task_id', taskId).in('id', removed)
+    if (error) throw error
+  }
 }
 
 async function removeTaskFiles(files: StudentTaskFile[]): Promise<void> {
@@ -141,11 +155,11 @@ async function uploadTaskFiles(
 
   try {
     for (const [offset, file] of files.entries()) {
-      validateFile(file)
+      validateStudentTaskFiles([file])
       const path = `${studentId}/${taskId}/${crypto.randomUUID()}-${cleanFileName(file.name)}`
       const { error: uploadError } = await supabase.storage
         .from(TASK_FILE_BUCKET)
-        .upload(path, file, { cacheControl: '3600', contentType: file.type, upsert: false })
+        .upload(path, file, { cacheControl: '3600', contentType: studentTaskFileType(file), upsert: false })
       if (uploadError) throw uploadError
       uploadedPaths.push(path)
 
@@ -153,7 +167,7 @@ async function uploadTaskFiles(
         task_id: taskId,
         storage_path: path,
         file_name: file.name,
-        mime_type: file.type,
+        mime_type: studentTaskFileType(file),
         size_bytes: file.size,
         position: startingPosition + offset,
       })
@@ -229,9 +243,10 @@ export async function createStudentTask(
   studentId: string,
   input: StudentTaskSaveInput,
 ): Promise<string> {
+  validateTaskAttachments(input)
   const { data, error } = await supabase
     .from('student_tasks')
-    .insert(taskPayload(studentId, input))
+    .insert({ ...taskPayload(studentId, input), sort_order: Date.now() })
     .select('id')
     .single()
   if (error) throw error
@@ -251,6 +266,7 @@ export async function updateStudentTask(
   task: StudentTask,
   input: StudentTaskSaveInput,
 ): Promise<void> {
+  validateTaskAttachments(input, task.files)
   const { error } = await supabase
     .from('student_tasks')
     .update(taskPayload(studentId, input))
@@ -261,13 +277,13 @@ export async function updateStudentTask(
   await replaceTaskLinks(task.id, input.links)
 
   const removedFiles = task.files.filter((file) => input.removedFileIds.includes(file.id))
-  await removeTaskFiles(removedFiles)
   await uploadTaskFiles(
     studentId,
     task.id,
     input.newFiles,
     task.files.length - removedFiles.length,
   )
+  await removeTaskFiles(removedFiles)
 }
 
 export async function deleteStudentTask(task: StudentTask): Promise<void> {
@@ -332,4 +348,10 @@ export async function createTaskFileDownloadUrl(path: string): Promise<string> {
   const { data, error } = await supabase.storage.from(TASK_FILE_BUCKET).createSignedUrl(path, 60)
   if (error) throw error
   return data.signedUrl
+}
+
+export async function downloadStudentTaskFile(path: string): Promise<Blob> {
+  const { data, error } = await supabase.storage.from(TASK_FILE_BUCKET).download(path)
+  if (error) throw error
+  return data
 }

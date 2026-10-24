@@ -1,24 +1,6 @@
 <template>
-  <ion-modal :is-open="isOpen" :can-dismiss="!saving" @didDismiss="$emit('dismiss')">
-    <ion-header>
-      <ion-toolbar>
-        <ion-title>Custom categories</ion-title>
-        <ion-buttons slot="end">
-          <ion-button :disabled="saving" @click="$emit('dismiss')">Done</ion-button>
-        </ion-buttons>
-      </ion-toolbar>
-    </ion-header>
-
-    <ion-content class="category-content">
+  <task-dialog :is-open="isOpen" title="Categories beyond your courses" description="Make room for personal study, school organizations, and everything in between." :icon="pricetagsOutline" :busy="saving" wide hide-footer @dismiss="$emit('dismiss')">
       <div class="category-shell">
-        <section class="category-intro">
-          <div class="category-icon"><ion-icon :icon="pricetagsOutline" /></div>
-          <div>
-            <h2>Categories beyond your courses</h2>
-            <p>Use these for personal study, school organizations, or tasks that do not belong to a subject.</p>
-          </div>
-        </section>
-
         <form class="category-form" @submit.prevent="submit">
           <div class="category-fields">
             <label class="color-field">
@@ -36,7 +18,7 @@
               required
             />
           </div>
-          <div v-if="formMessage" class="category-error" role="alert">{{ formMessage }}</div>
+          <div v-if="formMessage || error" class="category-error" role="alert">{{ formMessage || error }}</div>
           <div class="form-actions">
             <ion-button v-if="editingCategory" type="button" fill="clear" :disabled="saving" @click="resetForm">
               Cancel edit
@@ -74,34 +56,16 @@
           </div>
         </section>
       </div>
-    </ion-content>
-  </ion-modal>
-
-  <ion-alert
-    :is-open="Boolean(pendingDelete)"
-    header="Delete category?"
-    :message="deleteMessage"
-    :buttons="deleteButtons"
-    @didDismiss="pendingDelete = null"
-  />
+    <button type="button" class="done-button" :disabled="saving" @click="$emit('dismiss')">Done</button>
+  </task-dialog>
+  <task-dialog :is-open="Boolean(pendingDelete)" title="Delete category?" :description="deleteMessage" :icon="trashOutline" danger confirm-label="Delete category" :busy="saving" @dismiss="pendingDelete = null" @confirm="confirmDelete"><p v-if="error" class="category-error" role="alert">{{ error }}</p></task-dialog>
 </template>
 
 <script setup lang="ts">
-import {
-  IonAlert,
-  IonButton,
-  IonButtons,
-  IonContent,
-  IonHeader,
-  IonIcon,
-  IonInput,
-  IonModal,
-  IonSpinner,
-  IonTitle,
-  IonToolbar,
-} from '@ionic/vue'
+import { IonButton, IonIcon, IonInput, IonSpinner } from '@ionic/vue'
 import { pencilOutline, pricetagOutline, pricetagsOutline, trashOutline } from 'ionicons/icons'
 import { computed, ref, watch } from 'vue'
+import TaskDialog from './TaskDialog.vue'
 
 import type { StudentTaskCategory } from '@/types/studentTasks'
 
@@ -109,6 +73,7 @@ const props = defineProps<{
   isOpen: boolean
   categories: StudentTaskCategory[]
   saving: boolean
+  error?: string
 }>()
 
 const emit = defineEmits<{
@@ -123,25 +88,24 @@ const color = ref('#087443')
 const editingCategory = ref<StudentTaskCategory | null>(null)
 const pendingDelete = ref<StudentTaskCategory | null>(null)
 const formMessage = ref('')
+let awaitingSave = false
 
 const deleteMessage = computed(() => {
   const categoryName = pendingDelete.value?.name ?? 'this category'
   return `Tasks in “${categoryName}” will be kept, but they will become uncategorized.`
 })
 
-const deleteButtons = computed(() => [
-  { text: 'Cancel', role: 'cancel' },
-  {
-    text: 'Delete',
-    role: 'destructive',
-    handler: () => {
-      if (pendingDelete.value) emit('delete', pendingDelete.value.id)
-    },
-  },
-])
+function confirmDelete() { if (pendingDelete.value && !props.saving) emit('delete', pendingDelete.value.id) }
 
 watch(() => props.isOpen, (isOpen) => {
   if (isOpen) resetForm()
+  else pendingDelete.value = null
+})
+watch(() => props.saving, (saving, previous) => {
+  if (previous && !saving && awaitingSave) { if (!props.error) resetForm(); awaitingSave = false }
+})
+watch(() => props.categories, categories => {
+  if (pendingDelete.value && !categories.some(category => category.id === pendingDelete.value?.id)) pendingDelete.value = null
 })
 
 function resetForm() {
@@ -149,6 +113,7 @@ function resetForm() {
   color.value = '#087443'
   editingCategory.value = null
   formMessage.value = ''
+  awaitingSave = false
 }
 
 function edit(category: StudentTaskCategory) {
@@ -159,19 +124,24 @@ function edit(category: StudentTaskCategory) {
 }
 
 function submit() {
+  if (props.saving) return
   formMessage.value = ''
   const cleanName = name.value.trim()
   if (!cleanName) {
     formMessage.value = 'Enter a category name.'
     return
   }
+  if (props.categories.some(category => category.id !== editingCategory.value?.id && category.name.toLocaleLowerCase() === cleanName.toLocaleLowerCase())) {
+    formMessage.value = 'You already have a category with this name.'
+    return
+  }
 
+  awaitingSave = true
   if (editingCategory.value) {
     emit('update', editingCategory.value.id, cleanName, color.value)
   } else {
     emit('create', cleanName, color.value)
   }
-  resetForm()
 }
 </script>
 
@@ -182,10 +152,10 @@ function submit() {
 
 .category-shell {
   display: grid;
-  width: min(100% - 2rem, 620px);
+  width: 100%;
   gap: 1rem;
   margin: 0 auto;
-  padding: 1.25rem 0 2rem;
+  padding: 0;
 }
 
 .category-intro,
@@ -329,7 +299,8 @@ function submit() {
 
 @media (max-width: 520px) {
   .category-shell {
-    width: min(100% - 1rem, 620px);
+    width: 100%;
   }
 }
+.done-button { width: 100%; min-height: 46px; margin-top: 18px; border: 0; border-radius: 10px; color: var(--campus-muted); background: transparent; font: inherit; font-size: 13px; font-weight: 600; }
 </style>

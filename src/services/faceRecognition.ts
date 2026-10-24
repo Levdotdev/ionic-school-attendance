@@ -48,6 +48,9 @@ async function getHuman(): Promise<Human> {
 
       await human.load()
       return human
+    }).catch(error => {
+      humanPromise = null
+      throw error
     })
   }
 

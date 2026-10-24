@@ -1,10 +1,10 @@
 <template>
-  <ion-modal :is-open="open" :can-dismiss="!saving" class="face-enrollment-modal" @did-dismiss="closeModal">
+  <ion-modal :is-open="open" :can-dismiss="!open || (!saving && !capturing)" class="face-enrollment-modal" @did-dismiss="closeModal">
     <ion-header>
       <ion-toolbar>
         <ion-title>Set up face verification</ion-title>
         <ion-buttons slot="end">
-          <ion-button :disabled="saving" @click="closeModal">Later</ion-button>
+          <ion-button :disabled="saving || capturing" @click="closeModal">Later</ion-button>
         </ion-buttons>
       </ion-toolbar>
     </ion-header>
@@ -113,15 +113,18 @@ const consented = ref(false)
 const message = ref('')
 
 async function captureSample() {
+  if (capturing.value || saving.value || samples.value.length >= 3) return
   capturing.value = true
   message.value = ''
+  let photo: CapturedSelfie | null = null
   try {
-    const photo = await captureSelfie()
+    photo = await captureSelfie()
     const analysis = await analyzeFace(photo.blob)
     captured.value.push(photo)
     previews.value.push(photo.previewUrl)
     samples.value.push(analysis)
   } catch (error) {
+    releaseSelfiePreview(photo)
     message.value = toUserFacingErrorMessage(error, 'The face photo could not be processed.')
   } finally {
     capturing.value = false
@@ -159,7 +162,7 @@ function reset() {
 }
 
 function closeModal() {
-  if (saving.value) return
+  if (saving.value || capturing.value) return
   reset()
   emit('close')
 }
