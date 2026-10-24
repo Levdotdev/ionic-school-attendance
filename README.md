@@ -117,6 +117,8 @@ The October 25 release adds `20261024121350_parent_consent_and_meeting_simplific
 
 Deploy the migration before relying on parent consent, then deploy `invite-parent` with JWT verification enabled. Publish the eight branded Auth templates and enable manual identity linking with the narrow profile described in [the email-template guide](supabase/templates/README.md). Do not publish the main local-development Auth configuration to the hosted project. No live invitation, password change, or account-link action is part of the automated test suite.
 
+Production verification on October 25 confirmed this migration was applied, `invite-parent` was active with JWT verification, and the eight Auth HTML bodies/settings matched the published files. The existing attendance, meetings, enrollment, and stored evidence counts were unchanged; the old email-only parent connection became a pending consent request. Vercel reported a successful release and the site returned HTTP 200; an anonymous invitation request returned HTTP 401. All 254 automated tests, the web build, and the JDK 21 Android debug build passed. Camera/GPS/face matching/notification delivery still need physical-device testing, and actual email delivery remains subject to the SMTP provider and Spam filtering.
+
 ## Local setup
 
 Requirements: Node.js 22 or newer, pnpm, and Android Studio with JDK 21 for Android builds.
