@@ -50,7 +50,7 @@
             </div>
             <div>
               <p class="eyebrow">{{ meeting.class_name }}</p>
-              <h1>{{ meeting.title }}</h1>
+              <h1>Class attendance</h1>
               <p>{{ formatMode(meeting.attendance_mode) }}</p>
             </div>
           </div>
@@ -354,7 +354,6 @@ type CheckInStage = 'barcode' | 'selfie' | 'location' | 'submit'
 interface AvailableMeeting {
   id: string
   class_name: string
-  title: string
   attendance_mode: SelfAttendanceMode
   attendance_closes_at: string
   max_accuracy_m: number | null
@@ -515,7 +514,7 @@ async function loadMeeting() {
 
   const { data, error } = await supabase
     .from('student_available_meetings')
-    .select('id, class_name, title, attendance_mode, attendance_closes_at, max_accuracy_m, existing_status')
+    .select('id, class_name, attendance_mode, attendance_closes_at, max_accuracy_m, existing_status')
     .eq('id', meetingId.value)
     .maybeSingle()
 

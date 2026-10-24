@@ -6,11 +6,11 @@ export interface ScheduleCourse { id: string; name: string; archived_at?: string
 export interface StudentWeeklySchedule {
   id: string; class_id: string; day_of_week: number; starts_at: string; ends_at: string
   room: string | null; is_active: boolean; attendance_mode?: string
-  check_in_minutes_before?: number; check_in_minutes_after_start?: number | null
+  check_in_minutes_after_start?: number | null
 }
 export interface StudentCalendarMeeting {
   id: string; class_id: string; schedule_id: string | null; schedule_week_start?: string | null
-  title: string; meeting_date: string; starts_at: string; ends_at: string; attendance_enabled: boolean
+  meeting_date: string; starts_at: string; ends_at: string; attendance_enabled: boolean
 }
 export interface StudentCalendarEvent extends CalendarEvent {
   meetingId?: string; scheduleId?: string; taskId?: string; taskDue?: string
@@ -40,7 +40,7 @@ export function makeStudentCalendarEvents(options: {
   const skipped = new Set(options.exceptions.map(x => `${x.schedule_id}:${x.schedule_week_start}`))
   const actual = new Set(options.meetings.filter(m => m.schedule_id).map(m => `${m.schedule_id}:${m.schedule_week_start || schoolWeekStart(m.meeting_date)}`))
   const events: StudentCalendarEvent[] = options.meetings.filter(m => courses.has(m.class_id)).map(m => ({
-    id: `meeting:${m.id}`, meetingId: m.id, scheduleId: m.schedule_id || undefined, title: m.title,
+    id: `meeting:${m.id}`, meetingId: m.id, scheduleId: m.schedule_id || undefined, title: courses.get(m.class_id)!.name,
     start: m.starts_at, end: m.ends_at, kind: 'meeting', className: courses.get(m.class_id)!.name,
     status: m.attendance_enabled ? 'scheduled' : 'not_counted', subtext: m.attendance_enabled ? 'Class meeting' : 'Not counted',
   }))

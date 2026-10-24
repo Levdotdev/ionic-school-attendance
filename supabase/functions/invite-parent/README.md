@@ -1,0 +1,11 @@
+# Parent invitations
+
+Deploy after `parent_consent_and_meeting_simplification`. `invite-parent` uses the standard server-only `SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY` provided by Supabase. Optional `SITE_URL` defaults to the production attendance website; its `/auth/callback` must be allowed in Authentication redirect URLs. No service key belongs in Vite or the browser.
+
+The endpoint accepts an authenticated `POST` with `{ "email": "parent@example.com" }`. It verifies the token with Auth, then a service-only database reservation checks the current profile, email verification, approved teacher status and per-user invitation quota. Student accounts may invite 5 parents per hour, approved teachers 20, administrators 50. This is an anti-abuse limit for invitations, not a password-reset limit. Confirmed existing accounts and fresh duplicate invitations receive the same acknowledgement without another email. A trusted, still-unconfirmed parent invitation can be retried after one hour, including expired links, an interrupted worker or failed delivery; this never resends to an unrelated existing account.
+
+Supabase Auth sends its configured **Invite user** template through the existing SMTP provider. This does not create a student/parent link. A trusted reservation locks the invitee's account setup to the parent role. After a student-invited parent completes verified setup, a pending consent request is created for that student. The parent must explicitly approve before any child data is visible. Teacher/admin invitations require a separate student link request.
+
+Keep platform JWT verification enabled. The handler independently verifies the user, restricts browser origins and bounds payloads. Database reservation and completion RPCs are executable only by `service_role`, never an ordinary signed-in user. Delivery failures return an error without logging addresses, tokens or invitation links.
+
+Official references: [Auth invitation API](https://supabase.com/docs/reference/javascript/auth-admin-inviteuserbyemail), [Edge Function authentication](https://supabase.com/docs/guides/functions/auth), and [Auth's confirmed/unconfirmed invitation behavior](https://github.com/supabase/auth/blob/master/internal/api/invite.go).

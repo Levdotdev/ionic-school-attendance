@@ -23,7 +23,7 @@
             <p class="eyebrow">One-time setup</p>
             <h1>Complete your student profile</h1>
             <p>
-              Link your physical school ID and a parent or guardian email before joining classes.
+              Register your physical school ID, then ask your registered parent or guardian to approve your link before joining classes.
               Your barcode number is protected and never shown on screen.
             </p>
 
@@ -59,13 +59,14 @@
                 v-model="guardianEmail"
                 class="campus-input"
                 type="email"
-                label="Parent / guardian email"
+                label="Registered parent email (optional for now)"
                 label-placement="stacked"
                 fill="outline"
                 autocomplete="email"
                 :disabled="savingRegistration"
-                required
               />
+              <p class="guardian-help">Only registered parent accounts can be linked. Your parent must approve before you can join a class. If they have no account yet, invite them first.</p>
+              <ion-button type="button" fill="outline" :disabled="savingRegistration" @click="parentInviteOpen = true">Invite a parent</ion-button>
 
               <div class="scan-methods">
                 <div class="field-heading">
@@ -124,7 +125,7 @@
               <h1>{{ sectionTitle }}</h1>
               <p>{{ sectionDescription }}</p>
             </div>
-            <div class="availability-summary" :class="{ 'has-meetings': meetings.length > 0 }">
+            <div v-if="activeSection === 'overview'" class="availability-summary" :class="{ 'has-meetings': meetings.length > 0 }">
               <span class="summary-icon"><ion-icon :icon="meetings.length ? timeOutline : checkmarkCircleOutline" /></span>
               <span>
                 <strong>{{ meetings.length }}</strong>
@@ -150,7 +151,7 @@
                 <div>
                   <p class="eyebrow">Attendance</p>
                   <h2 id="self-checks-title">Available self-checks</h2>
-                  <p>Only meetings assigned to you with an open check-in window are shown.</p>
+                  <p>Your next unsubmitted check-in appears here when class starts. After you submit, the next available check-in is shown automatically.</p>
                 </div>
                 <span class="live-update-label"><span class="live-dot"></span> Live</span>
               </div>
@@ -165,7 +166,7 @@
                     <div class="meeting-title-row">
                       <div>
                         <span class="class-name">{{ meeting.class_name }}</span>
-                        <h3>{{ meeting.title }}</h3>
+                        <h3>Class attendance</h3>
                       </div>
                       <span class="status-chip is-open"><span class="live-dot"></span> Open</span>
                     </div>
@@ -220,14 +221,20 @@
               <div v-else class="empty-state compact-empty">
                 <div class="empty-icon"><ion-icon :icon="schoolOutline" /></div>
                 <h3>No courses yet</h3>
-                <p>Use your teacher's join code to enroll.</p>
-                <ion-button @click="openJoinModal">Join your first class</ion-button>
+                <p>{{ hasApprovedParent ? "Use your teacher's join code to enroll." : 'A registered parent must approve your link before you can join a class.' }}</p>
+                <ion-button @click="openJoinModal">{{ hasApprovedParent ? 'Join your first class' : 'Link your parent first' }}</ion-button>
               </div>
             </section>
 
             <student-schedule-panel v-if="activeSection === 'schedule' && user" :student-id="user.id" :courses="courses" />
             <student-history-panel v-if="activeSection === 'history' && user" :student-id="user.id" :student-name="profile?.full_name || 'Student'" />
             <aside v-if="activeSection === 'overview'" class="student-sidebar">
+              <section class="campus-surface join-panel guardian-overview">
+                <p class="eyebrow">Parent / guardian</p>
+                <h2>{{ hasApprovedParent ? 'Parent link approved' : 'Parent approval needed' }}</h2>
+                <p>{{ hasApprovedParent ? 'Your approved parent can follow your attendance and class calendar.' : guardianLinks.some(link => link.status === 'pending') ? 'Your request is waiting for your parent to approve it from their account.' : 'Link a registered parent before joining classes. Invite them if they do not have an account yet.' }}</p>
+                <ion-button fill="outline" expand="block" @click="openGuardianModal">{{ hasApprovedParent ? 'Manage parent link' : 'Link a parent' }}</ion-button>
+              </section>
               <section v-if="activeSection === 'overview'" class="face-setup-card">
                 <ion-icon :icon="personCircleOutline" />
                 <div>
@@ -294,6 +301,23 @@
         </div>
     </app-modal>
 
+    <app-modal :open="guardianModalOpen" title="Parent / guardian" :busy="parentLinkBusy" @close="guardianModalOpen = false">
+      <p class="guardian-help">Request a link using a registered parent’s email. The parent must sign in and approve it; an invitation alone does not grant access.</p>
+      <div v-if="guardianLinks.length" class="guardian-links">
+        <article v-for="link in guardianLinks" :key="link.request_id">
+          <div><strong>{{ link.parent_name }}</strong><small>{{ link.parent_email }}</small></div>
+          <span :class="`guardian-status is-${link.status}`">{{ link.status === 'approved' ? 'Approved by parent' : link.status === 'rejected' ? 'Declined by parent' : 'Waiting for parent' }}</span>
+        </article>
+      </div>
+      <form class="join-form" @submit.prevent="requestParentLink">
+        <ion-input v-model="parentLinkEmail" type="email" label="Parent’s registered email" label-placement="stacked" fill="outline" autocomplete="email" :disabled="parentLinkBusy" required />
+        <ion-button type="submit" :disabled="parentLinkBusy || !parentLinkEmail.trim()">{{ parentLinkBusy ? 'Requesting…' : 'Request parent approval' }}</ion-button>
+      </form>
+      <p v-if="guardianMessage" :class="guardianError ? 'guardian-error' : 'guardian-success'" :role="guardianError ? 'alert' : 'status'">{{ guardianMessage }}</p>
+      <template #actions><ion-button fill="outline" :disabled="parentLinkBusy" @click="guardianModalOpen = false; parentInviteOpen = true">Invite a parent</ion-button><ion-button fill="outline" :disabled="parentLinkBusy" @click="guardianModalOpen = false">Close</ion-button></template>
+    </app-modal>
+    <invite-parent-modal :open="parentInviteOpen" @close="parentInviteOpen = false" @invited="handleParentInvited" />
+
     <face-enrollment-modal
       :open="faceEnrollmentOpen"
       @close="faceEnrollmentOpen = false"
@@ -326,7 +350,7 @@ import {
   shieldCheckmarkOutline,
   timeOutline,
 } from 'ionicons/icons'
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
@@ -334,6 +358,7 @@ import PortalHeader from '@/components/PortalHeader.vue'
 import AppModal from '@/components/AppModal.vue'
 import StudentHistoryPanel from '@/components/StudentHistoryPanel.vue'
 import StudentSchedulePanel from '@/components/StudentSchedulePanel.vue'
+import InviteParentModal from '@/components/InviteParentModal.vue'
 import { useSession } from '@/composables/useSession'
 import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { supabase } from '@/lib/supabase'
@@ -352,7 +377,6 @@ interface AvailableMeeting {
   id: string
   class_id: string
   class_name: string
-  title: string
   meeting_date: string
   starts_at: string
   ends_at: string
@@ -370,6 +394,10 @@ interface StudentCourse {
   section: string | null
   timezone: string
   archived_at?: string | null
+}
+interface GuardianSummary {
+  request_id: string; parent_id: string; parent_name: string; parent_email: string
+  status: 'pending' | 'approved' | 'rejected'; requested_at?: string; responded_at?: string | null
 }
 
 const router = useRouter()
@@ -398,6 +426,23 @@ const faceEnrolled = ref(false)
 const faceRetakeAllowed = ref(false)
 const faceEnrollmentOpen = ref(false)
 const joinModalOpen = ref(false)
+const guardianLinks = ref<GuardianSummary[]>([])
+const guardianModalOpen = ref(false)
+const parentInviteOpen = ref(false)
+const parentLinkEmail = ref('')
+const parentLinkBusy = ref(false)
+const guardianMessage = ref('')
+const guardianError = ref(false)
+const hasApprovedParent = computed(() => guardianLinks.value.some(link => link.status === 'approved'))
+const feedbackTimers = new Set<ReturnType<typeof setTimeout>>()
+function expireFeedback(read: () => string, clear: () => void, message: string) {
+  if (!message) return
+  const timer = setTimeout(() => { feedbackTimers.delete(timer); if (read() === message) clear() }, 5000)
+  feedbackTimers.add(timer)
+}
+watch(guardianMessage, message => { if (!guardianError.value) expireFeedback(() => guardianMessage.value, () => { guardianMessage.value = '' }, message) })
+watch(joinMessage, message => { if (!joinFailed.value) expireFeedback(() => joinMessage.value, () => { joinMessage.value = '' }, message) })
+onBeforeUnmount(() => { feedbackTimers.forEach(clearTimeout); feedbackTimers.clear() })
 
 const registrationCompleted = computed(() => Boolean(studentProfile.value?.registration_completed_at))
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
@@ -409,7 +454,7 @@ const activeSection = computed(() => {
   const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
   return value === 'courses' || value === 'schedule' || value === 'history' ? value : 'overview'
 })
-const sectionTitle = computed(() => activeSection.value === 'courses' ? 'My courses' : activeSection.value === 'schedule' ? 'My schedule' : activeSection.value === 'history' ? 'Attendance history' : `Welcome back, ${studentFirstName.value}`)
+const sectionTitle = computed(() => activeSection.value === 'courses' ? 'My courses' : activeSection.value === 'schedule' ? 'My calendar' : activeSection.value === 'history' ? 'Attendance history' : `Welcome back, ${studentFirstName.value}`)
 const sectionDescription = computed(() => activeSection.value === 'courses' ? 'Your subjects, attendance, and connected coursework.' : activeSection.value === 'schedule' ? 'Your classes and task deadlines together. Choose the reminders that work for you.' : activeSection.value === 'history' ? 'Review your past attendance, teacher updates, and submitted photos.' : 'Open self-checks update automatically. Your completed attendance is saved in history.')
 
 function acceptBarcode(value: string) {
@@ -476,12 +521,12 @@ async function loadAvailableMeetings() {
     const { data, error } = await supabase
       .from('student_available_meetings')
       .select(
-        'id, class_id, class_name, title, meeting_date, starts_at, ends_at, attendance_mode, attendance_enabled, attendance_opens_at, attendance_closes_at, existing_status, submitted_at',
+        'id, class_id, class_name, meeting_date, starts_at, ends_at, attendance_mode, attendance_enabled, attendance_opens_at, attendance_closes_at, existing_status, submitted_at',
       )
       .order('attendance_opens_at', { ascending: true })
 
     if (error) throw error
-    meetings.value = ((data ?? []) as AvailableMeeting[]).filter(meeting => !meeting.existing_status && !meeting.submitted_at)
+    meetings.value = ((data ?? []) as AvailableMeeting[]).filter(meeting => !meeting.existing_status && !meeting.submitted_at).slice(0, 1)
   } catch (error) {
     pageMessage.value = toUserFacingErrorMessage(error, 'Unable to load attendance meetings.')
   } finally {
@@ -524,7 +569,7 @@ async function completeRegistration() {
     registrationMessage.value = 'Enter the student full name.'
     return
   }
-  if (!email || !email.includes('@')) {
+  if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     registrationMessage.value = 'Enter a valid parent or guardian email.'
     return
   }
@@ -539,14 +584,14 @@ async function completeRegistration() {
     const { error } = await supabase.rpc('complete_student_registration', {
       p_full_name: name,
       p_raw_barcode: rawBarcode.value,
-      p_guardian_email: email,
+      p_guardian_email: email || null,
     })
     if (error) throw error
 
     // Erase the raw credential from client memory as soon as the secure RPC has used it.
     rawBarcode.value = null
     await Promise.all([loadStudentProfile(), refreshProfile()])
-    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule()])
+    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule(), loadGuardianLinks()])
     faceEnrollmentOpen.value = true
   } catch (error) {
     registrationMessage.value = toUserFacingErrorMessage(error, 'Registration could not be completed.')
@@ -559,6 +604,11 @@ async function joinClass() {
   const code = joinCode.value.trim().toUpperCase()
   joinMessage.value = ''
   joinFailed.value = false
+  if (!hasApprovedParent.value) {
+    joinFailed.value = true
+    joinMessage.value = 'Your parent must approve your link before you can join a class.'
+    return
+  }
 
   if (code.length < 6) {
     joinFailed.value = true
@@ -583,9 +633,45 @@ async function joinClass() {
 }
 
 function openJoinModal() {
+  if (!hasApprovedParent.value) {
+    openGuardianModal()
+    guardianMessage.value = 'Link a registered parent and wait for their approval before joining a class.'
+    return
+  }
   joinMessage.value = ''
   joinFailed.value = false
   joinModalOpen.value = true
+}
+
+async function loadGuardianLinks() {
+  const actor = user.value?.id
+  if (!actor) { guardianLinks.value = []; return }
+  const { data, error } = await supabase.rpc('student_guardian_summary', { p_student_id: actor })
+  if (user.value?.id !== actor) return
+  if (error) { guardianLinks.value = []; throw error }
+  guardianLinks.value = Array.isArray(data) ? data : []
+}
+function openGuardianModal() {
+  parentLinkEmail.value = ''
+  guardianMessage.value = ''
+  guardianError.value = false
+  guardianModalOpen.value = true
+}
+async function requestParentLink() {
+  if (parentLinkBusy.value || !user.value) return
+  parentLinkBusy.value = true; guardianMessage.value = ''; guardianError.value = false
+  try {
+    const { error } = await supabase.rpc('request_student_parent_link', { p_parent_email: parentLinkEmail.value.trim().toLowerCase() })
+    if (error) throw error
+    await loadGuardianLinks()
+    guardianMessage.value = 'Request sent. Your parent must approve it from their account before you can join a class.'
+    parentLinkEmail.value = ''
+  } catch (error) { guardianError.value = true; guardianMessage.value = toUserFacingErrorMessage(error, 'The parent link could not be requested.') }
+  finally { parentLinkBusy.value = false }
+}
+async function handleParentInvited() {
+  try { await loadGuardianLinks() }
+  catch (error) { pageMessage.value = toUserFacingErrorMessage(error, 'Unable to update parent connections.') }
 }
 
 function closeJoinModal() {
@@ -678,6 +764,7 @@ async function loadStudentDashboard(promptForFaceEnrollment = false) {
         loadAvailableMeetings(),
         loadCoursesAndSchedule(),
         loadFaceEnrollmentStatus(),
+        loadGuardianLinks(),
       ])
       if (promptForFaceEnrollment) faceEnrollmentOpen.value = !faceEnrolled.value
     }
@@ -697,6 +784,16 @@ onIonViewWillEnter(async () => {
 </script>
 
 <style scoped>
+.guardian-help { color: var(--campus-muted); font-size: 13px; line-height: 1.65; margin: 0; }
+.guardian-links { display: grid; gap: 10px; margin: 18px 0; }
+.guardian-links article { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; border: 1px solid var(--campus-border); border-radius: 12px; }
+.guardian-links article > div { display: grid; gap: 4px; min-width: 0; }
+.guardian-links small { color: var(--campus-muted); overflow-wrap: anywhere; }
+.guardian-status { padding: 6px 9px; border-radius: 20px; font-size: 11px; background: var(--campus-warning-soft); color: var(--campus-warning); }
+.guardian-status.is-approved { color: var(--campus-success); background: var(--campus-success-soft); }
+.guardian-status.is-rejected, .guardian-error { color: var(--campus-danger); }
+.guardian-success { color: var(--campus-success); }
+.guardian-overview h2 { font-size: 19px; }
 .student-page {
   --campus-accent: var(--campus-green, #087443);
   --campus-accent-soft: var(--campus-green-soft, #e4f2e9);

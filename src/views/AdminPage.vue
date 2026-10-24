@@ -7,8 +7,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">School administration</p>
-            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : activeSection === 'verification' ? 'Student face verification' : 'Administration overview' }}</h1>
-            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : activeSection === 'verification' ? 'Face enrollment is completed once. Authorize a new enrollment only when a student needs to replace it.' : 'Manage teacher access and student verification.' }}</p>
+            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : activeSection === 'verification' ? 'Student face verification' : activeSection === 'parents' ? 'Family connections' : 'Administration overview' }}</h1>
+            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : activeSection === 'verification' ? 'Face enrollment is completed once. Authorize a new enrollment only when a student needs to replace it.' : activeSection === 'parents' ? 'Review each student’s parent-approved links and invite parents to register.' : 'Manage teacher access, family connections, and student verification.' }}</p>
           </div>
         </header>
 
@@ -32,6 +32,7 @@
           <ion-button @click="router.push({ path: '/admin', query: { section: 'teachers' } })">Open teacher approvals</ion-button>
         </section>
         <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Student identity</p><h2>Face verification access</h2><p>Manage one-time face enrollment and authorize a retake when needed.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'verification' } })">Manage verification</ion-button></section>
+        <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Parent access</p><h2>Family connections</h2><p>Inspect student links. Only the parent can approve a new family connection.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'parents' } })">View family connections</ion-button></section>
 
         <div
           v-if="message"
@@ -45,26 +46,33 @@
 
         <section v-if="activeSection === 'verification'" class="queue-card" aria-labelledby="verification-heading">
           <header class="queue-heading"><div><p class="eyebrow">Student identity</p><h2 id="verification-heading">Face enrollment</h2></div><label class="student-search"><span class="sr-only">Find a student</span><input v-model="studentSearch" type="search" placeholder="Search student name or email" /></label></header>
+          <div class="status-tabs" role="group" aria-label="Face enrollment status"><button type="button" :aria-pressed="faceView === 'enrolled'" :class="{ selected: faceView === 'enrolled' }" @click="faceView = 'enrolled'">Enrolled <span>{{ enrolledCount }}</span></button><button type="button" :aria-pressed="faceView === 'not_enrolled'" :class="{ selected: faceView === 'not_enrolled' }" @click="faceView = 'not_enrolled'">Not enrolled <span>{{ faceStudents.length - enrolledCount }}</span></button></div>
           <div v-if="loadingFaces" class="loading-state" role="status"><ion-spinner name="crescent" /><p>Loading verification access…</p></div>
-          <div v-else-if="!visibleStudents.length" class="queue-empty"><span class="empty-icon"><ion-icon :icon="peopleOutline" /></span><h3>{{ studentSearch ? 'No matching students' : 'No registered students yet' }}</h3></div>
-          <div v-else class="applicant-list"><article v-for="student in visibleStudents" :key="student.student_id" class="applicant-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><small>{{ student.enrolled ? `Enrolled ${formatDateTime(student.enrolled_at)}` : 'Face enrollment not completed' }}</small><small v-if="student.can_retake">A one-time retake is authorized.</small></div></div><div class="review-panel"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.enrolled ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'Retake authorized' : student.enrolled ? 'Enrolled' : 'Not enrolled' }}</span><ion-button v-if="student.enrolled && !student.can_retake" fill="outline" class="approve-button" @click="openRetake(student)">Authorize retake</ion-button></div></article></div>
+          <div v-else-if="!visibleStudents.length" class="queue-empty"><span class="empty-icon"><ion-icon :icon="peopleOutline" /></span><h3>{{ studentSearch ? 'No matching students' : faceView === 'enrolled' ? 'No enrolled students' : 'Every registered student is enrolled' }}</h3></div>
+          <div v-else class="applicant-list"><article v-for="student in visibleStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><small>{{ student.enrolled ? `Enrolled ${formatDateTime(student.enrolled_at)}` : 'Face enrollment not completed' }}</small><small v-if="student.can_retake">A one-time retake is authorized.</small></div></div><div class="review-panel verification-actions"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.enrolled ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'Retake authorized' : student.enrolled ? 'Enrolled' : 'Not enrolled' }}</span><ion-button v-if="student.enrolled && !student.can_retake" fill="outline" class="approve-button" @click="openRetake(student)">Authorize retake</ion-button></div></article></div>
         </section>
+
+        <section v-if="activeSection === 'parents'" class="queue-card" aria-labelledby="family-connections-heading"><header class="queue-heading"><div><p class="eyebrow">Parent access</p><h2 id="family-connections-heading">Student family connections</h2></div><ion-button @click="inviteParentOpen = true">Invite a parent</ion-button></header><div class="queue-search"><label class="student-search"><span class="sr-only">Find a student for parent links</span><input v-model="familySearch" type="search" placeholder="Search student name or email" /></label></div><div v-if="loadingFaces" class="loading-state"><ion-spinner /><p>Loading students…</p></div><div v-else-if="!familyStudents.length" class="queue-empty"><h3>No matching students</h3></div><div v-else class="applicant-list"><article v-for="student in familyStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name) }}</span><div class="applicant-copy"><h3>{{ student.full_name }}</h3><p>{{ student.email }}</p></div></div><ion-button fill="outline" @click="guardianStudent = { id: student.student_id, full_name: student.full_name }">View linked parents</ion-button></article></div></section>
 
         <section v-if="activeSection === 'teachers'" class="queue-card" aria-labelledby="queue-heading">
           <header class="queue-heading">
             <div>
               <p class="eyebrow">Registration queue</p>
-              <h2 id="queue-heading">{{ selectedView === 'pending' ? 'Needs review' : 'All teachers' }}</h2>
+              <h2 id="queue-heading">{{ selectedView === 'pending' ? 'Needs review' : selectedView === 'approved' ? 'Approved teachers' : 'Rejected registrations' }}</h2>
             </div>
             <ion-segment v-model="selectedView" class="queue-filter" aria-label="Filter teacher registrations">
               <ion-segment-button value="pending">
                 <ion-label>Pending {{ pendingCount }}</ion-label>
               </ion-segment-button>
-              <ion-segment-button value="all">
-                <ion-label>All {{ applicants.length }}</ion-label>
+              <ion-segment-button value="approved">
+                <ion-label>Approved {{ approvedCount }}</ion-label>
+              </ion-segment-button>
+              <ion-segment-button value="rejected">
+                <ion-label>Rejected {{ rejectedCount }}</ion-label>
               </ion-segment-button>
             </ion-segment>
           </header>
+          <div class="queue-search"><label class="student-search"><span class="sr-only">Find a teacher</span><input v-model="teacherSearch" type="search" placeholder="Search teacher name or email" /></label></div>
 
           <div v-if="loading" class="loading-state" role="status" aria-label="Loading teacher registrations">
             <ion-spinner name="crescent" />
@@ -75,7 +83,7 @@
             <span class="empty-icon" aria-hidden="true">
               <ion-icon :icon="selectedView === 'pending' ? shieldCheckmarkOutline : peopleOutline" />
             </span>
-            <h3>{{ selectedView === 'pending' ? 'The approval queue is clear' : 'No teacher registrations yet' }}</h3>
+            <h3>{{ teacherSearch ? 'No matching teachers' : selectedView === 'pending' ? 'The approval queue is clear' : `No ${selectedView} registrations` }}</h3>
             <p>
               {{ selectedView === 'pending'
                 ? 'There are no teacher accounts waiting for a decision.'
@@ -184,6 +192,8 @@
         </div>
       </template>
     </app-modal>
+    <student-guardian-modal :student="guardianStudent" @close="guardianStudent = null" @invite="guardianStudent = null; inviteParentOpen = true" />
+    <invite-parent-modal :open="inviteParentOpen" @close="inviteParentOpen = false" />
     <app-modal :open="Boolean(selectedStudent)" title="Authorize one face retake?" :busy="grantingRetake" @close="selectedStudent = null">
       <template v-if="selectedStudent"><p class="retake-description">{{ selectedStudent.full_name }} can replace their face enrollment once. Their existing enrollment remains active until they complete the new one.</p><ion-textarea v-model="retakeNote" label="Reason (optional)" label-placement="stacked" fill="outline" auto-grow :maxlength="500" :disabled="grantingRetake" /><p v-if="retakeError" class="retake-error" role="alert">{{ retakeError }}</p></template>
       <template #actions><ion-button fill="outline" :disabled="grantingRetake" @click="selectedStudent = null">Cancel</ion-button><ion-button :disabled="grantingRetake" @click="grantRetake">{{ grantingRetake ? 'Authorizing…' : 'Authorize retake' }}</ion-button></template>
@@ -216,7 +226,7 @@ import {
   shieldCheckmarkOutline,
   timeOutline,
 } from 'ionicons/icons'
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { useSession } from '@/composables/useSession'
@@ -225,6 +235,8 @@ import { supabase } from '@/lib/supabase'
 import type { TeacherApprovalStatus } from '@/types/database'
 import PortalHeader from '@/components/PortalHeader.vue'
 import AppModal from '@/components/AppModal.vue'
+import StudentGuardianModal from '@/components/StudentGuardianModal.vue'
+import InviteParentModal from '@/components/InviteParentModal.vue'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 interface TeacherApplicant {
@@ -238,7 +250,7 @@ interface TeacherApplicant {
 }
 interface FaceEnrollment { student_id: string; full_name: string; email: string; enrolled: boolean; can_retake: boolean; granted_at: string | null; enrolled_at: string | null }
 
-type QueueView = 'pending' | 'all'
+type QueueView = 'pending' | 'approved' | 'rejected'
 
 const router = useRouter()
 const route = useRoute()
@@ -253,19 +265,27 @@ const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
 const selectedView = ref<QueueView>('pending')
 const selectedApplicant = ref<TeacherApplicant | null>(null)
-const activeSection = computed(() => route.query.section === 'teachers' ? 'teachers' : route.query.section === 'verification' ? 'verification' : 'overview')
+const activeSection = computed(() => route.query.section === 'teachers' ? 'teachers' : route.query.section === 'verification' ? 'verification' : route.query.section === 'parents' ? 'parents' : 'overview')
 const faceStudents = ref<FaceEnrollment[]>([])
 const selectedStudent = ref<FaceEnrollment | null>(null)
 const studentSearch = ref(''), retakeNote = ref(''), retakeError = ref('')
 const loadingFaces = ref(false), grantingRetake = ref(false)
-const visibleStudents = computed(() => faceStudents.value.filter(student => `${student.full_name} ${student.email}`.toLowerCase().includes(studentSearch.value.trim().toLowerCase())))
+const faceView = ref<'enrolled' | 'not_enrolled'>('enrolled')
+const teacherSearch = ref(''), familySearch = ref(''), inviteParentOpen = ref(false)
+const guardianStudent = ref<{ id: string; full_name: string } | null>(null)
+const enrolledCount = computed(() => faceStudents.value.filter(student => student.enrolled).length)
+const visibleStudents = computed(() => faceStudents.value.filter(student => student.enrolled === (faceView.value === 'enrolled') && `${student.full_name} ${student.email}`.toLowerCase().includes(studentSearch.value.trim().toLowerCase())))
+const familyStudents = computed(() => faceStudents.value.filter(student => `${student.full_name} ${student.email}`.toLowerCase().includes(familySearch.value.trim().toLowerCase())))
 
 const pendingCount = computed(() => applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending').length)
 const approvedCount = computed(() => applicants.value.filter((applicant) => applicant.teacher_approval_status === 'approved').length)
 const rejectedCount = computed(() => applicants.value.filter((applicant) => applicant.teacher_approval_status === 'rejected').length)
-const visibleApplicants = computed(() => selectedView.value === 'all'
-  ? applicants.value
-  : applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending'))
+const visibleApplicants = computed(() => applicants.value.filter(applicant => (applicant.teacher_approval_status || 'pending') === selectedView.value && `${applicant.full_name} ${applicant.email}`.toLowerCase().includes(teacherSearch.value.trim().toLowerCase())))
+let feedbackTimeout: ReturnType<typeof setTimeout> | undefined
+watch(message, value => { clearTimeout(feedbackTimeout); if (value) feedbackTimeout = setTimeout(clearMessage, 5000) })
+watch(activeSection, () => { clearMessage(); selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null })
+watch(() => profile.value?.id, () => { clearMessage(); applicants.value = []; faceStudents.value = []; selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null; inviteParentOpen.value = false })
+onBeforeUnmount(() => { clearTimeout(feedbackTimeout) })
 
 async function loadApplicants(background = false) {
   if (!background) { loading.value = true; clearMessage() }
@@ -396,6 +416,7 @@ function showSuccess(text: string) {
 }
 
 function clearMessage() {
+  clearTimeout(feedbackTimeout)
   message.value = ''
 }
 
@@ -670,7 +691,7 @@ useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.ro
 }
 
 .queue-filter {
-  width: min(100%, 270px);
+  width: min(100%, 430px);
   padding: 4px;
   border-radius: 12px;
   background: var(--campus-bg-local);
@@ -833,6 +854,7 @@ useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.ro
 .review-panel {
   min-width: 0;
 }
+.queue-search { padding:16px 24px; border-bottom:1px solid var(--campus-border); }.queue-search .student-search { display:block; max-width:480px; }.status-tabs { display:flex; flex-wrap:wrap; gap:8px; padding:16px 24px; border-bottom:1px solid var(--campus-border); }.status-tabs button { display:flex; gap:9px; align-items:center; min-height:42px; padding:10px 14px; border:1px solid var(--campus-border); border-radius:10px; color:var(--campus-muted); background:var(--campus-surface); font:inherit; font-size:13px; font-weight:650; cursor:pointer; }.status-tabs button.selected { background:var(--campus-accent-soft); border-color:var(--campus-accent); color:var(--campus-accent); }.status-tabs button span { padding:2px 6px; border-radius:6px; background:var(--campus-surface-soft); font-size:11px; }.verification-row { grid-template-columns:minmax(0,1fr) auto; align-items:center; }.verification-actions { display:flex; align-items:center; justify-content:flex-end; flex-wrap:wrap; gap:12px; }.verification-actions ion-button { flex:0 0 auto; }.verification-actions .status-pill { flex:0 0 auto; }
 
 .existing-review-note {
   display: -webkit-box;
@@ -919,6 +941,7 @@ ion-modal .review-buttons {
     grid-template-columns: 1fr;
     gap: 16px;
   }
+  .verification-row { grid-template-columns:1fr; }.verification-actions { justify-content:flex-start; }
 }
 
 @media (max-width: 600px) {

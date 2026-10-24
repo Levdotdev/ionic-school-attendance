@@ -5,6 +5,7 @@ import { alertController } from '@ionic/vue'
 
 import EvidenceDetailModal, { type EvidenceRecord } from '@/components/EvidenceDetailModal.vue'
 import AppModal from '@/components/AppModal.vue'
+import ParentCalendarPanel from '@/components/ParentCalendarPanel.vue'
 import AdminPage from '@/views/AdminPage.vue'
 import ParentPage from '@/views/ParentPage.vue'
 import StudentPage from '@/views/StudentPage.vue'
@@ -91,7 +92,7 @@ function record(overrides: Partial<EvidenceRecord> = {}): EvidenceRecord {
     id: 'record-1', status: 'present', verification_status: 'approved',
     selfie_path: 'student-1/meeting-1/selfie.jpg', latitude: 13.387419, longitude: 121.162494,
     distance_m: 16, submitted_at: '2026-10-24T01:05:00.000Z',
-    meeting_starts_at: '2026-10-24T01:00:00.000Z', meeting_title: 'Saturday class',
+    meeting_starts_at: '2026-10-24T01:00:00.000Z',
     ...overrides,
   }
 }
@@ -125,6 +126,13 @@ afterEach(() => {
 })
 
 describe('protected attendance evidence', () => {
+  it('labels manual present attendance as teacher-confirmed inside school without inventing GPS', async () => {
+    const wrapper = mount(EvidenceDetailModal, { props: { record: record({ selfie_path: null, latitude: null, longitude: null, distance_m: null, location_status: 'teacher_confirmed_on_campus' }), studentName: 'Student One' }, global: { stubs: evidenceStubs } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Inside school · marked present by teacher (not a GPS reading)')
+    expect(wrapper.find('a').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('loads an initially open photo using a short-lived signed URL and shows Manila time/location', async () => {
     const wrapper = mount(EvidenceDetailModal, { props: { record: record(), studentName: 'Student One' }, global: { stubs: evidenceStubs } })
     await flushPromises()
@@ -185,6 +193,16 @@ describe('protected attendance evidence', () => {
 })
 
 describe('shared dialog lifetime', () => {
+  it('does not close its parent when a child dialog programmatically replaces it', async () => {
+    const wrapper = shallowMount(AppModal, { props: { open: true, title: 'Security' } })
+    await wrapper.setProps({ open: false })
+    wrapper.findComponent({ name: 'IonModal' }).vm.$emit('didDismiss')
+    expect(wrapper.emitted('close')).toBeUndefined()
+    await wrapper.setProps({ open: true })
+    wrapper.findComponent({ name: 'IonModal' }).vm.$emit('didDismiss')
+    expect(wrapper.emitted('close')).toHaveLength(1)
+    wrapper.unmount()
+  })
   it('blocks user cancellation during save while allowing a successful parent close and route unmount', async () => {
     const wrapper = shallowMount(AppModal, { props: { open: true, title: 'Save class', busy: true } })
     const canDismiss = wrapper.findComponent({ name: 'IonModal' }).props('canDismiss') as () => boolean
@@ -235,7 +253,7 @@ describe('cached student dashboard re-entry', () => {
 describe('teacher class workspace', () => {
   const schoolClass = (id: string) => ({ id, teacher_id: 'teacher-1', name: `Class ${id}`, join_code: `JOIN${id}`, section: null })
   const meeting = (classId: string) => ({
-    id: `meeting-${classId}`, class_id: classId, title: `Meeting ${classId}`, starts_at: '2026-10-24T01:00:00Z', ends_at: '2026-10-24T02:00:00Z',
+    id: `meeting-${classId}`, class_id: classId, starts_at: '2026-10-24T01:00:00Z', ends_at: '2026-10-24T02:00:00Z',
     attendance_mode: 'teacher_manual', attendance_enabled: true, attendance_opens_at: '2026-10-24T00:45:00Z', attendance_closes_at: '2026-10-24T02:00:00Z',
   })
 
@@ -313,9 +331,10 @@ describe('teacher class workspace', () => {
     await flushPromises()
     const state = setupState(wrapper)
     state.beginMeetingEdit(state.selectedMeeting)
-    state.meetingForm.title = 'Renamed cancelled class'
+    state.meetingForm.check_in_closes_at = '2026-10-24T09:30'
     await state.saveMeeting()
-    expect(writes[0].payload).toMatchObject({ title: 'Renamed cancelled class', attendance_enabled: false, latitude: 13.387419, longitude: 121.162494, radius_m: 180 })
+    expect(writes[0].payload).toMatchObject({ attendance_enabled: false, latitude: 13.387419, longitude: 121.162494, radius_m: 180, attendance_opens_at: current.starts_at })
+    expect(writes[0].payload).not.toHaveProperty('title')
     expect(state.meetings[0].attendance_enabled).toBe(false)
     expect(state.meetingModalOpen).toBe(false)
     confirmDialog()
@@ -366,9 +385,10 @@ describe('teacher class workspace', () => {
     await flushPromises()
     const state = setupState(wrapper)
     state.beginScheduleCreate()
-    Object.assign(state.scheduleForm, { attendance_mode: 'self_online', check_in_minutes_before: 30 })
+    Object.assign(state.scheduleForm, { attendance_mode: 'self_online', check_in_minutes_after_start: 30 })
     await state.saveSchedule()
-    expect(saved).toMatchObject({ class_id: 'A', attendance_mode: 'self_online', check_in_minutes_before: 30 })
+    expect(saved).toMatchObject({ class_id: 'A', attendance_mode: 'self_online', check_in_minutes_after_start: 30 })
+    expect(saved).not.toHaveProperty('check_in_minutes_before')
     expect(state.scheduleModalOpen).toBe(true)
     expect(state.message).toContain('weekly schedule upgrade is not active')
     wrapper.unmount()
@@ -390,14 +410,14 @@ describe('teacher class workspace', () => {
     await flushPromises()
     const state = setupState(wrapper)
     state.beginScheduleCreate()
-    Object.assign(state.scheduleForm, { attendance_mode: 'self_on_site', check_in_minutes_before: 20, room: 'Room 201' })
+    Object.assign(state.scheduleForm, { attendance_mode: 'self_on_site', check_in_minutes_after_start: 20, room: 'Room 201' })
     await state.saveSchedule()
     expect(state.scheduleModalOpen).toBe(false)
-    expect(state.schedules[0]).toMatchObject({ attendance_mode: 'self_on_site', check_in_minutes_before: 20, room: 'Room 201' })
+    expect(state.schedules[0]).toMatchObject({ attendance_mode: 'self_on_site', check_in_minutes_after_start: 20, room: 'Room 201' })
     state.beginScheduleEdit(state.schedules[0])
-    Object.assign(state.scheduleForm, { attendance_mode: 'self_online', check_in_minutes_before: 5 })
+    Object.assign(state.scheduleForm, { attendance_mode: 'self_online', check_in_minutes_after_start: 5 })
     await state.saveSchedule()
-    expect(writes[1].payload).toMatchObject({ attendance_mode: 'self_online', check_in_minutes_before: 5 })
+    expect(writes[1].payload).toMatchObject({ attendance_mode: 'self_online', check_in_minutes_after_start: 5 })
     confirmDialog()
     await state.deleteSchedule(state.schedules[0])
     expect(state.schedules).toEqual([])
@@ -437,7 +457,7 @@ describe('teacher class workspace', () => {
     wrapper.unmount()
   })
 
-  it('saves both weekly check-in offsets and rejects an invalid closing window without writing', async () => {
+  it('saves only the weekly closing offset and rejects an invalid closing window without writing', async () => {
     const writes: QueryState[] = []
     queryHandler = state => {
       if (state.table === 'classes') return { data: [schoolClass('A')], error: null }
@@ -448,9 +468,10 @@ describe('teacher class workspace', () => {
     await flushPromises()
     const state = setupState(wrapper)
     state.beginScheduleCreate()
-    Object.assign(state.scheduleForm, { check_in_minutes_before: 20, check_in_minutes_after_start: 30 })
+    Object.assign(state.scheduleForm, { check_in_minutes_after_start: 30 })
     await state.saveSchedule()
-    expect(writes[0].payload).toMatchObject({ check_in_minutes_before: 20, check_in_minutes_after_start: 30, is_active: true })
+    expect(writes[0].payload).toMatchObject({ check_in_minutes_after_start: 30, is_active: true })
+    expect(writes[0].payload).not.toHaveProperty('check_in_minutes_before')
     state.beginScheduleCreate()
     state.scheduleForm.check_in_minutes_after_start = 0
     await state.saveSchedule()
@@ -476,7 +497,8 @@ describe('teacher class workspace', () => {
     expect(state.activeSection).toBe('attendance')
     const submission = { ...record(), student_id: 'student-1', meeting_id: 'meeting-A', source: 'self_check', created_at: '2026-10-24T01:05:00Z' }
     state.openEvidence(submission)
-    expect(state.selectedEvidence).toMatchObject({ id: 'record-1', class_name: 'Class A', meeting_title: 'Meeting A', latitude: null, longitude: null, distance_m: null })
+    expect(state.selectedEvidence).toMatchObject({ id: 'record-1', class_name: 'Class A', latitude: null, longitude: null, distance_m: null })
+    expect(state.selectedEvidence).not.toHaveProperty('meeting_title')
     wrapper.unmount()
   })
 
@@ -533,6 +555,42 @@ describe('teacher class workspace', () => {
 })
 
 describe('administrator review dialog', () => {
+  it('separates pending, approved, and rejected teachers and searches within the selected status', async () => {
+    mocks.profile.value = { id: 'admin-1', role: 'admin' }
+    const rows = ['pending', 'approved', 'rejected'].map((status, index) => ({ id: `teacher-${index}`, full_name: `Teacher ${status}`, email: `${status}@example.com`, teacher_approval_status: status, created_at: '2026-10-23T00:00:00Z' }))
+    queryHandler = () => ({ data: rows, error: null })
+    const wrapper = shallowMount(AdminPage)
+    await flushPromises()
+    const state = setupState(wrapper)
+    expect(state.visibleApplicants.map((row: { teacher_approval_status: string }) => row.teacher_approval_status)).toEqual(['pending'])
+    state.selectedView = 'approved'
+    expect(state.visibleApplicants.map((row: { teacher_approval_status: string }) => row.teacher_approval_status)).toEqual(['approved'])
+    state.teacherSearch = 'APPROVED@EXAMPLE'
+    expect(state.visibleApplicants).toHaveLength(1)
+    state.teacherSearch = 'rejected'
+    expect(state.visibleApplicants).toHaveLength(0)
+    state.selectedView = 'rejected'
+    expect(state.visibleApplicants).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('separates enrolled and not-enrolled face lists and clears feedback after five seconds', async () => {
+    vi.useFakeTimers({ toFake: ['Date', 'setTimeout', 'clearTimeout'] })
+    mocks.profile.value = { id: 'admin-1', role: 'admin' }
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'admin_student_face_enrollments' ? [{ student_id: 'student-1', full_name: 'Enrolled Student', email: 'one@example.com', enrolled: true }, { student_id: 'student-2', full_name: 'New Student', email: 'two@example.com', enrolled: false }] : [], error: null }))
+    const wrapper = shallowMount(AdminPage)
+    await flushPromises()
+    const state = setupState(wrapper)
+    expect(state.visibleStudents.map((student: { student_id: string }) => student.student_id)).toEqual(['student-1'])
+    state.faceView = 'not_enrolled'
+    expect(state.visibleStudents.map((student: { student_id: string }) => student.student_id)).toEqual(['student-2'])
+    state.showSuccess('Teacher One registration approved.')
+    await flushPromises()
+    expect(state.message).toContain('approved')
+    await vi.advanceTimersByTimeAsync(5001)
+    expect(state.message).toBe('')
+    wrapper.unmount()
+  })
   it('saves the teacher approval decision and note, then refreshes the approval totals', async () => {
     mocks.profile.value = { id: 'admin-1', role: 'admin' }
     mocks.route.query.section = 'teachers'
@@ -597,7 +655,31 @@ describe('administrator review dialog', () => {
 })
 
 describe('family history', () => {
-  it('signs only the latest visible photo and reuses it during live history updates', async () => {
+  it('requires an explicit parent confirmation before accepting a pending student link', async () => {
+    mocks.profile.value = { id: 'parent-1', role: 'parent' }
+    const pending = { id: 'request-1', student_id: 'student-1', student_name: 'Student One', student_email: 'student@example.com', status: 'pending', requested_at: '2026-10-24T00:00:00Z' }
+    let approved = false
+    queryHandler = state => ({ data: state.table === 'guardian_links' && approved ? [{ student_id: 'student-1' }] : state.table === 'profiles' ? [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }] : [], error: null })
+    mocks.rpc.mockImplementation(async name => {
+      if (name === 'respond_to_parent_link_request') approved = true
+      return { data: name === 'my_parent_link_requests' ? approved ? [] : [pending] : [], error: null }
+    })
+    const wrapper = shallowMount(ParentPage)
+    await flushPromises()
+    const state = setupState(wrapper)
+    expect(state.pendingLinks).toHaveLength(1)
+    expect(state.students).toHaveLength(0)
+    state.openLinkReview(state.pendingLinks[0], true)
+    await state.respondToLink()
+    expect(mocks.rpc).not.toHaveBeenCalledWith('respond_to_parent_link_request', expect.anything())
+    state.confirmedStudent = true
+    await state.respondToLink()
+    expect(mocks.rpc).toHaveBeenCalledWith('respond_to_parent_link_request', { p_request_id: 'request-1', p_approve: true, p_note: null })
+    expect(state.pendingLinks).toHaveLength(0)
+    expect(state.students).toHaveLength(1)
+    wrapper.unmount()
+  })
+  it('keeps history photo paths for lazy thumbnails without eagerly signing hundreds of records', async () => {
     mocks.profile.value = { id: 'parent-1', role: 'parent' }
     mocks.route.query.section = 'overview'
     queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
@@ -606,13 +688,13 @@ describe('family history', () => {
     const wrapper = shallowMount(ParentPage)
     await flushPromises()
     expect(setupState(wrapper).attendance).toHaveLength(200)
-    expect(mocks.signedUrl).toHaveBeenCalledTimes(1)
+    expect(mocks.signedUrl).not.toHaveBeenCalled()
     const live = vi.mocked(useRealtimeRefresh).mock.calls.at(-1)![0]
     await live.onChange()
-    expect(mocks.signedUrl).toHaveBeenCalledTimes(1)
+    expect(mocks.signedUrl).not.toHaveBeenCalled()
     vi.setSystemTime(new Date('2026-10-24T00:15:00Z'))
     await live.onChange()
-    expect(mocks.signedUrl).toHaveBeenCalledTimes(2)
+    expect(mocks.signedUrl).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -631,7 +713,8 @@ describe('family history', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('Meeting not counted')
     expect(wrapper.find('img.history-photo').exists()).toBe(false)
-    expect(wrapper.text()).toContain('Photo available in Details')
+    expect(wrapper.find('attendance-photo-stub').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('Photo available in Details')
     expect(mocks.signedUrl).not.toHaveBeenCalled()
     wrapper.unmount()
   })
@@ -656,7 +739,7 @@ describe('family history', () => {
     wrapper.unmount()
   })
 
-  it('loads the child’s current weekly schedule and updates it without a refresh button', async () => {
+  it('passes the child’s active courses to the shared class calendar without a refresh button', async () => {
     mocks.profile.value = { id: 'parent-1', role: 'parent' }
     mocks.route.query.section = 'schedule'
     let enabled = true
@@ -664,14 +747,14 @@ describe('family history', () => {
     const wrapper = shallowMount(ParentPage, { global: { renderStubDefaultSlot: true } })
     await flushPromises()
     const state = setupState(wrapper)
-    expect(state.weeklyMeetings[0].class_name).toBe('Integration')
-    expect(wrapper.text()).toContain('Weekly schedule')
+    expect(state.studentCourses['student-1'][0].name).toBe('Integration')
+    expect(wrapper.findComponent(ParentCalendarPanel).props('studentId')).toBe('student-1')
+    expect(wrapper.text()).toContain('Your child’s calendar')
     expect(wrapper.text()).not.toContain('Refresh')
     enabled = false
     const liveOptions = vi.mocked(useRealtimeRefresh).mock.calls.at(-1)![0]
     await liveOptions.onChange()
-    expect(state.weeklyMeetings[0].attendance_enabled).toBe(false)
-    expect(wrapper.text()).toContain('Not counted')
+    expect(state.studentCourses['student-1'][0].name).toBe('Integration')
     wrapper.unmount()
   })
 })

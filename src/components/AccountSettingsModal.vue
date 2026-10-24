@@ -1,19 +1,19 @@
 <template>
-  <app-modal :open="open" title="Account settings" :busy="saving || pictureBusy" @close="$emit('close')">
+  <app-modal :open="open" title="Profile" :busy="saving || pictureBusy" @close="$emit('close')">
     <div v-if="profile" class="settings-content">
       <section>
-        <p class="settings-label">Your account</p>
+        <p class="settings-label">Your profile</p>
         <h2>{{ profile.full_name }}</h2>
         <p class="account-email">{{ profile.email }}</p>
         <span class="role-badge">{{ profile.role === 'admin' ? 'Administrator' : profile.role }}</span>
       </section>
       <section class="picture-settings" aria-label="Profile picture">
         <div class="picture-preview" :class="{ 'is-cropping': selectedPicture }">
-          <img v-if="picturePreview || avatarUrl" :src="picturePreview || avatarUrl" alt="Profile picture preview" :style="{ transform: picturePreview ? `scale(${pictureZoom})` : undefined }" referrerpolicy="no-referrer" />
+          <img v-if="picturePreview || avatarUrl" :src="picturePreview || avatarUrl" alt="Profile picture preview" :style="{ transform: picturePreview ? `scale(${pictureZoom})` : undefined }" referrerpolicy="no-referrer" @error="!picturePreview && onAvatarError()" />
           <span v-else>{{ initials }}</span>
         </div>
         <div class="picture-options">
-          <h3>Profile picture</h3><p>Choose a JPG, PNG, or WebP picture up to 5 MB.</p>
+          <h3>Profile picture</h3><p>Choose a JPG, PNG, or WebP picture up to 5 MB. Without an uploaded picture, your linked Google or Facebook photo is used.</p>
           <input ref="pictureInput" class="file-input" type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose profile picture" @change="choosePicture" />
           <div class="picture-actions"><ion-button size="small" fill="outline" :disabled="pictureBusy" @click="pictureInput?.click()">Choose picture</ion-button><ion-button v-if="nativeCamera" size="small" fill="outline" :disabled="pictureBusy" @click="takePicture">Use camera</ion-button><ion-button v-if="profile.avatar_path && !selectedPicture" size="small" fill="clear" :disabled="pictureBusy" @click="deletePicture">Remove</ion-button></div>
         </div>
@@ -25,7 +25,6 @@
           {{ saving ? 'Saving…' : 'Save name' }}
         </ion-button>
       </form>
-      <section class="linked-settings"><h3>Linked sign-in methods</h3><div class="linked-badges"><span v-for="method in methods" :key="method">{{ method }}</span></div><p>Use Change email or Change password in your profile menu to manage account security.</p><p v-if="user?.new_email">Pending email change: {{ user.new_email }}. Check both inboxes for confirmation.</p></section>
       <section v-if="profile.role === 'teacher' || profile.role === 'student'" class="notification-settings">
         <h3>Class reminders</h3>
         <p>{{ profile.role === 'teacher' ? 'Teacher reminders are sent 5 minutes before class and at the start.' : 'Choose your reminder times on each course’s weekly schedule. Your choices apply to its upcoming meetings.' }}</p>
@@ -43,21 +42,20 @@
 <script setup lang="ts">
 import { IonButton, IonInput } from '@ionic/vue'
 import { Capacitor } from '@capacitor/core'
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
 import AppModal from '@/components/AppModal.vue'
 import { useSession } from '@/composables/useSession'
 import { useProfileAvatar } from '@/composables/useProfileAvatar'
-import { linkedAuthMethods, removeAvatar, uploadAvatar, validateAvatar } from '@/services/account'
+import { removeAvatar, uploadAvatar, validateAvatar } from '@/services/account'
 import { supabase } from '@/lib/supabase'
 import { registerForClassNotifications } from '@/services/notifications'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
-const { profile, user, refreshProfile, refreshAuthUser } = useSession()
-const { avatarUrl, initials } = useProfileAvatar()
-const methods = computed(() => linkedAuthMethods(user.value))
+const { profile, refreshProfile, refreshAuthUser } = useSession()
+const { avatarUrl, initials, onAvatarError } = useProfileAvatar()
 const native = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
 const nativeCamera = Capacitor.isNativePlatform()
 const name = ref('')
@@ -71,12 +69,18 @@ const selectedPicture = ref<Blob | null>(null)
 const picturePreview = ref('')
 const pictureZoom = ref(1)
 const pictureBusy = ref(false)
+let feedbackTimer: ReturnType<typeof setTimeout> | undefined
+
+watch(message, value => {
+  clearTimeout(feedbackTimer)
+  if (value && !failed.value) feedbackTimer = setTimeout(() => { message.value = '' }, 6000)
+})
 
 watch(() => props.open, open => {
   if (open) { name.value = profile.value?.full_name ?? ''; message.value = ''; notificationMessage.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined) }
   else clearPicture()
 })
-onBeforeUnmount(clearPicture)
+onBeforeUnmount(() => { clearPicture(); clearTimeout(feedbackTimer) })
 
 function clearPicture() {
   if (picturePreview.value) URL.revokeObjectURL(picturePreview.value)

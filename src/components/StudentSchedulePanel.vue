@@ -54,8 +54,8 @@ async function loadCalendar() {
   const ids = props.courses.filter(c => !c.archived_at).map(c => c.id)
   try {
     const [scheduleResult, meetingResult, preferenceResult, exceptionResult, taskData] = await Promise.all([
-      ids.length ? supabase.from('class_schedules').select('id,class_id,day_of_week,starts_at,ends_at,room,is_active,attendance_mode,check_in_minutes_before,check_in_minutes_after_start').in('class_id', ids).order('day_of_week').order('starts_at') : Promise.resolve({ data: [], error: null }),
-      ids.length ? supabase.from('meetings').select('id,class_id,schedule_id,schedule_week_start,title,meeting_date,starts_at,ends_at,attendance_enabled').in('class_id', ids).gte('meeting_date', range.value.start).lt('meeting_date', range.value.end).order('starts_at') : Promise.resolve({ data: [], error: null }),
+      ids.length ? supabase.from('class_schedules').select('id,class_id,day_of_week,starts_at,ends_at,room,is_active,attendance_mode,check_in_minutes_after_start').in('class_id', ids).order('day_of_week').order('starts_at') : Promise.resolve({ data: [], error: null }),
+      ids.length ? supabase.from('meetings').select('id,class_id,schedule_id,schedule_week_start,meeting_date,starts_at,ends_at,attendance_enabled').in('class_id', ids).gte('meeting_date', range.value.start).lt('meeting_date', range.value.end).order('starts_at') : Promise.resolve({ data: [], error: null }),
       supabase.from('student_schedule_notification_preferences').select('schedule_id,reminder_minutes').eq('student_id', actor),
       supabase.rpc('visible_schedule_meeting_exceptions', { p_start: range.value.start, p_end: range.value.end }),
       loadStudentTaskData(actor),

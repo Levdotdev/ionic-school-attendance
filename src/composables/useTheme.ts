@@ -16,7 +16,7 @@ function applyTheme(value: ColorTheme) {
   document.documentElement.style.colorScheme = value
 
   const themeColor = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
-  if (themeColor) themeColor.content = value === 'dark' ? '#111715' : '#f5f7f3'
+  if (themeColor) themeColor.content = value === 'dark' ? '#252729' : '#f5f7f3'
 }
 
 export function initializeTheme() {

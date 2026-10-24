@@ -25,8 +25,26 @@ export function authActionError(error: unknown, fallback?: string): string {
   if (code === 'reauthentication_needed') return 'Confirm your identity with a verification code before changing your password.'
   if (code === 'reauthentication_not_valid') return 'That verification code is invalid or expired. Request a new code and try again.'
   if (code === 'same_password') return 'Choose a different password from your current password.'
+  if (code === 'manual_linking_disabled') return 'Linking sign-in methods is not enabled for this school yet. Please contact your administrator.'
+  if (code === 'identity_already_exists') return 'That provider account is already linked to a different user. Use another account or ask your administrator for help.'
+  if (code === 'single_identity_not_deletable') return 'Keep at least one sign-in method linked so you can access your account.'
   if (code === 'weak_password') return 'Choose a stronger password with at least 8 characters, uppercase and lowercase letters, a number, and a symbol.'
   return toUserFacingErrorMessage(error, fallback)
+}
+
+export async function unlinkAccountIdentity(provider: 'google' | 'facebook', expectedUserId: string): Promise<void> {
+  // Refresh before removing, including the server's last-method safeguard.
+  const current = await supabase.auth.getUser()
+  if (current.error) throw current.error
+  if (!current.data.user || current.data.user.id !== expectedUserId) throw new Error('Your account changed. Reopen Security before removing a sign-in method.')
+  const { data, error } = await supabase.auth.getUserIdentities()
+  if (error) throw error
+  const identities = data.identities ?? []
+  const identity = identities.find(item => item.provider === provider)
+  if (!identity) throw new Error('This sign-in method is no longer linked.')
+  if (identities.length < 2) throw new Error('Keep at least one sign-in method linked so you can access your account.')
+  const result = await supabase.auth.unlinkIdentity(identity)
+  if (result.error) throw result.error
 }
 
 export async function requestPasswordReset(email: string): Promise<void> {

@@ -103,6 +103,20 @@ Local PostgreSQL regression tests use an in-memory PGlite database with actual a
 
 The October 24 follow-up release applied `20261024103507_privacy_realtime_and_class_controls.sql` to production. It adds private online locations, one-time face enrollment with administrator retakes, avatars, class archiving, student reminder preferences, check-in closing offsets, authorized attendance history, manual teacher fallback, and recipient-only realtime counters. Post-release checks confirmed the new tables use RLS, the invalidation counter is published, and the existing attendance records were preserved. The filename matches the migration version recorded by Supabase.
 
+### Parent consent, account security, and attendance simplification
+
+The October 25 release adds `20261024121350_parent_consent_and_meeting_simplification.sql`:
+
+- Parent emails must belong to registered, verified parent accounts. Parents explicitly approve or decline student link requests. Existing email-matched links become pending requests; attendance, photos, and existing course enrollment are retained.
+- New enrollment and reactivation require an approved parent link, enforced by both the guarded enrollment function and a database trigger. Pending parents cannot read attendance, photos, locations, or class calendars.
+- Students, approved teachers, and administrators can invite parents through the protected `invite-parent` Edge Function. Invitations have hourly limits, duplicate suppression, retry recovery, and trusted parent-only onboarding. An invitation never approves a student link.
+- Meetings use course name and date/time; the meeting-title database column is removed. Student self-check begins exactly at class start, with an optional closing offset. Teacher attendance bypasses this time window; teacher-marked Present is labeled on-campus without inventing GPS coordinates.
+- Profile contains name and picture settings. Security contains separate linked-account, email, and password dialogs. Manual Google/Facebook linking preserves the current account and role; the last sign-in method cannot be removed.
+- Avatars remain stable during background refresh, falling back to the linked Google/Facebook photo when no uploaded picture exists. Attendance shows private photo thumbnails, and parents use the same class calendar as their child. Personal tasks remain student-only.
+- Softer dark surfaces, three teacher-approval filters with search, separate face-enrollment filters, and short-lived section-specific feedback improve readability and navigation.
+
+Deploy the migration before relying on parent consent, then deploy `invite-parent` with JWT verification enabled. Publish the eight branded Auth templates and enable manual identity linking with the narrow profile described in [the email-template guide](supabase/templates/README.md). Do not publish the main local-development Auth configuration to the hosted project. No live invitation, password change, or account-link action is part of the automated test suite.
+
 ## Local setup
 
 Requirements: Node.js 22 or newer, pnpm, and Android Studio with JDK 21 for Android builds.

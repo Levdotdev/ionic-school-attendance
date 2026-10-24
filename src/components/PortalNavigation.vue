@@ -31,7 +31,7 @@ const navigation = computed<NavigationItem[]>(() => {
   const common = [entry(role, 'overview', 'Overview', homeOutline)]
   if (role === 'teacher') return [...common, entry(role, 'classes', 'Classes', schoolOutline), entry(role, 'attendance', 'Attendance', checkmarkDoneOutline), entry(role, 'schedules', 'Class calendar', calendarOutline)]
   if (role === 'parent') return [...common, entry(role, 'history', 'Attendance history', checkmarkDoneOutline), entry(role, 'schedule', 'Weekly schedule', calendarOutline)]
-  if (role === 'admin') return [...common, entry(role, 'teachers', 'Teacher approvals', peopleOutline), entry(role, 'verification', 'Face verification', shieldCheckmarkOutline)]
+  if (role === 'admin') return [...common, entry(role, 'teachers', 'Teacher approvals', peopleOutline), entry(role, 'verification', 'Face verification', shieldCheckmarkOutline), entry(role, 'parents', 'Parent connections', peopleOutline)]
   return [...common, entry(role, 'courses', 'My courses', schoolOutline), { label: 'Tasks', icon: checkboxOutline, to: '/student/tasks' }, entry(role, 'schedule', 'My calendar', calendarOutline), entry(role, 'history', 'Attendance history', checkmarkDoneOutline)]
 })
 function isActive(item: NavigationItem) {

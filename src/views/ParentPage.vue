@@ -12,8 +12,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">Parent and guardian portal</p>
-            <h1>{{ activeSection === 'history' ? 'Attendance history' : activeSection === 'schedule' ? 'This week’s classes' : 'Your child’s attendance' }}</h1>
-            <p>{{ activeSection === 'history' ? 'Every past class, including present, absent, and meetings that were not counted.' : activeSection === 'schedule' ? 'Your linked children’s current weekly schedule, updated automatically.' : 'Follow attendance and view check-in photos and locations.' }}</p>
+            <h1>{{ activeSection === 'history' ? 'Attendance history' : activeSection === 'schedule' ? 'Your child’s calendar' : 'Your child’s attendance' }}</h1>
+            <p>{{ activeSection === 'history' ? 'Every past class, including present, absent, and meetings that were not counted.' : activeSection === 'schedule' ? 'The same class calendar your child sees, with week, month, and agenda views.' : 'Approve student links, follow attendance, and view check-in photos and locations.' }}</p>
           </div>
         </header>
 
@@ -22,12 +22,14 @@
           <span>{{ message }}</span>
         </div>
 
+        <p v-if="successMessage" class="consent-success" role="status">{{ successMessage }}</p>
+        <section v-if="pendingLinks.length" class="link-requests" aria-labelledby="link-requests-title"><header><p class="eyebrow">Your approval is required</p><h2 id="link-requests-title">Student link requests</h2><p>Confirm that you are this student’s parent or guardian before sharing attendance access.</p></header><article v-for="request in pendingLinks" :key="request.id"><div><strong>{{ request.student_name }}</strong><span>{{ request.student_email }}</span><small>Requested {{ formatDateTime(request.requested_at) }}</small></div><div class="consent-actions"><ion-button size="small" fill="outline" @click="openLinkReview(request, false)">Decline</ion-button><ion-button size="small" @click="openLinkReview(request, true)">Review & approve</ion-button></div></article></section>
         <section v-if="students.length === 0" class="empty-state" aria-labelledby="no-student-title">
           <div class="empty-icon" aria-hidden="true"><ion-icon :icon="peopleOutline" /></div>
           <h2 id="no-student-title">No student is linked yet</h2>
           <p>
-            Ask the student to use this account’s confirmed email address as their parent or guardian
-            email during registration.
+            Ask the student to send a link request using this registered parent account’s email address.
+            You must approve the request before their attendance and class calendar can appear here.
           </p>
         </section>
 
@@ -49,11 +51,7 @@
               <span class="linked-badge"><ion-icon :icon="linkOutline" /> Family access</span>
             </header>
 
-            <section v-if="activeSection === 'overview' || activeSection === 'schedule'" class="weekly-schedule-card">
-              <div class="section-title"><div><p class="eyebrow">Current week · {{ weekLabel }}</p><h3>Weekly schedule</h3></div><span class="record-count">{{ dashboard.schedule.length }} meetings</span></div>
-              <div v-if="dashboard.schedule.length" class="weekly-schedule-list"><article v-for="meeting in dashboard.schedule" :key="meeting.id" class="weekly-meeting"><span class="weekly-day">{{ weekday(meeting.starts_at) }}</span><div><strong>{{ meeting.class_name }}</strong><span>{{ meeting.title }}</span><small>{{ formatDateTime(meeting.starts_at) }} – {{ formatTime(meeting.ends_at) }}</small></div><span class="attendance-pill" :class="meeting.attendance_enabled ? 'is-present' : 'is-not-counted'">{{ meeting.attendance_enabled ? 'Scheduled' : 'Not counted' }}</span></article></div>
-              <p v-else class="weekly-empty">No classes scheduled for this week.</p>
-            </section>
+            <parent-calendar-panel v-if="activeSection === 'overview' || activeSection === 'schedule'" :student-id="dashboard.student.id" :student-name="dashboard.student.full_name" :courses="dashboard.courses" />
 
             <template v-if="dashboard.latest && activeSection !== 'schedule'">
               <div v-if="activeSection === 'overview'" class="latest-grid">
@@ -69,7 +67,7 @@
                   <h3 :id="`latest-status-heading-${dashboard.student.id}`">
                     {{ attendanceLabel(dashboard.latest) }}
                   </h3>
-                  <p class="meeting-name">{{ dashboard.latest.class_name }} · {{ dashboard.latest.meeting_title }}</p>
+                  <p class="meeting-name">{{ dashboard.latest.class_name }}</p>
                   <p class="meeting-time">
                     <ion-icon :icon="calendarOutline" aria-hidden="true" />
                     {{ formatDateTime(dashboard.latest.meeting_starts_at) }}
@@ -94,23 +92,17 @@
 
                   <div class="evidence-body">
                     <figure class="photo-proof">
-                      <img
-                        v-if="dashboard.latest.selfie_url"
-                        :src="dashboard.latest.selfie_url"
-                        :alt="`${dashboard.student.full_name}'s latest attendance check-in`"
-                        loading="lazy"
-                      />
+                      <attendance-photo v-if="dashboard.latest.selfie_path" :path="dashboard.latest.selfie_path" :alt="`${dashboard.student.full_name}'s latest attendance check-in`" class="latest-photo" />
                       <div
                         v-else
                         class="photo-placeholder"
-                        :class="{ 'is-unavailable': dashboard.latest.selfie_path }"
                       >
                         <ion-icon
-                          :icon="dashboard.latest.selfie_path ? alertCircleOutline : imageOutline"
+                          :icon="imageOutline"
                           aria-hidden="true"
                         />
                         <span>
-                          {{ dashboard.latest.selfie_path ? 'Photo could not be loaded' : 'No photo required' }}
+                          No photo required
                         </span>
                       </div>
                       <figcaption>Check-in photo</figcaption>
@@ -142,7 +134,7 @@
 
                       <div v-else class="detail-row">
                         <span class="detail-icon"><ion-icon :icon="locationOutline" /></span>
-                        <span><small>Location</small><strong>{{ dashboard.latest.attendance_mode === 'self_online' ? 'No location was saved for this record' : 'No submitted location' }}</strong></span>
+                        <span><small>Location</small><strong>{{ locationLabel(dashboard.latest) }}</strong></span>
                       </div>
                     </div>
                   </div>
@@ -160,23 +152,14 @@
 
                 <div class="history-list">
                   <article v-for="record in dashboard.records" :key="record.id" class="history-row">
-                    <span
-                      class="history-photo is-placeholder"
-                      role="img"
-                      :aria-label="record.selfie_path ? 'Attendance photo available in Details' : 'No photo was required'"
-                      :title="record.selfie_path ? 'Open Details to view the attendance photo' : 'No photo was required'"
-                    >
-                      <ion-icon :icon="imageOutline" aria-hidden="true" />
-                    </span>
+                    <button v-if="record.selfie_path" type="button" class="history-photo photo-button" :aria-label="`View ${dashboard.student.full_name}'s attendance photo`" @click="openEvidence(record, dashboard.student.full_name)"><attendance-photo :path="record.selfie_path" :alt="`${dashboard.student.full_name}'s attendance check-in`" /></button>
+                    <span v-else class="history-photo is-placeholder" role="img" aria-label="No photo was required"><ion-icon :icon="imageOutline" aria-hidden="true" /></span>
 
                     <div class="history-copy">
                       <strong>{{ record.class_name }}</strong>
-                      <span>{{ record.meeting_title }}</span>
                       <small>{{ formatDateTime(record.meeting_starts_at) }}</small>
                       <small v-if="record.is_inferred">No check-in was recorded before the meeting ended.</small>
-                      <small v-if="record.selfie_path" class="photo-available">
-                        Photo available in Details
-                      </small>
+                      <small v-if="record.location_status === 'teacher_confirmed_on_campus'">Inside school · marked present by teacher</small>
                     </div>
 
                     <div class="history-meta">
@@ -214,6 +197,7 @@
       </main>
     </ion-content>
     <evidence-detail-modal :record="selectedEvidence" :student-name="selectedStudentName" @close="selectedEvidence = null" />
+    <app-modal :open="Boolean(selectedLink)" :title="approveLink ? 'Approve student link' : 'Decline student link'" :busy="respondingLink" @close="closeLinkReview"><template v-if="selectedLink"><h3>{{ selectedLink.student_name }}</h3><p class="consent-description">{{ selectedLink.student_email }}</p><p class="consent-description">{{ approveLink ? 'Approving this request links you as a parent or guardian. You will be able to see this student’s attendance, school schedule, check-in photos, and submitted locations.' : 'Declining this request will not share this student’s attendance with your account.' }}</p><label v-if="approveLink" class="confirm-student"><input v-model="confirmedStudent" type="checkbox" :disabled="respondingLink" /><span>I have verified this student’s identity and confirm that I am their parent or guardian.</span></label><p v-if="linkError" class="consent-error" role="alert">{{ linkError }}</p></template><template #actions><ion-button fill="outline" :disabled="respondingLink" @click="closeLinkReview">Cancel</ion-button><ion-button :disabled="respondingLink || (approveLink && !confirmedStudent)" @click="respondToLink">{{ respondingLink ? 'Saving…' : approveLink ? 'Approve link' : 'Decline link' }}</ion-button></template></app-modal>
   </ion-page>
 </template>
 
@@ -251,6 +235,10 @@ import { supabase } from '@/lib/supabase'
 import { loadAttendanceHistory, loadParentOnlineLocations } from '@/services/attendanceHistory'
 import PortalHeader from '@/components/PortalHeader.vue'
 import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
+import AttendancePhoto from '@/components/AttendancePhoto.vue'
+import ParentCalendarPanel from '@/components/ParentCalendarPanel.vue'
+import AppModal from '@/components/AppModal.vue'
+import type { ScheduleCourse } from '@/utils/studentScheduleCalendar'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 interface StudentRow {
@@ -272,15 +260,15 @@ interface AttendanceDisplayRow {
   selfie_path: string | null
   selfie_url: string | null
   submitted_at: string | null
-  meeting_title: string
   meeting_starts_at: string
   class_name: string
   review_note: string | null
   attendance_enabled: boolean
   attendance_mode: string
   is_inferred: boolean
+  location_status?: string
 }
-interface WeeklyMeeting { id: string; student_id: string; class_id: string; title: string; class_name: string; starts_at: string; ends_at: string; attendance_enabled: boolean }
+interface ParentLinkRequest { id: string; student_id: string; student_name: string; student_email: string; status: string; requested_at: string }
 
 const router = useRouter()
 const route = useRoute()
@@ -290,30 +278,22 @@ const refreshing = ref(false)
 const signingOut = ref(false)
 const students = ref<StudentRow[]>([])
 const attendance = ref<AttendanceDisplayRow[]>([])
-const weeklyMeetings = ref<WeeklyMeeting[]>([])
+const studentCourses = ref<Record<string, ScheduleCourse[]>>({})
+const linkRequests = ref<ParentLinkRequest[]>([])
+const pendingLinks = computed(() => linkRequests.value.filter(link => link.status === 'pending'))
+const selectedLink = ref<ParentLinkRequest | null>(null), approveLink = ref(true), confirmedStudent = ref(false), respondingLink = ref(false), linkError = ref(''), successMessage = ref('')
+let successTimeout: ReturnType<typeof setTimeout> | undefined
 const message = ref('')
 const selectedEvidence = ref<AttendanceDisplayRow | null>(null)
 const selectedStudentName = ref('')
 const activeSection = computed(() => route.query.section === 'history' ? 'history' : route.query.section === 'schedule' ? 'schedule' : 'overview')
-const weekLabel = ref('')
 
 const studentDashboards = computed(() => students.value.map((student) => {
   const records = attendance.value.filter((record) => record.student_id === student.id)
-  return { student, records, latest: records[0] ?? null, schedule: weeklyMeetings.value.filter(meeting => meeting.student_id === student.id) }
+  return { student, records, latest: records[0] ?? null, courses: studentCourses.value[student.id] || [] }
 }))
 
 let dashboardRequest = 0
-const photoCache = new Map<string, { url: string; expires: number }>()
-async function latestPhoto(path: string, isCurrent: () => boolean): Promise<string | null> {
-  const cached = photoCache.get(path)
-  if (cached && cached.expires > Date.now()) return cached.url
-  const signed = await supabase.storage.from('attendance-selfies').createSignedUrl(path, 900)
-  if (!isCurrent() || signed.error || !signed.data?.signedUrl) return null
-  const url = signed.data.signedUrl
-  photoCache.set(path, { url, expires: Date.now() + 14 * 60_000 })
-  for (const [key, value] of photoCache) if (value.expires <= Date.now()) photoCache.delete(key)
-  return url
-}
 async function loadDashboard() {
   const request = ++dashboardRequest
   const parentId = profile.value?.id
@@ -323,19 +303,21 @@ async function loadDashboard() {
   message.value = ''
 
   try {
-    const { data: links, error: linksError } = await supabase
-      .from('guardian_links')
-      .select('student_id')
-      .eq('parent_id', parentId)
-      .order('created_at')
+    const [linkResult, requests] = await Promise.all([
+      supabase.from('guardian_links').select('student_id').eq('parent_id', parentId).order('created_at'),
+      supabase.rpc('my_parent_link_requests'),
+    ])
+    const { data: links, error: linksError } = linkResult
     if (linksError) throw linksError
+    if (requests.error) throw requests.error
     if (!isCurrent()) return
+    linkRequests.value = Array.isArray(requests.data) ? requests.data : []
 
     const studentIds = (links ?? []).map((link) => link.student_id)
     if (!studentIds.length) {
       students.value = []
       attendance.value = []
-      weeklyMeetings.value = []
+      studentCourses.value = {}
       selectedEvidence.value = null
       return
     }
@@ -346,38 +328,28 @@ async function loadDashboard() {
       .in('id', studentIds)
     if (profilesError) throw profilesError
     if (!isCurrent()) return
-    const week = currentWeek()
     const results = await Promise.all(studentIds.map(async studentId => {
       const [history, locations, enrollments] = await Promise.all([
         loadAttendanceHistory<AttendanceDisplayRow>(studentId, isCurrent),
         loadParentOnlineLocations<{ attendance_id: string; latitude: number; longitude: number }>(studentId, isCurrent),
         supabase.from('class_enrollments').select('class_id,class:classes(id,name,archived_at)').eq('student_id', studentId).eq('is_active', true),
       ])
-      if (!isCurrent()) return { records: [], schedule: [] }
+      if (!isCurrent()) return { studentId, records: [], courses: [] }
       if (enrollments.error) throw enrollments.error
       const locationById = new Map<string, { latitude: number; longitude: number }>(locations.map(location => [location.attendance_id, location]))
       const records = history.map(record => {
         const location = record.attendance_id ? locationById.get(record.attendance_id) : null
         return { ...record, latitude: location?.latitude ?? record.latitude, longitude: location?.longitude ?? record.longitude, selfie_url: null as string | null }
       })
-      if (activeSection.value === 'overview' && records[0]?.selfie_path) records[0].selfie_url = await latestPhoto(records[0].selfie_path, isCurrent)
-      if (!isCurrent()) return { records: [], schedule: [] }
+      if (!isCurrent()) return { studentId, records: [], courses: [] }
       const classRows = (enrollments.data ?? []) as unknown as Array<{ class_id: string; class: { id: string; name: string; archived_at?: string | null } | Array<{ id: string; name: string; archived_at?: string | null }> | null }>
       const courses = classRows.flatMap(row => Array.isArray(row.class) ? row.class : row.class ? [row.class] : []).filter(course => !course.archived_at)
-      let schedule: WeeklyMeeting[] = []
-      if (courses.length) {
-        const meetings = await supabase.from('meetings').select('id,class_id,title,starts_at,ends_at,attendance_enabled').in('class_id', courses.map(course => course.id)).gte('meeting_date', week.start).lte('meeting_date', week.end).order('starts_at')
-        if (meetings.error) throw meetings.error
-        const names = new Map(courses.map(course => [course.id, course.name]))
-        schedule = (meetings.data ?? []).map(meeting => ({ ...meeting, student_id: studentId, class_name: names.get(meeting.class_id) ?? 'Class' })) as WeeklyMeeting[]
-      }
-      return { records, schedule }
+      return { studentId, records, courses }
     }))
     if (!isCurrent()) return
     students.value = (profiles ?? []) as StudentRow[]
     attendance.value = results.flatMap(result => result.records).sort((a, b) => b.meeting_starts_at.localeCompare(a.meeting_starts_at))
-    weeklyMeetings.value = results.flatMap(result => result.schedule)
-    weekLabel.value = `${week.start} – ${week.end}`
+    studentCourses.value = Object.fromEntries(results.map(result => [result.studentId, result.courses]))
     if (selectedEvidence.value) selectedEvidence.value = attendance.value.find(record => record.id === selectedEvidence.value?.id) ?? null
   } catch (error) {
     if (isCurrent()) message.value = toUserFacingErrorMessage(error, 'Unable to load parent attendance.')
@@ -386,15 +358,26 @@ async function loadDashboard() {
   }
 }
 
-function currentWeek() {
-  const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Manila', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date())
-  const start = new Date(`${today}T00:00:00Z`)
-  start.setUTCDate(start.getUTCDate() - (start.getUTCDay() + 6) % 7)
-  const end = new Date(start); end.setUTCDate(end.getUTCDate() + 6)
-  return { start: start.toISOString().slice(0, 10), end: end.toISOString().slice(0, 10) }
+function locationLabel(record: AttendanceDisplayRow) {
+  if (record.location_status === 'teacher_confirmed_on_campus') return 'Inside school · marked present by teacher'
+  if (record.location_status === 'gps_on_campus') return 'Inside the school boundary'
+  return record.attendance_mode === 'self_online' ? 'No location was saved for this record' : 'No submitted location'
 }
-function weekday(value: string) { return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', weekday: 'short' }).format(new Date(value)) }
-function formatTime(value: string) { return new Intl.DateTimeFormat('en-PH', { timeZone: 'Asia/Manila', hour: 'numeric', minute: '2-digit' }).format(new Date(value)) }
+function openLinkReview(request: ParentLinkRequest, approve: boolean) { selectedLink.value = request; approveLink.value = approve; confirmedStudent.value = false; linkError.value = '' }
+function closeLinkReview() { if (!respondingLink.value) selectedLink.value = null }
+async function respondToLink() {
+  if (!selectedLink.value || respondingLink.value || (approveLink.value && !confirmedStudent.value)) return
+  respondingLink.value = true; linkError.value = ''
+  try {
+    const result = await supabase.rpc('respond_to_parent_link_request', { p_request_id: selectedLink.value.id, p_approve: approveLink.value, p_note: null })
+    if (result.error) throw result.error
+    const approved = approveLink.value
+    selectedLink.value = null; await loadDashboard()
+    successMessage.value = approved ? 'Student link approved. Their attendance and calendar are now available.' : 'Student link declined.'
+    clearTimeout(successTimeout); successTimeout = setTimeout(() => { successMessage.value = '' }, 5000)
+  } catch (error) { linkError.value = toUserFacingErrorMessage(error, 'The student link could not be updated.') }
+  finally { respondingLink.value = false }
+}
 
 function openEvidence(record: AttendanceDisplayRow, name: string) {
   selectedStudentName.value = name
@@ -479,18 +462,19 @@ onIonViewWillEnter(async () => {
 useRealtimeRefresh({ channel: 'family-attendance', enabled: () => profile.value?.role === 'parent', onChange: loadDashboard })
 watch(() => profile.value?.id, () => {
   dashboardRequest++
-  photoCache.clear()
   students.value = []
   attendance.value = []
-  weeklyMeetings.value = []
+  studentCourses.value = {}
+  linkRequests.value = []; selectedLink.value = null; successMessage.value = ''; clearTimeout(successTimeout)
   selectedEvidence.value = null
   refreshing.value = false
 })
 watch(activeSection, () => { if (!loading.value && profile.value?.role === 'parent') void loadDashboard() })
-onBeforeUnmount(() => { dashboardRequest++; photoCache.clear() })
+onBeforeUnmount(() => { dashboardRequest++; clearTimeout(successTimeout) })
 </script>
 
 <style scoped>
+.link-requests { margin-bottom:24px; padding:22px; border:1px solid var(--campus-border); border-radius:16px; background:var(--campus-surface); }.link-requests h2 { margin:0; color:var(--campus-text); font-size:20px; }.link-requests header>p:last-child,.consent-description { color:var(--campus-muted); font-size:13px; line-height:1.6; }.link-requests article { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:16px; padding:18px 0; border-top:1px solid var(--campus-border); }.link-requests article:last-child { padding-bottom:0; }.link-requests article>div:first-child { display:grid; gap:5px; min-width:0; }.link-requests strong { color:var(--campus-text); font-size:14px; }.link-requests span,.link-requests small { color:var(--campus-muted); font-size:12px; overflow-wrap:anywhere; }.consent-actions { display:flex; flex-wrap:wrap; gap:6px; }.confirm-student { display:flex; align-items:start; gap:12px; padding:14px; border:1px solid var(--campus-border); border-radius:10px; color:var(--campus-text); font-size:13px; line-height:1.6; }.confirm-student input { flex:0 0 auto; width:20px; height:20px; accent-color:var(--campus-accent); }.consent-error { color:var(--campus-danger); font-size:13px; }.consent-success { padding:14px; margin:0 0 18px; border-radius:10px; color:var(--campus-success); background:var(--campus-success-soft); font-size:13px; }.photo-button { padding:0; border:0; cursor:pointer; }.photo-button:focus-visible { outline:3px solid var(--campus-accent); outline-offset:3px; }.latest-photo { height:160px; border-radius:12px; }
 .weekly-schedule-card { border: 1px solid var(--campus-border); border-radius: 16px; background: var(--campus-surface); padding: 22px; margin: 0 0 22px; }
 .weekly-schedule-list { display: grid; margin-top: 16px; }
 .weekly-meeting { display: flex; align-items: center; gap: 14px; padding: 16px 0; border-top: 1px solid var(--campus-border); }

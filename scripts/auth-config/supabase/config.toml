@@ -1,0 +1,42 @@
+# Narrow hosted Auth publish profile. Do not add local-development defaults.
+# Content paths are relative to --workdir scripts/auth-config.
+project_id = "minsu-attendance-auth-emails"
+
+[auth]
+enable_manual_linking = true
+
+[auth.email.template.confirmation]
+subject = "MinSU Attendance — Confirm your account"
+content_path = "./supabase/templates/confirmation.html"
+
+[auth.email.template.email_change]
+subject = "MinSU Attendance — Confirm your new email address"
+content_path = "./supabase/templates/email_change.html"
+
+[auth.email.template.recovery]
+subject = "MinSU Attendance — Reset your password"
+content_path = "./supabase/templates/recovery.html"
+
+[auth.email.template.invite]
+subject = "MinSU Attendance — You are invited to the parent portal"
+content_path = "./supabase/templates/invite.html"
+
+[auth.email.notification.password_changed]
+enabled = true
+subject = "MinSU Attendance — Your password was changed"
+content_path = "./supabase/templates/password_changed_notification.html"
+
+[auth.email.notification.email_changed]
+enabled = true
+subject = "MinSU Attendance — Your email address was changed"
+content_path = "./supabase/templates/email_changed_notification.html"
+
+[auth.email.notification.identity_linked]
+enabled = true
+subject = "MinSU Attendance — A sign-in method was linked"
+content_path = "./supabase/templates/identity_linked_notification.html"
+
+[auth.email.notification.identity_unlinked]
+enabled = true
+subject = "MinSU Attendance — A sign-in method was removed"
+content_path = "./supabase/templates/identity_unlinked_notification.html"

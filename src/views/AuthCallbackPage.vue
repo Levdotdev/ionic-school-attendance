@@ -6,14 +6,14 @@
           <img src="/minsu-logo.png" alt="Mindoro State University seal" class="callback-logo" />
           <template v-if="processing">
             <ion-spinner name="crescent" />
-            <h1>Completing sign in</h1>
+            <h1>{{ linking ? 'Connecting your sign-in method' : 'Completing sign in' }}</h1>
             <p>Please wait while we securely connect your account.</p>
           </template>
           <template v-else-if="errorMessage">
             <ion-icon :icon="alertCircleOutline" class="error-icon" />
-            <h1>Sign in was not completed</h1>
+            <h1>{{ linking ? 'Account was not linked' : 'Sign in was not completed' }}</h1>
             <p role="alert">{{ errorMessage }}</p>
-            <ion-button expand="block" @click="returnToLogin">Return to sign in</ion-button>
+            <ion-button expand="block" @click="linking ? returnToSecurity() : returnToLogin()">{{ linking ? 'Return to security' : 'Return to sign in' }}</ion-button>
           </template>
         </section>
       </main>
@@ -27,18 +27,26 @@ import { alertCircleOutline } from 'ionicons/icons'
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { accountPathForProfile, useSession } from '@/composables/useSession'
-import { clearOAuthAttempt, completeSocialSignIn } from '@/services/oauth'
+import { clearIdentityLinkAttempt, clearOAuthAttempt, completeIdentityLink, completeSocialSignIn, pendingIdentityLink } from '@/services/oauth'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const router = useRouter()
-const { initializeSession, refreshProfile, passwordRecovery, signOut } = useSession()
+const { initializeSession, refreshProfile, refreshAuthUser, passwordRecovery, signOut } = useSession()
 const processing = ref(true)
 const errorMessage = ref('')
+const linking = Boolean(pendingIdentityLink())
+
+async function returnToSecurity() {
+  clearIdentityLinkAttempt()
+  const current = await refreshProfile().catch(() => null)
+  await router.replace(current ? `${accountPathForProfile(current)}?account=security` : '/login')
+}
 
 async function returnToLogin() {
   try {
     await signOut()
     clearOAuthAttempt()
+    clearIdentityLinkAttempt()
     await router.replace('/login')
   } catch (error) {
     errorMessage.value = toUserFacingErrorMessage(error, 'Unable to return to sign in. Please try again.')
@@ -51,7 +59,14 @@ onMounted(async () => {
     await initializeSession()
     clearOAuthAttempt()
     if (passwordRecovery.value) {
+      clearIdentityLinkAttempt()
       await router.replace('/account/recover')
+      return
+    }
+    if (linking) {
+      const destination = await completeIdentityLink()
+      await refreshAuthUser()
+      await router.replace(destination)
       return
     }
     const currentProfile = await refreshProfile()

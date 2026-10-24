@@ -1,7 +1,7 @@
 <template>
-  <app-modal :open="Boolean(record)" title="Attendance evidence" :busy="busy" wide @close="$emit('close')">
+  <app-modal :open="Boolean(record)" title="Attendance details" :busy="busy" wide @close="$emit('close')">
     <template v-if="record">
-      <div class="evidence-heading"><div><p>{{ record.class_name || 'Self-check attendance' }}</p><h2>{{ studentName }}</h2><span>{{ record.meeting_title }}</span></div><ion-badge :color="record.attendance_enabled === false ? 'medium' : record.verification_status === 'rejected' || record.status === 'absent' ? 'danger' : 'success'">{{ record.attendance_enabled === false ? 'Meeting not counted' : record.verification_status === 'rejected' ? 'Voided by teacher' : record.status === 'present' ? 'Present' : 'Absent' }}</ion-badge></div>
+      <div class="evidence-heading"><div><p>{{ record.class_name || 'Class attendance' }}</p><h2>{{ studentName }}</h2></div><ion-badge :color="record.attendance_enabled === false ? 'medium' : record.verification_status === 'rejected' || record.status === 'absent' ? 'danger' : 'success'">{{ record.attendance_enabled === false ? 'Meeting not counted' : record.verification_status === 'rejected' ? 'Voided by teacher' : record.status === 'present' ? 'Present' : 'Absent' }}</ion-badge></div>
       <div v-if="loadingPhoto" class="photo-state" role="status"><ion-spinner /><span>Loading protected photo…</span></div>
       <img v-else-if="photoUrl && !photoFailed" :src="photoUrl" :alt="`${studentName}'s attendance photo`" class="evidence-photo" @error="photoFailed = true" />
       <div v-else class="photo-state" :class="{ 'is-empty': !record.selfie_path }"><ion-icon :icon="imageOutline" /><span>{{ record.selfie_path ? 'Photo unavailable. Close and reopen to try again.' : record.is_inferred ? 'No attendance check-in was submitted.' : 'No photo was required for this attendance record.' }}</span></div>
@@ -9,7 +9,7 @@
       <dl class="evidence-facts">
         <div><dt>Submitted at</dt><dd>{{ formatDate(record.submitted_at || record.created_at) }}</dd></div>
         <div><dt>Meeting time</dt><dd>{{ formatDate(record.meeting_starts_at) }}</dd></div>
-        <div><dt>Location</dt><dd v-if="record.latitude != null && record.longitude != null"><a :href="`https://www.google.com/maps?q=${record.latitude},${record.longitude}`" target="_blank" rel="noopener">{{ record.latitude.toFixed(6) }}, {{ record.longitude.toFixed(6) }} ↗</a></dd><dd v-else>{{ record.attendance_mode === 'self_online' ? 'Online check-in location is private to the linked parent or guardian.' : 'No submitted location' }}</dd></div>
+        <div><dt>Location</dt><dd v-if="record.latitude != null && record.longitude != null"><a :href="`https://www.google.com/maps?q=${record.latitude},${record.longitude}`" target="_blank" rel="noopener">{{ record.latitude.toFixed(6) }}, {{ record.longitude.toFixed(6) }} ↗</a></dd><dd v-else>{{ record.location_status === 'teacher_confirmed_on_campus' ? 'Inside school · marked present by teacher (not a GPS reading)' : record.attendance_mode === 'self_online' ? 'Online check-in location is private to the linked parent or guardian.' : 'No submitted location' }}</dd></div>
         <div v-if="record.distance_m != null"><dt>Distance from school</dt><dd>{{ Math.round(record.distance_m) }} meters</dd></div>
       </dl>
       <p v-if="!reviewable && record.review_note" class="teacher-note"><strong>Teacher’s note</strong>{{ record.review_note }}</p>
@@ -35,11 +35,12 @@ import { toUserFacingErrorMessage } from '@/utils/errors'
 export interface EvidenceRecord {
   id: string; status: string; verification_status: string | null; selfie_path: string | null
   selfie_url?: string | null; latitude: number | null; longitude: number | null; distance_m: number | null
-  submitted_at: string | null; created_at?: string; meeting_starts_at?: string; meeting_title?: string; class_name?: string
+  submitted_at: string | null; created_at?: string; meeting_starts_at?: string; class_name?: string
   review_note?: string | null
   attendance_enabled?: boolean
   attendance_mode?: string
   is_inferred?: boolean
+  location_status?: string
 }
 const props = defineProps<{ record: EvidenceRecord | null; studentName: string; reviewable?: boolean; busy?: boolean; actionError?: string }>()
 defineEmits<{ close: []; review: [voided: boolean, note: string] }>()

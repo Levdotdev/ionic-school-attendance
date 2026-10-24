@@ -69,7 +69,7 @@
               <ion-select-option v-for="item in visibleClasses" :key="item.id" :value="item.id">{{ item.name }}{{ item.archived_at ? ' · Archived' : '' }}</ion-select-option>
             </ion-select>
             <ion-select v-if="meetings.length && activeSection !== 'schedules'" v-model="selectedMeetingId" label="Meeting in selected week" label-placement="stacked" fill="outline">
-              <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">{{ meeting.title }} · {{ formatDateTime(meeting.starts_at) }}{{ meeting.attendance_enabled ? '' : ' · Not counted' }}</ion-select-option>
+              <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">{{ formatDateTime(meeting.starts_at) }}{{ meeting.attendance_enabled ? '' : ' · Not counted' }}</ion-select-option>
             </ion-select>
           </section>
           <section v-if="!loadingClasses && !visibleClasses.length && activeSection !== 'classes'" class="surface-card no-classes">
@@ -91,7 +91,7 @@
               </div>
               <div class="heading-actions">
                 <ion-spinner v-if="loadingClasses" name="crescent" />
-                <ion-button v-else size="small" @click="beginClassCreate">Create class</ion-button>
+                <template v-else><ion-button size="small" fill="outline" @click="inviteParentOpen = true">Invite a parent</ion-button><ion-button size="small" @click="beginClassCreate">Create class</ion-button></template>
               </div>
             </div>
 
@@ -165,7 +165,7 @@
             <section v-if="activeSection === 'overview'" class="overview-grid">
               <article class="surface-card overview-card"><p class="eyebrow">Your class</p><h2>{{ activeClass.name }}</h2><p>{{ students.length }} enrolled students{{ activeClass.archived_at ? ' · Archived' : '' }}</p><p class="join-code-copy">Join code <strong>{{ activeClass.join_code }}</strong></p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'classes' } })">Manage classes</ion-button></article>
               <article class="surface-card overview-card"><p class="eyebrow">Weekly plan</p><h2>{{ meetings.length }} meetings in this week</h2><p>{{ countedMeetings }} {{ countedMeetings === 1 ? 'meeting counts' : 'meetings count' }} toward attendance. Disable a single meeting when class is cancelled.</p><ion-button fill="outline" @click="router.push({ path: '/teacher', query: { section: 'schedules' } })">Manage schedules</ion-button></article>
-              <article class="surface-card overview-card"><p class="eyebrow">{{ selectedMeeting ? 'Selected meeting' : 'Attendance' }}</p><h2>{{ selectedMeeting?.title || 'No meeting selected' }}</h2><p>{{ selectedMeeting ? formatDateTime(selectedMeeting.starts_at) : 'Add your weekly schedule to create meetings automatically.' }}</p><ion-button v-if="selectedMeeting" @click="router.push({ path: '/teacher', query: { section: 'attendance' } })">Open attendance</ion-button></article>
+              <article class="surface-card overview-card"><p class="eyebrow">{{ selectedMeeting ? 'Selected meeting' : 'Attendance' }}</p><h2>{{ selectedMeeting ? activeClass.name : 'No meeting selected' }}</h2><p>{{ selectedMeeting ? formatDateTime(selectedMeeting.starts_at) : 'Add your weekly schedule to create meetings automatically.' }}</p><ion-button v-if="selectedMeeting" @click="router.push({ path: '/teacher', query: { section: 'attendance' } })">Open attendance</ion-button></article>
             </section>
 
             <section v-if="activeSection === 'attendance'" class="attendance-layout">
@@ -189,7 +189,7 @@
                 <div v-if="meetings.length" class="meeting-selector select-shell">
                   <ion-select v-model="selectedMeetingId" label="Meeting in selected week" label-placement="stacked" fill="outline">
                     <ion-select-option v-for="meeting in meetings" :key="meeting.id" :value="meeting.id">
-                      {{ meeting.title }} · {{ formatDateTime(meeting.starts_at) }}
+                      {{ formatDateTime(meeting.starts_at) }}
                     </ion-select-option>
                   </ion-select>
                 </div>
@@ -208,6 +208,7 @@
                     <div class="student-copy">
                       <strong>{{ student.full_name }}</strong>
                       <span>{{ student.email || 'No email recorded' }}</span>
+                      <button type="button" class="guardian-link-button" @click="guardianStudent = student">View linked parents</button>
                       <ion-badge
                         v-if="attendanceByStudent[student.id]"
                         :color="statusColor(attendanceByStudent[student.id].status)"
@@ -220,6 +221,7 @@
                       </small>
                     </div>
                     <div v-if="attendanceByStudent[student.id]?.source === 'self_check'" class="attendance-buttons evidence-actions">
+                      <button v-if="attendanceByStudent[student.id].selfie_path" type="button" class="attendance-thumbnail" :aria-label="`View ${student.full_name}'s attendance photo`" @click="openEvidence(attendanceByStudent[student.id])"><attendance-photo :path="attendanceByStudent[student.id].selfie_path" :alt="`${student.full_name}'s attendance photo`" /></button>
                       <ion-button size="small" fill="outline" @click="openEvidence(attendanceByStudent[student.id])">View attendance</ion-button>
                     </div>
                     <div v-else class="attendance-buttons" role="group" :aria-label="`Mark attendance for ${student.full_name}`">
@@ -268,7 +270,7 @@
                       <ion-badge v-if="selectedMeeting.schedule_id" color="primary">Weekly</ion-badge>
                     </div>
                     <div class="meeting-detail">
-                      <strong>{{ selectedMeeting.title }}</strong>
+                      <strong>{{ activeClass.name }}</strong>
                       <span>Check-in: {{ formatDateTime(selectedMeeting.attendance_opens_at) }}</span>
                       <span>Closes: {{ formatDateTime(selectedMeeting.attendance_closes_at) }}</span>
                     </div>
@@ -310,7 +312,7 @@
                       @click="selectedMeetingId = meeting.id"
                     >
                       <span class="mini-date">{{ formatDateTime(meeting.starts_at).split(',')[0] }}</span>
-                      <span><strong>{{ meeting.title }}</strong><small>{{ modeLabel(meeting.attendance_mode) }}</small></span>
+                      <span><strong>{{ formatDateTime(meeting.starts_at) }}</strong><small>{{ modeLabel(meeting.attendance_mode) }}</small></span>
                     </button>
                   </div>
                   <p v-else class="muted-copy">No meetings are scheduled for this week.</p>
@@ -381,6 +383,8 @@
     </ion-content>
 
     <evidence-detail-modal :record="selectedEvidence" :student-name="selectedEvidence ? studentName(selectedEvidence.student_id) : ''" reviewable :busy="Boolean(reviewingRecordId)" :action-error="evidenceError" @close="closeEvidence" @review="reviewSelectedEvidence" />
+    <student-guardian-modal :student="guardianStudent" @close="guardianStudent = null" @invite="guardianStudent = null; inviteParentOpen = true" />
+    <invite-parent-modal :open="inviteParentOpen" @close="inviteParentOpen = false" />
 
     <app-modal :open="classModalOpen" :title="editingClassId ? 'Edit class' : 'Create class'" :busy="savingClass" @close="cancelClassEdit">
         <form class="modal-form" @submit.prevent="saveClass">
@@ -417,9 +421,8 @@
             <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
             <ion-select-option value="self_online">Online class self-check</ion-select-option>
           </ion-select>
-          <ion-input v-model="scheduleForm.check_in_minutes_before" type="number" min="0" max="120" step="1" label="Open check-in minutes before class" label-placement="stacked" fill="outline" :disabled="savingSchedule" required />
           <ion-input v-model="scheduleForm.check_in_minutes_after_start" type="number" min="1" max="1440" step="1" label="Close check-in minutes after class starts" label-placement="stacked" fill="outline" placeholder="Leave blank for class end" :disabled="savingSchedule" />
-          <p class="schedule-help full-row">Check-in window: {{ scheduleCheckInWindow(scheduleForm) }}. Leave the closing field empty to close at class end. Weekly repetition is automatic. Changes apply to future meetings; edit a meeting to adjust this week’s window.</p>
+          <p class="schedule-help full-row">Check-in starts exactly when class starts: {{ scheduleCheckInWindow(scheduleForm) }}. Leave the closing field empty to close at class end. Teachers may mark attendance outside this self-check window.</p>
           <div class="notification-note full-row">
             <strong>Automatic class reminders</strong>
             <span>You receive reminders 5 minutes before and at class time. Students choose which reminder times they want for each schedule.</span>
@@ -437,7 +440,6 @@
             <span class="status-message-icon" aria-hidden="true">!</span>
             <span>{{ message }}</span>
           </div>
-          <ion-input v-model="meetingForm.title" label="Meeting title" label-placement="stacked" fill="outline" :disabled="savingMeeting" required />
           <ion-select v-model="meetingForm.mode" label="Attendance mode" label-placement="stacked" fill="outline" :disabled="savingMeeting">
             <ion-select-option value="teacher_manual">Teacher marks attendance</ion-select-option>
             <ion-select-option value="self_on_site">Student self-check on site</ion-select-option>
@@ -445,7 +447,6 @@
           </ion-select>
           <label class="native-field"><span>Meeting starts</span><day-date-input v-model="meetingForm.starts_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
           <label class="native-field"><span>Meeting ends</span><day-date-input v-model="meetingForm.ends_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
-          <label class="native-field"><span>Check-in opens</span><day-date-input v-model="meetingForm.check_in_opens_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
           <label class="native-field"><span>Check-in closes</span><day-date-input v-model="meetingForm.check_in_closes_at" type="datetime-local" :min="meetingInputMin" :max="meetingInputMax" :disabled="savingMeeting" required /></label>
           <div class="location-note full-row">
             <span class="location-pin" aria-hidden="true">⌖</span>
@@ -461,7 +462,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   IonBadge,
@@ -495,6 +496,9 @@ import AppModal from '@/components/AppModal.vue'
 import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
 import ScheduleCalendar, { type CalendarEvent } from '@/components/ScheduleCalendar.vue'
 import DayDateInput from '@/components/DayDateInput.vue'
+import StudentGuardianModal from '@/components/StudentGuardianModal.vue'
+import InviteParentModal from '@/components/InviteParentModal.vue'
+import AttendancePhoto from '@/components/AttendancePhoto.vue'
 
 type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
@@ -524,7 +528,6 @@ interface ScheduleRow {
   room: string | null
   is_active: boolean
   attendance_mode: MeetingMode
-  check_in_minutes_before: number
   check_in_minutes_after_start: number | null
 }
 
@@ -532,7 +535,6 @@ interface MeetingRow {
   id: string
   class_id: string
   schedule_id: string | null
-  title: string
   starts_at: string
   ends_at: string
   attendance_mode: MeetingMode
@@ -579,6 +581,7 @@ const SCHOOL_LATITUDE = 13.387419
 const SCHOOL_LONGITUDE = 121.162494
 const SCHOOL_RADIUS_M = 180
 const MANILA_TIME_ZONE = 'Asia/Manila'
+const MEETING_COLUMNS = 'id,class_id,schedule_id,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m'
 
 const weekdays = [
   { value: 1, label: 'Monday' },
@@ -625,11 +628,16 @@ const savingMeeting = ref(false)
 const updatingMeeting = ref(false)
 const markingStudentId = ref('')
 const reviewingRecordId = ref('')
-const selectedEvidence = ref<(AttendanceRow & { meeting_title?: string; meeting_starts_at?: string; class_name?: string; attendance_enabled?: boolean }) | null>(null)
+const selectedEvidence = ref<(AttendanceRow & { meeting_starts_at?: string; class_name?: string; attendance_enabled?: boolean; location_status?: string }) | null>(null)
+const guardianStudent = ref<StudentRow | null>(null), inviteParentOpen = ref(false)
 const evidenceError = ref('')
 const signingOut = ref(false)
 const message = ref('')
 const messageKind = ref<'success' | 'error'>('success')
+let feedbackTimeout: ReturnType<typeof setTimeout> | undefined
+watch(message, value => { clearTimeout(feedbackTimeout); if (value) feedbackTimeout = setTimeout(clearMessage, 5000) })
+watch(() => route.query.section, clearMessage)
+onBeforeUnmount(() => { clearTimeout(feedbackTimeout); classDetailsRequest++; attendanceRequest++; calendarRequest++ })
 
 const week = reactive(currentManilaWeek())
 const calendarDate = ref(dateKeyInManila(new Date()))
@@ -640,13 +648,11 @@ const meetingInputMax = computed(() => `${week.endDateInclusive}T23:59`)
 let calendarRequest = 0
 
 const classForm = reactive({ name: '' })
-const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '', attendance_mode: 'teacher_manual' as MeetingMode, check_in_minutes_before: 15 as number | string, check_in_minutes_after_start: '' as number | string, is_active: true })
+const scheduleForm = reactive({ day_of_week: 1, starts_at: '08:00', ends_at: '09:00', room: '', attendance_mode: 'teacher_manual' as MeetingMode, check_in_minutes_after_start: '' as number | string, is_active: true })
 const meetingForm = reactive({
-  title: '',
   mode: 'teacher_manual' as MeetingMode,
   starts_at: '',
   ends_at: '',
-  check_in_opens_at: '',
   check_in_closes_at: '',
 })
 
@@ -660,7 +666,7 @@ const calendarEvents = computed<TeacherCalendarEvent[]>(() => {
     const schoolClass = classMap.get(meeting.class_id)
     if (!schoolClass) continue
     if (meeting.schedule_id) actualOccurrences.add(`${meeting.schedule_id}:${dateKeyInManila(new Date(meeting.starts_at))}`)
-    events.push({ id: `meeting:${meeting.id}`, title: meeting.title, start: meeting.starts_at, end: meeting.ends_at, kind: 'meeting', className: schoolClass.name, status: meeting.attendance_enabled ? 'active' : 'not_counted', subtext: modeLabel(meeting.attendance_mode), classId: meeting.class_id, meetingId: meeting.id })
+    events.push({ id: `meeting:${meeting.id}`, title: schoolClass.name, start: meeting.starts_at, end: meeting.ends_at, kind: 'meeting', className: schoolClass.name, status: meeting.attendance_enabled ? 'active' : 'not_counted', subtext: modeLabel(meeting.attendance_mode), classId: meeting.class_id, meetingId: meeting.id })
   }
   for (let day = calendarRange.value.start; day < calendarRange.value.end; day = addCalendarDays(day, 1)) {
     const dayOfWeek = new Date(`${day}T00:00:00Z`).getUTCDay()
@@ -847,7 +853,7 @@ async function loadCalendar() {
   try {
     const [scheduleResult, meetingResult, exceptionResult] = await Promise.all([
       supabase.from('class_schedules').select('*').in('class_id', classIds),
-      supabase.from('meetings').select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m').in('class_id', classIds).gte('starts_at', `${range.start}T00:00:00+08:00`).lt('starts_at', `${range.end}T00:00:00+08:00`).order('starts_at'),
+      supabase.from('meetings').select(MEETING_COLUMNS).in('class_id', classIds).gte('starts_at', `${range.start}T00:00:00+08:00`).lt('starts_at', `${range.end}T00:00:00+08:00`).order('starts_at'),
       supabase.rpc('visible_schedule_meeting_exceptions', { p_start: range.start, p_end: range.end }),
     ])
     if (request !== calendarRequest) return
@@ -1045,7 +1051,7 @@ async function loadClassDetails(classId: string, options: { generate?: boolean; 
         .eq('class_id', classId),
       supabase
         .from('meetings')
-        .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
+        .select(MEETING_COLUMNS)
         .eq('class_id', classId)
         .gte('starts_at', week.startIso)
         .lt('starts_at', week.endIso)
@@ -1059,7 +1065,7 @@ async function loadClassDetails(classId: string, options: { generate?: boolean; 
     if (!isCurrent()) return
 
     schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[])
-      .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_before: schedule.check_in_minutes_before ?? 15, check_in_minutes_after_start: schedule.check_in_minutes_after_start ?? null }))
+      .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_after_start: schedule.check_in_minutes_after_start ?? null }))
       .sort((a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at))
     meetings.value = (meetingResult.data ?? []) as MeetingRow[]
     students.value = enrolledStudents
@@ -1113,8 +1119,6 @@ async function saveSchedule() {
   try {
     if (!scheduleForm.starts_at || !scheduleForm.ends_at) throw new Error('Enter the schedule start and end times.')
     if (scheduleForm.ends_at <= scheduleForm.starts_at) throw new Error('Schedule end must be after its start.')
-    const checkInMinutes = Number(scheduleForm.check_in_minutes_before)
-    if (!Number.isInteger(checkInMinutes) || checkInMinutes < 0 || checkInMinutes > 120) throw new Error('Check-in must open between 0 and 120 whole minutes before class.')
     const closesAtClassEnd = String(scheduleForm.check_in_minutes_after_start).trim() === ''
     const checkInClosingMinutes = closesAtClassEnd ? null : Number(scheduleForm.check_in_minutes_after_start)
     if (checkInClosingMinutes != null && (!Number.isInteger(checkInClosingMinutes) || checkInClosingMinutes < 1 || checkInClosingMinutes > 1440)) throw new Error('Check-in must close between 1 and 1440 whole minutes after class starts, or leave it empty to close at class end.')
@@ -1126,7 +1130,6 @@ async function saveSchedule() {
       room: scheduleForm.room.trim() || null,
       is_active: true,
       attendance_mode: scheduleForm.attendance_mode,
-      check_in_minutes_before: checkInMinutes,
       check_in_minutes_after_start: checkInClosingMinutes,
     }
 
@@ -1171,7 +1174,6 @@ function beginScheduleEdit(schedule: ScheduleRow) {
   scheduleForm.ends_at = schedule.ends_at.slice(0, 5)
   scheduleForm.room = schedule.room ?? ''
   scheduleForm.attendance_mode = schedule.attendance_mode
-  scheduleForm.check_in_minutes_before = schedule.check_in_minutes_before
   scheduleForm.check_in_minutes_after_start = schedule.check_in_minutes_after_start ?? ''
   scheduleForm.is_active = schedule.is_active
   clearMessage()
@@ -1190,7 +1192,6 @@ function resetScheduleForm() {
   scheduleForm.ends_at = '09:00'
   scheduleForm.room = ''
   scheduleForm.attendance_mode = 'teacher_manual'
-  scheduleForm.check_in_minutes_before = 15
   scheduleForm.check_in_minutes_after_start = ''
   scheduleForm.is_active = true
 }
@@ -1232,13 +1233,12 @@ async function saveMeeting() {
     const isOnline = meetingForm.mode === 'self_online'
     const payload = {
       class_id: selectedClassId.value,
-      title: meetingForm.title.trim(),
       meeting_date: meetingForm.starts_at.slice(0, 10),
       starts_at: manilaInputToIso(meetingForm.starts_at),
       ends_at: manilaInputToIso(meetingForm.ends_at),
       attendance_mode: meetingForm.mode,
       attendance_enabled: true,
-      attendance_opens_at: manilaInputToIso(meetingForm.check_in_opens_at),
+      attendance_opens_at: manilaInputToIso(meetingForm.starts_at),
       attendance_closes_at: manilaInputToIso(meetingForm.check_in_closes_at),
       latitude: isOnline ? null : SCHOOL_LATITUDE,
       longitude: isOnline ? null : SCHOOL_LONGITUDE,
@@ -1252,7 +1252,7 @@ async function saveMeeting() {
         .from('meetings')
         .update({ ...payload, attendance_enabled: current?.attendance_enabled ?? true })
         .eq('id', editingMeetingId.value)
-        .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
+        .select(MEETING_COLUMNS)
         .single()
       if (error) throw error
       const updated = data as MeetingRow
@@ -1278,7 +1278,7 @@ async function saveMeeting() {
     const { data, error } = await supabase
       .from('meetings')
       .insert({ ...payload, created_by: creatorId })
-      .select('id,class_id,schedule_id,title,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,latitude,longitude,radius_m,max_accuracy_m')
+      .select(MEETING_COLUMNS)
       .single()
     if (error) throw error
 
@@ -1310,11 +1310,9 @@ function beginMeetingCreate() {
 
 function beginMeetingEdit(meeting: MeetingRow) {
   editingMeetingId.value = meeting.id
-  meetingForm.title = meeting.title
   meetingForm.mode = meeting.attendance_mode
   meetingForm.starts_at = isoToManilaInput(meeting.starts_at)
   meetingForm.ends_at = isoToManilaInput(meeting.ends_at)
-  meetingForm.check_in_opens_at = isoToManilaInput(meeting.attendance_opens_at)
   meetingForm.check_in_closes_at = isoToManilaInput(meeting.attendance_closes_at)
   clearMessage()
   meetingModalOpen.value = true
@@ -1327,11 +1325,9 @@ function cancelMeetingEdit() {
 }
 
 function resetMeetingForm() {
-  meetingForm.title = ''
   meetingForm.mode = 'teacher_manual'
   meetingForm.starts_at = `${calendarDate.value}T08:00`
   meetingForm.ends_at = `${calendarDate.value}T09:00`
-  meetingForm.check_in_opens_at = `${calendarDate.value}T07:45`
   meetingForm.check_in_closes_at = `${calendarDate.value}T09:00`
 }
 
@@ -1467,7 +1463,7 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
 function openEvidence(record: AttendanceRow) {
   evidenceError.value = ''
   const onlineLocation = selectedMeeting.value?.attendance_mode === 'self_online' ? { latitude: null, longitude: null, distance_m: null } : {}
-  selectedEvidence.value = { ...record, ...onlineLocation, meeting_title: selectedMeeting.value?.title, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled }
+  selectedEvidence.value = { ...record, ...onlineLocation, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled, location_status: record.source === 'teacher' && record.status === 'present' ? 'teacher_confirmed_on_campus' : undefined }
 }
 
 function closeEvidence() {
@@ -1495,17 +1491,15 @@ async function setEvidenceVoided(record: AttendanceRow, voided: boolean) {
 }
 
 function validateMeetingWindow() {
-  if (!meetingForm.title.trim()) throw new Error('Enter a meeting title.')
   const starts = new Date(manilaInputToIso(meetingForm.starts_at)).getTime()
   const ends = new Date(manilaInputToIso(meetingForm.ends_at)).getTime()
-  const opens = new Date(manilaInputToIso(meetingForm.check_in_opens_at)).getTime()
   const closes = new Date(manilaInputToIso(meetingForm.check_in_closes_at)).getTime()
-  if ([starts, ends, opens, closes].some(Number.isNaN)) throw new Error('Complete all meeting date and time fields.')
+  if ([starts, ends, closes].some(Number.isNaN)) throw new Error('Complete all meeting date and time fields.')
   if (starts < new Date(week.startIso).getTime() || starts >= new Date(week.endIso).getTime()) {
     throw new Error('The meeting must start within the selected school week. Select another week in the calendar to create it there.')
   }
   if (ends <= starts) throw new Error('Meeting end must be after its start.')
-  if (closes <= opens) throw new Error('Check-in close must be after check-in open.')
+  if (closes <= starts) throw new Error('Check-in must close after class starts.')
 }
 
 function currentManilaWeek(anchor = new Date()) {
@@ -1554,11 +1548,10 @@ function scheduleDateLabel(dayOfWeek: number) {
   return displayDate(dateKey(date))
 }
 
-function scheduleCheckInWindow(schedule: { starts_at: string; ends_at: string; check_in_minutes_before: number | string; check_in_minutes_after_start: number | string | null }) {
+function scheduleCheckInWindow(schedule: { starts_at: string; ends_at: string; check_in_minutes_after_start: number | string | null }) {
   const [hour, minute] = schedule.starts_at.split(':').map(Number)
   const startMinutes = hour * 60 + minute
-  if (!Number.isFinite(startMinutes)) return 'opens before class and closes at class end'
-  const openingMinutes = Number(schedule.check_in_minutes_before)
+  if (!Number.isFinite(startMinutes)) return 'opens when class starts and closes at class end'
   const closingOffset = schedule.check_in_minutes_after_start
   const closesAtClassEnd = closingOffset == null || String(closingOffset).trim() === ''
   const formatMinutes = (minutes: number) => {
@@ -1567,7 +1560,7 @@ function scheduleCheckInWindow(schedule: { starts_at: string; ends_at: string; c
     const clock = `${String(Math.floor(normalized / 60)).padStart(2, '0')}:${String(normalized % 60).padStart(2, '0')}`
     return `${formatTime(clock)}${dayOffset < 0 ? ' (previous day)' : dayOffset > 0 ? ' (next day)' : ''}`
   }
-  const opening = Number.isFinite(openingMinutes) ? formatMinutes(startMinutes - openingMinutes) : 'before class'
+  const opening = formatMinutes(startMinutes)
   const closing = closesAtClassEnd ? formatTime(schedule.ends_at) : formatMinutes(startMinutes + Number(closingOffset))
   return `${opening} – ${closing}`
 }
@@ -1687,6 +1680,7 @@ function showSuccess(text: string) {
 }
 
 function clearMessage() {
+  clearTimeout(feedbackTimeout)
   message.value = ''
 }
 
@@ -1702,6 +1696,7 @@ async function logout() {
 </script>
 
 <style scoped>
+.guardian-link-button { padding:3px 0; border:0; background:transparent; color:var(--campus-accent); text-align:left; font:inherit; font-size:12px; text-decoration:underline; cursor:pointer; }.attendance-thumbnail { flex:0 0 auto; width:54px; height:54px; padding:0; border:1px solid var(--campus-border); border-radius:9px; background:var(--campus-surface-soft); cursor:pointer; }.evidence-actions { align-items:center; }
 .centered {
   display: grid;
   min-height: 40vh;

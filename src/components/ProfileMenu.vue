@@ -2,26 +2,25 @@
   <div v-if="user" class="profile-controls">
     <ion-button fill="clear" class="theme-toggle" :aria-label="isDark ? 'Switch to light mode' : 'Switch to dark mode'" :title="isDark ? 'Switch to light mode' : 'Switch to dark mode'" @click="toggleTheme"><ion-icon slot="icon-only" :icon="isDark ? sunnyOutline : moonOutline" /></ion-button>
     <ion-button fill="clear" class="user-trigger" aria-label="Open your profile menu" :aria-expanded="menuOpen" aria-haspopup="dialog" @click="openMenu">
-      <span class="toolbar-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="Your profile" referrerpolicy="no-referrer" @error="avatarUrl = ''" /><span v-else>{{ initials }}</span></span>
+      <span class="toolbar-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="Your profile" referrerpolicy="no-referrer" @error="onAvatarError" /><span v-else>{{ initials }}</span></span>
       <ion-icon :icon="chevronDownOutline" class="profile-chevron" aria-hidden="true" />
     </ion-button>
   </div>
   <ion-popover :is-open="menuOpen" :event="menuEvent" :show-backdrop="false" side="bottom" alignment="end" class="account-popover" @did-dismiss="menuOpen = false">
     <div class="profile-menu">
-      <div class="profile-block"><span class="profile-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="" referrerpolicy="no-referrer" @error="avatarUrl = ''" /><span v-else>{{ initials }}</span></span><div><p class="profile-name">{{ profile?.full_name || 'My account' }}</p><p class="profile-email">{{ user?.email }}</p><span class="profile-role">{{ roleLabel }}</span></div></div>
+      <div class="profile-block"><span class="profile-avatar"><img v-if="avatarUrl" :src="avatarUrl" alt="" referrerpolicy="no-referrer" @error="onAvatarError" /><span v-else>{{ initials }}</span></span><div><p class="profile-name">{{ profile?.full_name || 'My account' }}</p><p class="profile-email">{{ user?.email }}</p><span class="profile-role">{{ roleLabel }}</span></div></div>
       <section class="linked-methods" aria-label="Linked sign-in methods"><span>Linked sign-in methods</span><div v-if="methods.length" class="method-badges"><span v-for="method in methods" :key="method">{{ method }}</span></div><p v-else>{{ identityBusy ? 'Checking linked accounts…' : 'No linked methods available.' }}</p><p v-if="identityError" class="identity-error" role="status">{{ identityError }}</p></section>
       <div class="profile-divider" />
-      <button type="button" class="menu-action" @click="show('settings')"><ion-icon :icon="settingsOutline" aria-hidden="true" />Account settings<ion-icon :icon="chevronForwardOutline" class="action-arrow" /></button>
-      <button type="button" class="menu-action" @click="show('email')"><ion-icon :icon="mailOutline" aria-hidden="true" />Change email<ion-icon :icon="chevronForwardOutline" class="action-arrow" /></button>
-      <button type="button" class="menu-action" @click="show('password')"><ion-icon :icon="keyOutline" aria-hidden="true" />Change password<ion-icon :icon="chevronForwardOutline" class="action-arrow" /></button>
+      <button type="button" class="menu-action" @click="show('profile')"><ion-icon :icon="personCircleOutline" aria-hidden="true" />Profile<ion-icon :icon="chevronForwardOutline" class="action-arrow" /></button>
+      <button type="button" class="menu-action" @click="show('security')"><ion-icon :icon="shieldCheckmarkOutline" aria-hidden="true" />Security<ion-icon :icon="chevronForwardOutline" class="action-arrow" /></button>
       <div class="profile-divider" />
       <button type="button" class="menu-action signout-action" @click="show('signout')"><ion-icon :icon="logOutOutline" aria-hidden="true" />Sign out<ion-icon :icon="arrowForwardOutline" class="action-arrow" /></button>
     </div>
   </ion-popover>
-  <account-settings-modal :open="activeDialog === 'settings'" @close="activeDialog = null" />
-  <account-change-modal :open="activeDialog === 'email' || activeDialog === 'password'" :kind="activeDialog === 'email' ? 'email' : 'password'" @close="activeDialog = null" />
+  <account-settings-modal :open="activeDialog === 'profile'" @close="activeDialog = null" />
+  <security-modal :open="activeDialog === 'security'" :linked-provider="linkedProvider" @close="activeDialog = null" />
   <app-modal :open="activeDialog === 'signout'" title="Sign out of your account?" :busy="signingOut" @close="activeDialog = null">
-    <p class="signout-description">Your saved classes, attendance, and tasks will be here when you return.</p>
+    <p class="signout-description">{{ signoutDescription }}</p>
     <p v-if="signoutError" class="signout-error" role="alert">{{ signoutError }}</p>
     <template #actions><ion-button fill="outline" :disabled="signingOut" @click="activeDialog = null">Cancel</ion-button><ion-button :disabled="signingOut" @click="confirmSignOut">{{ signingOut ? 'Signing out…' : 'Sign out' }}</ion-button></template>
   </app-modal>
@@ -29,11 +28,11 @@
 
 <script setup lang="ts">
 import { IonButton, IonIcon, IonPopover } from '@ionic/vue'
-import { arrowForwardOutline, chevronDownOutline, chevronForwardOutline, keyOutline, logOutOutline, mailOutline, moonOutline, settingsOutline, sunnyOutline } from 'ionicons/icons'
-import { computed, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { arrowForwardOutline, chevronDownOutline, chevronForwardOutline, logOutOutline, moonOutline, personCircleOutline, shieldCheckmarkOutline, sunnyOutline } from 'ionicons/icons'
+import { computed, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import AccountSettingsModal from '@/components/AccountSettingsModal.vue'
-import AccountChangeModal from '@/components/AccountChangeModal.vue'
+import SecurityModal from '@/components/SecurityModal.vue'
 import AppModal from '@/components/AppModal.vue'
 import { useProfileAvatar } from '@/composables/useProfileAvatar'
 import { useSession } from '@/composables/useSession'
@@ -41,13 +40,28 @@ import { useTheme } from '@/composables/useTheme'
 import { authActionError, linkedAuthMethods } from '@/services/account'
 
 const { user, profile, refreshAuthUser, signOut } = useSession()
-const { avatarUrl, initials } = useProfileAvatar()
+const { avatarUrl, initials, onAvatarError } = useProfileAvatar()
 const { isDark, toggleTheme } = useTheme()
 const router = useRouter()
+const route = useRoute()
 const menuOpen = ref(false), menuEvent = ref<Event>(), identityBusy = ref(false), identityError = ref(''), signingOut = ref(false), signoutError = ref('')
-const activeDialog = ref<'settings' | 'email' | 'password' | 'signout' | null>(null)
+const activeDialog = ref<'profile' | 'security' | 'signout' | null>(null)
+const linkedProvider = ref('')
 const methods = computed(() => linkedAuthMethods(user.value))
 const roleLabel = computed(() => ({ admin: 'Administrator', teacher: 'Teacher', student: 'Student', parent: 'Parent' }[profile.value?.role ?? 'student']))
+const signoutDescription = computed(() => ({
+  parent: 'Your child’s attendance history, linked students, and school calendar will be available when you sign in again.',
+  teacher: 'Your classes, schedules, and attendance records will be available when you sign in again.',
+  admin: 'Teacher approvals, student verification, and school records will be available when you sign in again.',
+  student: 'Your classes, attendance history, calendar, and tasks will be available when you sign in again.',
+}[profile.value?.role ?? 'student']))
+watch(() => route.query.account, value => {
+  if (value !== 'security' || !user.value) return
+  linkedProvider.value = typeof route.query.linked === 'string' ? route.query.linked : ''
+  activeDialog.value = 'security'
+  const query = { ...route.query }; delete query.account; delete query.linked
+  void router.replace({ path: route.path, query })
+}, { immediate: true })
 async function openMenu(event: Event) {
   menuEvent.value = event; menuOpen.value = true; identityBusy.value = true; identityError.value = ''
   try { await refreshAuthUser() }

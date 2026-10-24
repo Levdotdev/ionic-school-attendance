@@ -64,7 +64,7 @@ describe('combined student calendar', () => {
     const events = makeStudentCalendarEvents({
       courses: [course, { id: 'archived', name: 'Archived course', archived_at: '2026-10-01T00:00:00Z' }],
       schedules: [schedule, { ...schedule, id: 'deleted', day_of_week: 2 }, { ...schedule, id: 'archived-schedule', class_id: 'archived', day_of_week: 3 }],
-      meetings: [{ id: 'actual', class_id: course.id, schedule_id: schedule.id, schedule_week_start: '2026-10-26', title: 'No class on Monday', meeting_date: '2026-10-26', starts_at: '2026-10-26T01:00:00Z', ends_at: '2026-10-26T02:00:00Z', attendance_enabled: false }],
+      meetings: [{ id: 'actual', class_id: course.id, schedule_id: schedule.id, schedule_week_start: '2026-10-26', meeting_date: '2026-10-26', starts_at: '2026-10-26T01:00:00Z', ends_at: '2026-10-26T02:00:00Z', attendance_enabled: false }],
       exceptions: [{ schedule_id: 'deleted', schedule_week_start: '2026-10-26' }], tasks: [task()], range: { start: '2026-10-26', end: '2026-11-02' }, now: new Date('2026-10-24T00:00:00Z'),
     })
     expect(events).toHaveLength(2)
@@ -129,9 +129,9 @@ describe('student course reminder preferences', () => {
 describe('student attendance history and face access', () => {
   it('shows present, absent and not-counted history with evidence inside attendance and strips online coordinates', async () => {
     mocks.rpc.mockResolvedValue({ data: [
-      { id: 'present', class_id: course.id, student_id: 'student-1', status: 'present', attendance_enabled: true, class_name: course.name, meeting_title: 'Recorded class', meeting_starts_at: '2026-10-23T01:00:00Z', attendance_mode: 'self_online', latitude: 1, longitude: 2, distance_m: 3, selfie_path: 'photo.jpg', verification_status: 'approved' },
-      { id: 'absent', class_id: course.id, student_id: 'student-1', status: 'absent', attendance_enabled: true, class_name: course.name, meeting_title: 'Missed class', meeting_starts_at: '2026-10-22T01:00:00Z', attendance_mode: 'teacher_manual', is_inferred: true },
-      { id: 'disabled', class_id: course.id, student_id: 'student-1', status: 'absent', attendance_enabled: false, class_name: course.name, meeting_title: 'Cancelled class', meeting_starts_at: '2026-10-21T01:00:00Z', attendance_mode: 'teacher_manual', is_inferred: true },
+      { id: 'present', class_id: course.id, student_id: 'student-1', status: 'present', attendance_enabled: true, class_name: course.name, meeting_starts_at: '2026-10-23T01:00:00Z', attendance_mode: 'self_online', latitude: 1, longitude: 2, distance_m: 3, selfie_path: 'photo.jpg', verification_status: 'approved' },
+      { id: 'absent', class_id: course.id, student_id: 'student-1', status: 'absent', attendance_enabled: true, class_name: course.name, meeting_starts_at: '2026-10-22T01:00:00Z', attendance_mode: 'teacher_manual', is_inferred: true },
+      { id: 'disabled', class_id: course.id, student_id: 'student-1', status: 'absent', attendance_enabled: false, class_name: course.name, meeting_starts_at: '2026-10-21T01:00:00Z', attendance_mode: 'teacher_manual', is_inferred: true },
     ], error: null })
     const wrapper = mount(StudentHistoryPanel, { props: { studentId: 'student-1', studentName: 'Student One' }, global: { stubs: { IonSpinner: slot, IonIcon: slot } } })
     await flushPromises()
@@ -143,13 +143,14 @@ describe('student attendance history and face access', () => {
     expect(state(wrapper).selected).toMatchObject({ id: 'present', latitude: null, longitude: null, distance_m: null })
     await wrapper.findAll('select')[1].setValue('absent')
     expect(wrapper.findAll('.history-row')).toHaveLength(1)
-    expect(wrapper.text()).toContain('Missed class')
+    expect(wrapper.text()).toContain(course.name)
+    expect(wrapper.text()).toContain('Oct 22')
     wrapper.unmount()
   })
   it('removes submitted self-checks from availability and exposes retake only after admin permission', async () => {
     handler = q => {
       if (q.table === 'student_profiles') return { data: { registration_completed_at: '2026-10-01', guardian_email: 'parent@example.invalid' }, error: null }
-      if (q.table === 'student_available_meetings') return { data: [{ id: 'done', existing_status: 'present', submitted_at: '2026-10-24' }, { id: 'open', existing_status: null, submitted_at: null }], error: null }
+      if (q.table === 'student_available_meetings') return { data: [{ id: 'done', existing_status: 'present', submitted_at: '2026-10-24' }, { id: 'open', existing_status: null, submitted_at: null }, { id: 'next', existing_status: null, submitted_at: null }], error: null }
       return { data: [], error: null }
     }
     mocks.rpc.mockResolvedValue({ data: [{ is_enrolled: true, can_retake: false }], error: null })
@@ -164,6 +165,62 @@ describe('student attendance history and face access', () => {
     expect(vm.faceRetakeAllowed).toBe(true)
     await vm.handleFaceEnrolled()
     expect(vm.faceRetakeAllowed).toBe(false)
+    wrapper.unmount()
+  })
+})
+
+describe('student parent consent', () => {
+  function readyStudent() {
+    handler = q => q.table === 'student_profiles'
+      ? { data: { registration_completed_at: '2026-10-01', guardian_email: null }, error: null }
+      : { data: [], error: null }
+  }
+  it('blocks joining until a registered parent approves, and reacts to approval updates', async () => {
+    readyStudent()
+    let status = 'pending'
+    mocks.rpc.mockImplementation(async (name: string) => ({ data: name === 'student_guardian_summary'
+      ? [{ request_id: 'link-1', parent_id: 'parent-1', parent_name: 'Parent One', parent_email: 'parent@example.test', status }]
+      : name === 'my_face_enrollment_access' ? [{ is_enrolled: true, can_retake: false }] : { name: course.name }, error: null }))
+    const wrapper = shallowMount(StudentPage)
+    await flushPromises()
+    const vm = state(wrapper)
+    vm.openJoinModal()
+    expect(vm.guardianModalOpen).toBe(true)
+    expect(vm.joinModalOpen).toBe(false)
+    vm.joinCode = 'SYS412'
+    await vm.joinClass()
+    expect(mocks.rpc.mock.calls.some(call => call[0] === 'join_class')).toBe(false)
+    status = 'approved'
+    await mocks.realtime.mock.calls[0][0].onChange()
+    vm.openJoinModal()
+    expect(vm.joinModalOpen).toBe(true)
+    await vm.joinClass()
+    expect(mocks.rpc).toHaveBeenCalledWith('join_class', { p_join_code: 'SYS412' })
+    wrapper.unmount()
+  })
+  it('shows a registered-parent validation error without granting enrollment access', async () => {
+    readyStudent()
+    mocks.rpc.mockImplementation(async (name: string) => name === 'request_student_parent_link'
+      ? { data: null, error: { message: 'This email is not a registered, verified parent. Invite the parent to register first.' } }
+      : { data: [], error: null })
+    const wrapper = shallowMount(StudentPage)
+    await flushPromises()
+    const vm = state(wrapper)
+    vm.parentLinkEmail = 'unregistered@example.test'
+    await vm.requestParentLink()
+    expect(vm.guardianError).toBe(true)
+    expect(vm.guardianMessage).toContain('not a registered')
+    expect(vm.hasApprovedParent).toBe(false)
+    wrapper.unmount()
+  })
+  it('fails closed when parent permissions cannot be loaded', async () => {
+    readyStudent()
+    mocks.rpc.mockImplementation(async (name: string) => ({ data: [], error: name === 'student_guardian_summary' ? { message: 'Unable to load consent' } : null }))
+    const wrapper = shallowMount(StudentPage)
+    await flushPromises()
+    const vm = state(wrapper)
+    expect(vm.hasApprovedParent).toBe(false)
+    expect(vm.pageMessage).toContain('Unable to load consent')
     wrapper.unmount()
   })
 })

@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-const mocks = vi.hoisted(() => ({ updateUser: vi.fn(), resetPasswordForEmail: vi.fn() }))
+const mocks = vi.hoisted(() => ({ updateUser: vi.fn(), resetPasswordForEmail: vi.fn(), getUser: vi.fn(), getUserIdentities: vi.fn(), unlinkIdentity: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabase: { auth: mocks } }))
 vi.mock('@/services/oauth', () => ({ oauthRedirectUrl: () => 'https://ionic-school-attendance.vercel.app/auth/callback' }))
-import { accountInitials, authActionError, avatarCrop, changeAccountEmail, changeAccountPassword, linkedAuthMethods, MAX_AVATAR_BYTES, requestPasswordReset, validateAvatar } from '@/services/account'
+import { accountInitials, authActionError, avatarCrop, changeAccountEmail, changeAccountPassword, linkedAuthMethods, MAX_AVATAR_BYTES, requestPasswordReset, unlinkAccountIdentity, validateAvatar } from '@/services/account'
 
 beforeEach(() => { vi.clearAllMocks(); mocks.updateUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null }); mocks.resetPasswordForEmail.mockResolvedValue({ error: null }) })
 
@@ -38,6 +38,22 @@ describe('account security actions', () => {
     await requestPasswordReset(' Person@Example.com ')
     expect(mocks.resetPasswordForEmail).toHaveBeenCalledWith('person@example.com', { redirectTo: 'https://ionic-school-attendance.vercel.app/auth/callback' })
     expect(mocks.updateUser).not.toHaveBeenCalled()
+  })
+  it('unlinks only an identity confirmed for the currently signed-in user', async () => {
+    const identity = { id: 'google-id', provider: 'google' }
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    mocks.getUserIdentities.mockResolvedValue({ data: { identities: [{ id: 'email-id', provider: 'email' }, identity] }, error: null })
+    mocks.unlinkIdentity.mockResolvedValue({ error: null })
+    await unlinkAccountIdentity('google', 'user-1')
+    expect(mocks.unlinkIdentity).toHaveBeenCalledWith(identity)
+  })
+  it('does not remove the last method or act on a different account', async () => {
+    mocks.getUser.mockResolvedValue({ data: { user: { id: 'user-1' } }, error: null })
+    mocks.getUserIdentities.mockResolvedValue({ data: { identities: [{ id: 'google-id', provider: 'google' }] }, error: null })
+    await expect(unlinkAccountIdentity('google', 'user-1')).rejects.toThrow('Keep at least one')
+    expect(mocks.unlinkIdentity).not.toHaveBeenCalled()
+    await expect(unlinkAccountIdentity('google', 'another-user')).rejects.toThrow('account changed')
+    expect(mocks.unlinkIdentity).not.toHaveBeenCalled()
   })
 })
 

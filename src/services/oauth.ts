@@ -9,6 +9,8 @@ export type SocialProvider = 'google' | 'facebook'
 
 const OAUTH_PROVIDER_KEY = 'minsu-oauth-provider'
 const OAUTH_STARTED_AT_KEY = 'minsu-oauth-started-at'
+const IDENTITY_LINK_KEY = 'minsu-identity-link-attempt'
+const IDENTITY_LINK_WINDOW_MS = 15 * 60 * 1000
 const NEW_ACCOUNT_WINDOW_MS = 5 * 60 * 1000
 const NATIVE_CALLBACK_URL = 'edu.minsu.attendance://auth/callback'
 
@@ -20,6 +22,7 @@ export function oauthRedirectUrl(): string {
 }
 
 export async function beginSocialSignIn(provider: SocialProvider): Promise<void> {
+  clearIdentityLinkAttempt()
   window.localStorage.setItem(OAUTH_PROVIDER_KEY, provider)
   window.localStorage.setItem(OAUTH_STARTED_AT_KEY, Date.now().toString())
 
@@ -48,6 +51,50 @@ export async function beginSocialSignIn(provider: SocialProvider): Promise<void>
       toolbarColor: '#063f2a',
     })
   }
+}
+
+interface IdentityLinkAttempt { userId: string; provider: SocialProvider; returnPath: string; startedAt: number }
+
+export function pendingIdentityLink(): IdentityLinkAttempt | null {
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(IDENTITY_LINK_KEY) ?? 'null') as IdentityLinkAttempt | null
+    if (!stored || !stored.userId || !['google', 'facebook'].includes(stored.provider)
+      || !/^\/(student|teacher|parent|admin)$/.test(stored.returnPath)
+      || !Number.isFinite(stored.startedAt) || Date.now() < stored.startedAt
+      || Date.now() - stored.startedAt > IDENTITY_LINK_WINDOW_MS) return null
+    return stored
+  } catch { return null }
+}
+
+export function clearIdentityLinkAttempt(): void { window.localStorage.removeItem(IDENTITY_LINK_KEY) }
+
+export async function beginIdentityLink(provider: SocialProvider, expectedUserId: string, returnPath: string): Promise<void> {
+  const { data: current, error: currentError } = await supabase.auth.getUser()
+  if (currentError) throw currentError
+  if (!current.user || current.user.id !== expectedUserId) throw new Error('Your account changed. Open Security again before linking a sign-in method.')
+  if (current.user.identities?.some(identity => identity.provider === provider)) throw new Error('This sign-in method is already linked.')
+  if (!/^\/(student|teacher|parent|admin)$/.test(returnPath)) throw new Error('Return to your account dashboard before linking a sign-in method.')
+  window.localStorage.setItem(IDENTITY_LINK_KEY, JSON.stringify({ userId: current.user.id, provider, returnPath, startedAt: Date.now() }))
+  const isNative = Capacitor.isNativePlatform()
+  try {
+    const { data, error } = await supabase.auth.linkIdentity({ provider, options: { redirectTo: oauthRedirectUrl(), skipBrowserRedirect: isNative } })
+    if (error) throw error
+    if (isNative) {
+      if (!data.url) throw new Error('The account-linking page could not be opened. Please try again.')
+      await Browser.open({ url: data.url, toolbarColor: '#29483a' })
+    }
+  } catch (error) { clearIdentityLinkAttempt(); throw error }
+}
+
+export async function completeIdentityLink(): Promise<string> {
+  const attempt = pendingIdentityLink()
+  if (!attempt) throw new Error('This account-linking request expired. Return to Security and try again.')
+  const { data, error } = await supabase.auth.getUser()
+  if (error) throw error
+  if (data.user?.id !== attempt.userId) throw new Error('The sign-in account changed. No account data or role has been merged. Return to your original account and try linking again.')
+  if (!data.user.identities?.some(identity => identity.provider === attempt.provider)) throw new Error('The provider was not linked. Return to Security and try again.')
+  clearIdentityLinkAttempt()
+  return `${attempt.returnPath}?account=security&linked=${attempt.provider}`
 }
 
 function nativeCallbackPath(value: string): string | null {
@@ -103,6 +150,19 @@ export async function completeSocialSignIn(): Promise<Session> {
 
   if (providerError) {
     throw new Error(providerError.replaceAll('+', ' '))
+  }
+
+  const tokenHash = callbackUrl.searchParams.get('token_hash')
+  if (tokenHash) {
+    // Verify single-use hashes even if this browser already has a session.
+    // Admin invites cannot use PKCE; a token hash avoids an incompatible
+    // implicit-grant redirect and works across browsers without a verifier.
+    const type = callbackUrl.searchParams.get('type')
+    if (type !== 'recovery' && type !== 'invite') throw new Error('This email action is not supported. Request a new link from the app.')
+    const result = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+    if (result.error) throw result.error
+    if (!result.data.session) throw new Error(type === 'recovery' ? 'This recovery link has expired. Request a new password-reset email.' : 'This parent invitation could not be completed. Ask the sender for a new invitation.')
+    return result.data.session
   }
 
   const sessionResult = await supabase.auth.getSession()

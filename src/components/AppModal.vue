@@ -1,5 +1,5 @@
 <template>
-  <ion-modal :is-open="open" :can-dismiss="canDismiss" class="app-dialog" :class="{ 'app-dialog-wide': wide }" @did-dismiss="$emit('close')">
+  <ion-modal :is-open="open" :can-dismiss="canDismiss" class="app-dialog" :class="{ 'app-dialog-wide': wide }" @did-dismiss="handleDismiss">
     <section class="dialog-shell">
     <ion-header>
       <ion-toolbar>
@@ -18,9 +18,10 @@ import { IonButton, IonButtons, IonFooter, IonHeader, IonIcon, IonModal, IonTitl
 import { closeOutline } from 'ionicons/icons'
 import { onBeforeUnmount } from 'vue'
 const props = defineProps<{ open: boolean; title: string; busy?: boolean; wide?: boolean }>()
-defineEmits<{ close: [] }>()
+const emit = defineEmits<{ close: [] }>()
 let unmounting = false
 function canDismiss() { return unmounting || !props.open || !props.busy }
+function handleDismiss() { if (props.open && !unmounting) emit('close') }
 onBeforeUnmount(() => { unmounting = true })
 </script>
 
