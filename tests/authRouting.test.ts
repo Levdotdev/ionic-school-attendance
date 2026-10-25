@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(), maybeSingle: vi.fn(), beforeEach: vi.fn(),
   initializeSession: vi.fn(), passwordRecovery: { value: false },
+  session: { value: null as null | { user: { id: string } } },
 }))
 vi.mock('@ionic/vue-router', () => ({
   createWebHistory: vi.fn(),
@@ -14,7 +15,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: {
 } }))
 vi.mock('@/composables/useSession', () => ({
   readAccountProfile: () => mocks.maybeSingle(),
-  useSession: () => ({ initializeSession: mocks.initializeSession, passwordRecovery: mocks.passwordRecovery }),
+  useSession: () => ({ initializeSession: mocks.initializeSession, passwordRecovery: mocks.passwordRecovery, session: mocks.session, refreshProfile: async () => { const result = await mocks.maybeSingle(); if (result.error) throw result.error; return result.data } }),
 }))
 
 let guard: (to: { path: string; meta: Record<string, unknown> }) => Promise<unknown>
@@ -23,7 +24,7 @@ beforeEach(async () => {
   vi.clearAllMocks()
   mocks.passwordRecovery.value = false
   mocks.getSession.mockResolvedValue({ data: { session: { user: { id: 'user-1' } } } })
-  mocks.initializeSession.mockResolvedValue(undefined)
+  mocks.initializeSession.mockImplementation(async () => { mocks.session.value = (await mocks.getSession()).data.session })
   mocks.maybeSingle.mockResolvedValue({ data: { role: 'student', onboarding_completed_at: '2026-10-24' }, error: null })
   await import('@/router')
   guard = mocks.beforeEach.mock.calls[0][0]

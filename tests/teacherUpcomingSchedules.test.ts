@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { teacherUpcomingSchedules } from '@/utils/teacherUpcomingSchedules'
+import { teacherOverviewAttendance, teacherUpcomingSchedules } from '@/utils/teacherUpcomingSchedules'
 
 const courses = [{ id: 'a', name: 'INTEGRATION' }, { id: 'b', name: 'DATABASES' }, { id: 'archived', name: 'ARCHIVED', archived_at: '2026-01-01' }]
 const weekly = { id: 's1', class_id: 'a', day_of_week: 1, starts_at: '08:00:00', ends_at: '09:00:00', room: 'ROOM 1', is_active: true, attendance_mode: 'teacher_manual' as const }
@@ -28,5 +28,22 @@ describe('teacher current and next schedule', () => {
     const result = teacherUpcomingSchedules({ courses, schedules: [weekly], meetings: [], exceptions: [], now: new Date('2026-10-26T01:00:00Z') })
     expect(result.current).toEqual([])
     expect(result.next?.start).toBe('2026-11-02T08:00:00+08:00')
+  })
+})
+
+describe('teacher overview attendance counts', () => {
+  it('keeps active unmarked students unchecked when former students have recorded marks', () => {
+    expect(teacherOverviewAttendance(['present', 'absent', 'unmarked', 'unmarked'], [
+      { student_id: 'present', status: 'present', source: 'teacher', verification_status: null },
+      { student_id: 'absent', status: 'absent', source: 'teacher', verification_status: null },
+      { student_id: 'former', status: 'present', source: 'self_check', verification_status: 'rejected' },
+    ])).toEqual({ present: 1, absent: 1, unchecked: 1, voided: 1 })
+  })
+  it('counts accepted self-checks as present and keeps legacy pending checks out of accepted totals', () => {
+    expect(teacherOverviewAttendance(['approved', 'pending', 'voided'], [
+      { student_id: 'approved', status: 'present', source: 'self_check', verification_status: 'approved' },
+      { student_id: 'pending', status: 'present', source: 'self_check', verification_status: 'pending' },
+      { student_id: 'voided', status: 'present', source: 'self_check', verification_status: 'rejected' },
+    ])).toEqual({ present: 1, absent: 0, unchecked: 0, voided: 1 })
   })
 })

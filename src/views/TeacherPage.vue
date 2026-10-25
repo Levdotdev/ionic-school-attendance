@@ -47,9 +47,9 @@
               <h1 id="teacher-dashboard-title">{{ sectionMeta.title }}</h1>
               <p>{{ sectionMeta.description }}</p>
             </div>
-            <div v-if="activeSection !== 'overview'" class="week-chip">
-              <span>{{ isCurrentSchoolWeek ? 'This school week' : 'Selected school week' }}</span>
-              <strong>{{ displayDate(week.startDate) }} – {{ displayDate(week.endDateInclusive) }}</strong>
+            <div class="week-chip">
+              <span>{{ activeSection === 'overview' || isCurrentSchoolWeek ? 'This school week' : 'Selected school week' }}</span>
+              <strong>{{ displayDate(headingWeek.startDate) }} – {{ displayDate(headingWeek.endDateInclusive) }}</strong>
             </div>
           </section>
 
@@ -74,20 +74,37 @@
             <ion-button @click="beginClassCreate">Create class</ion-button>
           </section>
 
-          <section v-if="activeSection === 'overview'" class="upcoming-workspace" aria-label="Current and next class schedules">
-            <article v-for="item in upcoming.current" :key="item.id" class="surface-card upcoming-class current-class">
-              <p class="eyebrow">Happening now</p><h2>{{ item.className }}</h2>
-              <p class="upcoming-time">{{ formatScheduleOccurrence(item) }}</p>
-              <p>{{ modeLabel(item.attendanceMode) }}<template v-if="item.room"> · {{ item.room }}</template></p>
-              <ion-button v-if="item.meetingId" fill="outline" @click="openUpcomingClass(item)">Open attendance</ion-button>
-            </article>
-            <article v-if="upcoming.next" class="surface-card upcoming-class next-class">
-              <p class="eyebrow">Up next</p><h2>{{ upcoming.next.className }}</h2>
-              <p class="upcoming-time">{{ formatScheduleOccurrence(upcoming.next) }}</p>
-              <p>{{ modeLabel(upcoming.next.attendanceMode) }}<template v-if="upcoming.next.room"> · {{ upcoming.next.room }}</template></p>
-              <span class="upcoming-state">{{ upcoming.next.meetingId ? 'Scheduled class' : 'Repeats weekly' }}</span>
-            </article>
-            <article v-if="!upcoming.current.length && !upcoming.next" class="surface-card upcoming-class no-upcoming"><p class="eyebrow">Your schedule</p><h2>No upcoming class</h2><p>Your next active class schedule will appear here.</p></article>
+          <section v-if="activeSection === 'overview'" class="teacher-overview" aria-label="Current or next class overview">
+            <template v-if="overviewOccurrence && overviewClass">
+              <div class="stats-grid" aria-label="Attendance for this class meeting">
+                <article class="stat-card present-stat"><span class="stat-icon" aria-hidden="true">✓</span><div><span>Present</span><strong data-overview-present>{{ overviewReady ? overviewTotals.present : '—' }}</strong></div></article>
+                <article class="stat-card absent-stat"><span class="stat-icon" aria-hidden="true">×</span><div><span>Absent</span><strong data-overview-absent>{{ overviewReady ? overviewTotals.absent : '—' }}</strong></div></article>
+                <article class="stat-card unchecked-stat"><span class="stat-icon" aria-hidden="true">○</span><div><span>Unchecked</span><strong data-overview-unchecked>{{ overviewReady ? overviewTotals.unchecked : '—' }}</strong></div></article>
+                <article class="stat-card review-stat"><span class="stat-icon" aria-hidden="true">!</span><div><span>Voided self-checks</span><strong data-overview-voided>{{ overviewReady ? overviewTotals.voided : '—' }}</strong></div></article>
+              </div>
+              <div class="overview-grid">
+                <article class="surface-card overview-card upcoming-class" :class="upcoming.current.length ? 'current-class' : 'next-class'" data-overview-occurrence>
+                  <p class="eyebrow">{{ upcoming.current.length ? 'Happening now' : 'Up next' }}</p><h2>{{ overviewOccurrence.className }}</h2>
+                  <p class="upcoming-time">{{ formatScheduleOccurrence(overviewOccurrence) }}</p>
+                  <p>{{ modeLabel(overviewOccurrence.attendanceMode) }}<template v-if="overviewOccurrence.room"> · {{ overviewOccurrence.room }}</template></p>
+                  <ion-button v-if="overviewMeetingId" fill="outline" @click="openUpcomingClass({ ...overviewOccurrence, meetingId: overviewMeetingId })">Open attendance</ion-button>
+                  <span v-else class="upcoming-state">Repeats weekly</span>
+                </article>
+                <article class="surface-card overview-card" data-overview-class>
+                  <p class="eyebrow">Class details</p><h2>Your class</h2><h3>{{ overviewClass.name }}</h3>
+                  <p>{{ overviewReady ? overviewState!.studentIds.length : '—' }} enrolled students</p>
+                  <div class="join-code-block"><span>Student join code</span><strong>{{ overviewClass.join_code }}</strong></div>
+                </article>
+                <article class="surface-card overview-card" data-overview-plan>
+                  <p class="eyebrow">This school week</p><h2>Weekly plan</h2>
+                  <strong class="overview-meeting-count">{{ overviewReady ? overviewState!.meetings.length : '—' }}</strong>
+                  <p>meetings this week</p><p>{{ overviewReady ? overviewState!.meetings.filter(item => item.attendance_enabled).length : '—' }} count attendance.</p>
+                </article>
+              </div>
+              <p v-if="loadingOverview" class="schedule-help" role="status">Loading this class’s attendance…</p>
+              <p v-else-if="overviewError" class="overview-error" role="alert">{{ overviewError }}</p>
+            </template>
+            <article v-else class="surface-card upcoming-class no-upcoming"><p class="eyebrow">Your schedule</p><h2>No upcoming class</h2><p>Your next active class schedule will appear here.</p></article>
           </section>
 
           <section v-if="activeSection === 'schedules'" class="collective-calendar" aria-label="All class schedules">
@@ -492,7 +509,7 @@ import StudentGuardianModal from '@/components/StudentGuardianModal.vue'
 import InviteParentModal from '@/components/InviteParentModal.vue'
 import AttendancePhoto from '@/components/AttendancePhoto.vue'
 import ClassAttendanceReportModal from '@/components/ClassAttendanceReportModal.vue'
-import { teacherUpcomingSchedules, type UpcomingTeacherClass } from '@/utils/teacherUpcomingSchedules'
+import { teacherOverviewAttendance, teacherUpcomingSchedules, type UpcomingTeacherClass } from '@/utils/teacherUpcomingSchedules'
 
 type MeetingMode = 'teacher_manual' | 'self_on_site' | 'self_online'
 type AttendanceStatus = 'present' | 'absent'
@@ -604,6 +621,10 @@ const calendarExceptions = ref<Array<{ schedule_id: string; schedule_week_start:
 const upcomingMeetings = ref<MeetingRow[]>([])
 const upcomingExceptions = ref<Array<{ schedule_id: string; schedule_week_start: string }>>([])
 const upcomingNow = ref(Date.now())
+const overviewState = ref<{ key: string; studentIds: string[]; meetings: MeetingRow[]; records: AttendanceRow[]; meetingId: string } | null>(null)
+const loadingOverview = ref(false)
+const overviewError = ref('')
+let overviewRequest = 0
 const meetings = ref<MeetingRow[]>([])
 const students = ref<StudentRow[]>([])
 const attendanceRecords = ref<AttendanceRow[]>([])
@@ -637,7 +658,7 @@ const messageKind = ref<'success' | 'error'>('success')
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(feedbackTimeout); if (value) feedbackTimeout = setTimeout(clearMessage, 5000) })
 watch(() => route.query.section, clearMessage)
-onBeforeUnmount(() => { clearTimeout(feedbackTimeout); classDetailsRequest++; attendanceRequest++; calendarRequest++ })
+onBeforeUnmount(() => { clearTimeout(feedbackTimeout); classDetailsRequest++; attendanceRequest++; calendarRequest++; overviewRequest++ })
 
 const week = reactive(currentManilaWeek())
 const calendarDate = ref(dateKeyInManila(new Date()))
@@ -658,6 +679,16 @@ const meetingForm = reactive({
 
 const activeClass = computed(() => classes.value.find((item) => item.id === selectedClassId.value) ?? null)
 const upcoming = computed(() => teacherUpcomingSchedules({ courses: activeClasses.value, schedules: calendarSchedules.value, meetings: upcomingMeetings.value, exceptions: upcomingExceptions.value, now: new Date(upcomingNow.value) }))
+const overviewOccurrence = computed(() => upcoming.value.current[0] ?? upcoming.value.next)
+const overviewClass = computed(() => classes.value.find(item => item.id === overviewOccurrence.value?.classId) ?? null)
+const overviewContextKey = computed(() => {
+  const occurrence = overviewOccurrence.value
+  return occurrence ? `${profile.value?.id}:${occurrence.classId}:${occurrence.id}:${occurrence.start}:${occurrence.end}` : ''
+})
+const overviewReady = computed(() => overviewState.value?.key === overviewContextKey.value && Boolean(overviewState.value))
+const overviewMeetingId = computed(() => overviewReady.value ? overviewState.value!.meetingId : '')
+const overviewTotals = computed(() => teacherOverviewAttendance(overviewReady.value ? overviewState.value!.studentIds : [], overviewReady.value ? overviewState.value!.records : []))
+const headingWeek = computed(() => activeSection.value === 'overview' ? currentManilaWeek(new Date(upcomingNow.value)) : week)
 const calendarEvents = computed<TeacherCalendarEvent[]>(() => {
   const classMap = new Map(activeClasses.value.map(item => [item.id, item]))
   const events: TeacherCalendarEvent[] = []
@@ -683,21 +714,6 @@ const selectedMeeting = computed(() => meetings.value.find((item) => item.id ===
 const attendanceByStudent = computed<Record<string, AttendanceRow>>(() =>
   Object.fromEntries(attendanceRecords.value.map((record) => [record.student_id, record])),
 )
-const evidenceRows = computed(() => attendanceRecords.value.filter((record) => record.source === 'self_check'))
-const countedMeetings = computed(() => meetings.value.filter(meeting => meeting.attendance_enabled).length)
-const presentCount = computed(
-  () =>
-    attendanceRecords.value.filter(
-      (record) =>
-        record.status === 'present' &&
-        (record.verification_status == null || record.verification_status === 'approved'),
-    ).length,
-)
-const absentCount = computed(() => attendanceRecords.value.filter((record) => record.status === 'absent').length)
-const uncheckedCount = computed(() => Math.max(students.value.length - attendanceRecords.value.length, 0))
-const voidedEvidenceCount = computed(
-  () => evidenceRows.value.filter((record) => record.verification_status === 'rejected').length,
-)
 const canMarkAttendance = computed(
   () => Boolean(!activeClass.value?.archived_at && !loadingDetails.value && !loadingAttendance.value && selectedMeeting.value?.attendance_enabled),
 )
@@ -708,7 +724,6 @@ const teacherApprovalStatus = computed(() =>
   profile.value?.teacher_approval_status === 'rejected' ? 'rejected' : 'pending',
 )
 const teacherApprovalNote = computed(() => profile.value?.teacher_approval_note?.trim() || '')
-const currentWeekLabel = computed(() => `This week: ${displayDate(week.startDate)} to ${displayDate(week.endDateInclusive)}`)
 const activeSection = computed<TeacherSection>(() => {
   const value = typeof route.query.section === 'string' ? route.query.section : 'overview'
   if (value === 'evidence') return 'attendance'
@@ -719,7 +734,7 @@ const sectionMeta = computed(() => {
     overview: {
     eyebrow: 'Teacher dashboard',
     title: `Welcome back, ${profile.value?.full_name || 'Teacher'}`,
-    description: 'Your current class and the next schedule across all your subjects.',
+    description: 'Attendance and weekly context for your current class, or your next class when none is in progress.',
     },
     classes: {
     eyebrow: 'Class management',
@@ -744,6 +759,16 @@ watch(classFilter, () => {
   if (!visibleClasses.value.some(item => item.id === selectedClassId.value)) {
     selectedClassId.value = visibleClasses.value[0]?.id ?? ''
   }
+})
+
+watch(activeSection, section => {
+  if (section === 'overview' && teacherApproved.value) void loadCalendar()
+  else { overviewRequest++; loadingOverview.value = false }
+})
+watch(() => [profile.value?.id, teacherApproved.value], () => {
+  overviewRequest++
+  overviewState.value = null
+  overviewError.value = ''
 })
 
 useRealtimeRefresh({
@@ -852,6 +877,10 @@ async function loadCalendar() {
     calendarExceptions.value = []
     upcomingMeetings.value = []
     upcomingExceptions.value = []
+    overviewRequest++
+    overviewState.value = null
+    overviewError.value = ''
+    loadingOverview.value = false
     return
   }
   const range = calendarRange.value
@@ -875,8 +904,59 @@ async function loadCalendar() {
     calendarExceptions.value = Array.isArray(exceptionResult.data) ? exceptionResult.data : []
     upcomingMeetings.value = ((upcomingResult.data ?? []) as MeetingRow[]).filter(meeting => classIds.includes(meeting.class_id))
     upcomingExceptions.value = Array.isArray(upcomingExceptionResult.data) ? upcomingExceptionResult.data : []
+    if (activeSection.value === 'overview') await loadOverviewContext()
   } catch (error) {
     if (request === calendarRequest) showError(error)
+  }
+}
+
+async function loadOverviewContext() {
+  const request = ++overviewRequest
+  const occurrence = overviewOccurrence.value
+  const key = overviewContextKey.value
+  const actorId = profile.value?.id
+  const isCurrent = () => request === overviewRequest && key === overviewContextKey.value && actorId === profile.value?.id && teacherApproved.value && activeSection.value === 'overview'
+  if (!occurrence || !key || !teacherApproved.value) {
+    overviewState.value = null
+    loadingOverview.value = false
+    return
+  }
+  loadingOverview.value = true
+  overviewError.value = ''
+  // Do not reuse the manually selected workspace's roster, week or attendance.
+  overviewState.value = null
+  const schoolWeek = currentManilaWeek(new Date(upcomingNow.value))
+  try {
+    if (dateKeyInManila(new Date(occurrence.start)) >= schoolWeek.startDate && dateKeyInManila(new Date(occurrence.start)) <= schoolWeek.endDateInclusive) {
+      const { error } = await supabase.rpc('ensure_current_week_meetings', { p_class_id: occurrence.classId })
+      if (!isCurrent()) return
+      if (error) throw error
+    }
+    const [meetingResult, enrollmentResult] = await Promise.all([
+      supabase.from('meetings').select(MEETING_COLUMNS).eq('class_id', occurrence.classId).gte('starts_at', schoolWeek.startIso).lt('starts_at', schoolWeek.endIso).order('starts_at'),
+      supabase.from('class_enrollments').select('student_id').eq('class_id', occurrence.classId).eq('is_active', true),
+    ])
+    if (!isCurrent()) return
+    if (meetingResult.error) throw meetingResult.error
+    if (enrollmentResult.error) throw enrollmentResult.error
+    const classMeetings = ((meetingResult.data ?? []) as MeetingRow[]).filter(item => item.class_id === occurrence.classId)
+    const actualMeeting = classMeetings.find(item => item.id === occurrence.meetingId) ?? classMeetings.find(item => item.schedule_id === occurrence.scheduleId && new Date(item.starts_at).getTime() === new Date(occurrence.start).getTime())
+    const meetingId = actualMeeting?.id || occurrence.meetingId || ''
+    let records: AttendanceRow[] = []
+    if (meetingId) {
+      const result = await supabase.from('attendance_records').select('id,meeting_id,student_id,status,source,verification_status').eq('meeting_id', meetingId)
+      if (!isCurrent()) return
+      if (result.error) throw result.error
+      records = ((result.data ?? []) as AttendanceRow[]).filter(record => record.meeting_id === meetingId)
+    }
+    if (!isCurrent()) return
+    overviewState.value = { key, studentIds: [...new Set((enrollmentResult.data ?? []).map(row => row.student_id as string))], meetings: classMeetings, records, meetingId }
+  } catch (error) {
+    if (!isCurrent()) return
+    overviewState.value = null
+    overviewError.value = toUserFacingErrorMessage(error, 'Unable to load this class’s attendance. It will retry automatically.')
+  } finally {
+    if (isCurrent()) loadingOverview.value = false
   }
 }
 
@@ -1232,7 +1312,7 @@ function resetScheduleForm() {
 async function deleteSchedule(schedule: ScheduleRow) {
   const confirmed = await confirmAction({
     header: `Delete ${dayLabel(schedule.day_of_week)} schedule?`,
-    message: 'This stops future weekly meetings. Meetings already created remain available and can be disabled or deleted separately.',
+    message: 'This permanently removes this weekly schedule and all of its generated meetings, including past, current, and future meetings, along with their recorded attendance and photos. Independent additional meetings are kept.',
     confirmText: 'Delete schedule',
   })
   if (!confirmed) return
@@ -1244,10 +1324,10 @@ async function deleteSchedule(schedule: ScheduleRow) {
     if (error) throw error
     if (editingScheduleId.value === schedule.id) cancelScheduleEdit()
     schedules.value = schedules.value.filter((item) => item.id !== schedule.id)
-    meetings.value.forEach((meeting) => {
-      if (meeting.schedule_id === schedule.id) meeting.schedule_id = null
-    })
-    await loadCalendar()
+    meetings.value = meetings.value.filter(meeting => meeting.schedule_id !== schedule.id)
+    if (!meetings.value.some(meeting => meeting.id === selectedMeetingId.value)) selectedMeetingId.value = meetings.value[0]?.id || ''
+    if (selectedClassId.value === schedule.class_id) await loadClassDetails(schedule.class_id, { generate: false, silent: true })
+    else await loadCalendar()
     showSuccess('Weekly schedule deleted.')
   } catch (error) {
     showError(error)
@@ -1907,6 +1987,10 @@ async function logout() {
 .overview-card h2 { margin: 0 0 8px; font-size: 18px; letter-spacing: -.025em; }
 .overview-card > p:not(.eyebrow) { margin: 0 0 18px; color: var(--page-muted); font-size: 13px; line-height: 1.6; }
 .overview-card ion-button { margin-top: auto; }
+.overview-card h3 { margin: 0 0 10px; color: var(--page-text); font-size: 1.05rem; line-height: 1.4; overflow-wrap: anywhere; }
+.overview-card .join-code-block { margin-top: auto; align-items: flex-start; }
+.overview-meeting-count { margin: 0 0 8px; color: var(--page-text); font-size: 2.1rem; line-height: 1.1; }
+.overview-error { color: var(--page-danger); font-size: .85rem; line-height: 1.6; }
 .join-code-copy strong { margin-left: 8px; color: var(--page-blue); letter-spacing: .12em; }
 .dashboard-heading,
 .planning-heading,

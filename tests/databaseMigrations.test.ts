@@ -13,6 +13,8 @@ const beforeParentConsentMigrations: string[] = []
 let parentConsentMigration = ''
 const beforeStructuredNamesMigrations: string[] = []
 let structuredNamesMigration = ''
+const beforeScheduleDeletionMigrations: string[] = []
+let scheduleDeletionMigration = ''
 
 // Supabase-owned tables/functions and Cron transport are the only scaffolds.
 // Application schemas, triggers, policies, grants, and RPCs below are the
@@ -77,6 +79,8 @@ beforeAll(async () => {
     const sql = await readFile(`${migrationDirectory}/${file}`, 'utf8')
     if (file.endsWith('structured_names_attendance_reports_and_auth_sync.sql')) structuredNamesMigration = sql
     else if (!structuredNamesMigration) beforeStructuredNamesMigrations.push(sql)
+    if (file.endsWith('delete_schedule_generated_meetings_and_cleanup_photos.sql')) scheduleDeletionMigration = sql
+    else if (!scheduleDeletionMigration) beforeScheduleDeletionMigrations.push(sql)
     if (file.endsWith('parent_consent_and_meeting_simplification.sql')) parentConsentMigration = sql
     else if (!parentConsentMigration) beforeParentConsentMigrations.push(sql)
     if (file.endsWith('class_notification_infrastructure.sql')) {
@@ -158,7 +162,9 @@ async function seedOnlineEvidence() {
       ('${adminId}','database-admin@example.invalid',now());
     update public.profiles set role='parent',onboarding_completed_at=now() where id in ('${parentId}','${unrelatedId}');
     update public.profiles set role='admin',onboarding_completed_at=now() where id='${adminId}';
-    update public.meetings set attendance_opens_at=now()-interval '1 hour',attendance_closes_at=now()+interval '1 hour'
+    update public.meetings set starts_at=now()-interval '30 minutes',ends_at=now()+interval '30 minutes',
+      meeting_date=timezone('Asia/Manila',now())::date,
+      attendance_opens_at=now()-interval '30 minutes',attendance_closes_at=now()+interval '1 hour'
       where schedule_id='${scheduleId}';
     insert into private.face_verification_sessions(student_id,meeting_id,model_version,similarity,liveness_score,antispoof_score,matched)
       select '${studentId}',id,'test-model',0.99,0.99,0.99,true from public.meetings where schedule_id='${scheduleId}';
@@ -550,11 +556,173 @@ describe('actual database migrations', () => {
     expect(tombstone.rows[0].count).toBe(1)
   })
 
-  it('preserves meeting history when its weekly schedule is deleted', async () => {
+  it('deletes the current generated meeting when its weekly schedule is deleted', async () => {
     await seedClass()
-    await database.exec(`delete from public.class_schedules where id = '${scheduleId}';`)
+    await become(teacherId)
+    expect((await database.query(`delete from public.class_schedules where id = '${scheduleId}' returning id`)).rows).toEqual([{ id: scheduleId }])
     const result = await database.query(`select schedule_id, attendance_mode from public.meetings where class_id = '${classId}'`)
-    expect(result.rows).toEqual([{ schedule_id: null, attendance_mode: 'self_on_site' }])
+    expect(result.rows).toEqual([])
+  })
+
+  it('repairs old detached generated meetings while preserving independent meetings and queuing deleted photos', async () => {
+    const legacy = new PGlite({extensions:{pgcrypto}})
+    const additionalId='30000000-0000-4000-8000-000000000011'
+    try {
+      await legacy.exec(platformScaffold)
+      for(const sql of beforeScheduleDeletionMigrations) await legacy.exec(sql.replace(/^create extension if not exists pg_cron with schema pg_catalog;\r?$/gim,''))
+      await legacy.exec(`insert into auth.users(id,email,email_confirmed_at) values('${teacherId}','legacy-teacher@example.invalid',now()),('${studentId}','legacy-student@example.invalid',now());
+        update public.profiles set role='teacher',teacher_approval_status='approved',teacher_approved_at=now(),onboarding_completed_at=now() where id='${teacherId}';
+        insert into public.classes(id,teacher_id,name,join_code) values('${classId}','${teacherId}','Legacy schedule','LEGACY12');
+        insert into public.class_schedules(id,class_id,day_of_week,starts_at,ends_at,attendance_mode)
+          values('${scheduleId}','${classId}',1,'10:00','11:00','self_online');
+        insert into public.attendance_records(meeting_id,student_id,status,source,selfie_path,recorded_by,verification_status)
+          select m.id,'${studentId}','present','self_check','${studentId}/'||m.id||'/legacy.jpg','${studentId}','approved' from public.meetings m;
+        insert into storage.objects(bucket_id,name) select 'attendance-selfies',a.selfie_path from public.attendance_records a;
+        delete from public.class_schedules where id='${scheduleId}';
+        insert into public.meetings(id,class_id,meeting_date,starts_at,ends_at,attendance_opens_at,attendance_closes_at,created_by)
+          values('${additionalId}','${classId}',current_date,now(),now()+interval '1 hour',now(),now()+interval '1 hour','${teacherId}');`)
+      const photo=(await legacy.query<{selfie_path:string}>('select selfie_path from public.attendance_records')).rows[0].selfie_path
+      expect((await legacy.query('select id from public.meetings')).rows).toHaveLength(2)
+      await legacy.exec(scheduleDeletionMigration)
+      expect((await legacy.query('select id,schedule_id,schedule_week_start from public.meetings')).rows)
+        .toEqual([{id:additionalId,schedule_id:null,schedule_week_start:null}])
+      expect((await legacy.query('select id from public.attendance_records')).rows).toEqual([])
+      expect((await legacy.query('select object_path from private.attendance_photo_deletions')).rows).toEqual([{object_path:photo}])
+      expect((await legacy.query('select name from storage.objects')).rows).toEqual([{name:photo}])
+    } finally { await legacy.close() }
+  })
+
+  it('deletes all generated weeks and dependent evidence while preserving additional meetings and other schedules/classes', async () => {
+    await seedClass('self_online')
+    const additionalId='30000000-0000-4000-8000-000000000001'
+    const secondSchedule='30000000-0000-4000-8000-000000000002'
+    const otherClass='30000000-0000-4000-8000-000000000003'
+    const otherSchedule='30000000-0000-4000-8000-000000000004'
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','other-owner@example.invalid',now());
+      update public.profiles set role='teacher',teacher_approval_status='approved',teacher_approved_at=now(),onboarding_completed_at=now() where id='${unrelatedId}';
+      insert into public.classes(id,teacher_id,name,join_code) values('${otherClass}','${unrelatedId}','Unrelated class','OTHER123');
+      insert into public.class_schedules(id,class_id,day_of_week,starts_at,ends_at,attendance_mode)
+      values('${secondSchedule}','${classId}',2,'12:00','13:00','teacher_manual'),
+        ('${otherSchedule}','${otherClass}',3,'14:00','15:00','teacher_manual');
+      insert into public.meetings(id,class_id,meeting_date,starts_at,ends_at,attendance_opens_at,attendance_closes_at,created_by)
+      values('${additionalId}','${classId}',current_date,now()-interval '3 hours',now()-interval '2 hours',now()-interval '3 hours',now()-interval '2 hours','${teacherId}');
+      insert into public.meetings(class_id,schedule_id,schedule_week_start,meeting_date,starts_at,ends_at,attendance_mode,attendance_opens_at,attendance_closes_at,created_by)
+      select m.class_id,m.schedule_id,m.schedule_week_start+offset_days,m.meeting_date+offset_days,
+        m.starts_at+make_interval(days=>offset_days),m.ends_at+make_interval(days=>offset_days),m.attendance_mode,
+        m.attendance_opens_at+make_interval(days=>offset_days),m.attendance_closes_at+make_interval(days=>offset_days),m.created_by
+      from public.meetings m cross join unnest(array[-7,7]) offset_days where m.schedule_id='${scheduleId}';
+      insert into public.attendance_records(meeting_id,student_id,status,source,selfie_path,recorded_by,verification_status)
+      select m.id,'${studentId}','present','self_check','${studentId}/'||m.id||'/selfie.jpg','${studentId}','approved'
+        from public.meetings m where m.schedule_id='${scheduleId}' and m.starts_at<now();
+      insert into storage.objects(bucket_id,name) select 'attendance-selfies',a.selfie_path from public.attendance_records a;
+      insert into private.online_attendance_locations(attendance_id,student_id,latitude,longitude,accuracy_m)
+        select a.id,a.student_id,14,121,10 from public.attendance_records a;
+      insert into private.face_verification_sessions(student_id,meeting_id,model_version,similarity,liveness_score,antispoof_score,matched)
+        select '${studentId}',m.id,'test-model',0.99,0.99,0.99,true from public.meetings m where m.schedule_id='${scheduleId}';
+      insert into public.student_schedule_notification_preferences(schedule_id,student_id) values('${scheduleId}','${studentId}');
+      insert into private.class_notification_queue(meeting_id,schedule_id,user_id,audience,reminder_offset_minutes,scheduled_for)
+        select m.id,m.schedule_id,'${studentId}','student',0,m.starts_at from public.meetings m where m.schedule_id='${scheduleId}' on conflict do nothing;
+      insert into private.class_notification_deliveries(queue_id) select q.id from private.class_notification_queue q where q.schedule_id='${scheduleId}';
+      insert into private.schedule_meeting_exceptions(schedule_id,schedule_week_start,meeting_date,deleted_by)
+        select '${scheduleId}',m.schedule_week_start+14,m.meeting_date+14,'${teacherId}' from public.meetings m where m.schedule_id='${scheduleId}' order by m.starts_at limit 1;`)
+    const removedMeetings=(await database.query<{ id:string }>(`select id from public.meetings where schedule_id='${scheduleId}'`)).rows.map(row=>row.id)
+    const survivingMeetings=(await database.query<{ id:string }>(`select id from public.meetings where schedule_id is distinct from '${scheduleId}'::uuid`)).rows.map(row=>row.id).sort()
+    const survivingQueue=(await database.query<{id:string}>(`select id from private.class_notification_queue where schedule_id is distinct from '${scheduleId}'::uuid order by id`)).rows
+    const survivingDeliveries=(await database.query<{id:string}>(`select d.id from private.class_notification_deliveries d join private.class_notification_queue q on q.id=d.queue_id where q.schedule_id is distinct from '${scheduleId}'::uuid order by d.id`)).rows
+    const photos=(await database.query<{ selfie_path:string }>('select selfie_path from public.attendance_records order by selfie_path')).rows.map(row=>row.selfie_path)
+    expect(removedMeetings).toHaveLength(3)
+    expect(photos.length).toBeGreaterThan(0)
+    await become(teacherId)
+    expect((await database.query(`delete from public.class_schedules where id='${scheduleId}' returning id`)).rows).toEqual([{id:scheduleId}])
+    await database.exec('reset role;')
+    expect((await database.query<{id:string}>('select id from public.meetings order by id')).rows.map(row=>row.id)).toEqual(survivingMeetings)
+    expect((await database.query('select id from public.classes')).rows).toHaveLength(2)
+    expect((await database.query('select id from public.class_schedules')).rows).toHaveLength(2)
+    for(const table of ['public.attendance_records','private.online_attendance_locations','private.face_verification_sessions',
+      'public.student_schedule_notification_preferences','private.schedule_meeting_exceptions']) {
+      expect((await database.query(`select count(*)::integer as count from ${table}`)).rows).toEqual([{count:0}])
+    }
+    expect((await database.query('select id from private.class_notification_queue order by id')).rows).toEqual(survivingQueue)
+    expect((await database.query('select id from private.class_notification_deliveries order by id')).rows).toEqual(survivingDeliveries)
+    expect((await database.query<{object_path:string}>('select object_path from private.attendance_photo_deletions order by object_path')).rows.map(row=>row.object_path)).toEqual(photos)
+    // SQL retains managed Storage metadata; the protected worker removes bytes via API.
+    expect((await database.query('select name from storage.objects')).rows).toHaveLength(photos.length)
+    await database.exec(`select private.generate_current_week_meetings('${classId}');`)
+    expect((await database.query(`select id from public.meetings where schedule_id='${scheduleId}'`)).rows).toEqual([])
+    for(const actor of [studentId,parentId]) {
+      await become(actor)
+      const history=(await database.query<{meeting_id:string}>(`select meeting_id from public.student_attendance_history('${studentId}')`)).rows
+      expect(history.some(row=>removedMeetings.includes(row.meeting_id))).toBe(false)
+    }
+  })
+
+  it('restricts schedule deletion to its approved teacher and requires restoring an archived class', async () => {
+    await seedClass()
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','another-teacher@example.invalid',now());
+      update public.profiles set role='teacher',teacher_approval_status='approved',teacher_approved_at=now(),onboarding_completed_at=now() where id='${unrelatedId}';`)
+    for(const actor of [studentId,parentId,pendingTeacherId,unrelatedId]) {
+      await become(actor)
+      expect((await database.query(`delete from public.class_schedules where id='${scheduleId}' returning id`)).rows).toEqual([])
+    }
+    await become(teacherId)
+    await database.exec(`select public.set_class_archived('${classId}'); savepoint archived_schedule;`)
+    await expect(database.query(`delete from public.class_schedules where id='${scheduleId}'`)).rejects.toThrow('Restore the archived class')
+    await database.exec('rollback to savepoint archived_schedule; reset role;')
+    expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
+    expect((await database.query('select id from private.attendance_photo_deletions')).rows).toHaveLength(0)
+    await become(teacherId)
+    // Deleting an entire owned class is still a supported cascade.
+    await database.exec(`delete from public.classes where id='${classId}';`)
+    await database.exec('reset role;')
+    expect((await database.query('select id from public.meetings')).rows).toEqual([])
+  })
+
+  it('leases bounded photo cleanup to the service only and rejects stale acknowledgements', async () => {
+    const path=`${studentId}/${scheduleId}/selfie.jpg`
+    await database.exec(`insert into private.attendance_photo_deletions(object_path) values('${path}');`)
+    for(const role of ['anon','authenticated']) {
+      expect((await database.query(`select has_table_privilege('${role}','private.attendance_photo_deletions','SELECT') as table_access,
+        has_function_privilege('${role}','public.claim_attendance_photo_deletions(integer)','EXECUTE') as can_claim,
+        has_function_privilege('${role}','public.complete_attendance_photo_deletions(uuid[],uuid,boolean)','EXECUTE') as can_complete`)).rows)
+        .toEqual([{table_access:false,can_claim:false,can_complete:false}])
+    }
+    await database.exec('set local role service_role; savepoint cleanup_bound;')
+    await expect(database.query('select * from public.claim_attendance_photo_deletions(101)')).rejects.toThrow('1 to 100')
+    await database.exec('rollback to savepoint cleanup_bound;')
+    const first=(await database.query<{id:string;object_path:string;lease_token:string}>('select * from public.claim_attendance_photo_deletions(1)')).rows[0]
+    expect(first.object_path).toBe(path)
+    expect((await database.query('select * from public.claim_attendance_photo_deletions(1)')).rows).toEqual([])
+    expect((await database.query(`select public.complete_attendance_photo_deletions(array['${first.id}'::uuid],gen_random_uuid(),true) as count`)).rows).toEqual([{count:0}])
+    expect((await database.query(`select public.complete_attendance_photo_deletions(array['${first.id}'::uuid],'${first.lease_token}',false) as count`)).rows).toEqual([{count:1}])
+    expect((await database.query('select * from public.claim_attendance_photo_deletions(1)')).rows).toEqual([])
+    await database.exec(`reset role; update private.attendance_photo_deletions set next_attempt_at=now()-interval '1 second'; set local role service_role;`)
+    const second=(await database.query<{id:string;lease_token:string}>('select * from public.claim_attendance_photo_deletions(1)')).rows[0]
+    expect(second.id).toBe(first.id)
+    expect(second.lease_token).not.toBe(first.lease_token)
+    expect((await database.query(`select public.complete_attendance_photo_deletions(array['${first.id}'::uuid],'${first.lease_token}',true) as count`)).rows).toEqual([{count:0}])
+    await database.exec(`reset role; update private.attendance_photo_deletions set lease_expires_at=now()-interval '1 second'; set local role service_role;`)
+    const third=(await database.query<{id:string;lease_token:string}>('select * from public.claim_attendance_photo_deletions(1)')).rows[0]
+    expect(third.lease_token).not.toBe(second.lease_token)
+    expect((await database.query(`select public.complete_attendance_photo_deletions(array['${third.id}'::uuid],'${second.lease_token}',true) as count`)).rows).toEqual([{count:0}])
+    expect((await database.query(`select public.complete_attendance_photo_deletions(array['${third.id}'::uuid],'${third.lease_token}',true) as count`)).rows).toEqual([{count:1}])
+    expect((await database.query('select id from private.attendance_photo_deletions')).rows).toEqual([])
+  })
+
+  it('never claims unsafe paths or photos still backing surviving attendance', async () => {
+    await seedClass('self_online')
+    const meeting=(await database.query<{id:string}>(`select id from public.meetings where schedule_id='${scheduleId}'`)).rows[0].id
+    const retained=`${studentId}/${meeting}/retained.jpg`, removable=`${studentId}/${meeting}/removed.jpg`
+    await database.exec(`insert into public.attendance_records(meeting_id,student_id,status,source,selfie_path,recorded_by,verification_status)
+      values('${meeting}','${studentId}','present','self_check','${retained}','${studentId}','approved');
+      insert into private.attendance_photo_deletions(object_path) values(''),('../private.jpg'),('${studentId}/${meeting}/../escape.jpg'),('${retained}'),('${removable}');
+      set local role service_role;`)
+    expect((await database.query<{object_path:string}>('select object_path from public.claim_attendance_photo_deletions(100)')).rows)
+      .toEqual([{object_path:removable}])
+    expect((await database.query<{object_path:string}>('select object_path from private.attendance_photo_deletions')).rows)
+      .toEqual([{object_path:removable}])
+    await database.exec(`reset role; delete from public.attendance_records where meeting_id='${meeting}'; set local role service_role;`)
+    expect((await database.query<{object_path:string}>('select object_path from public.claim_attendance_photo_deletions(100)')).rows)
+      .toEqual([{object_path:retained}])
   })
 
   it('applies schedule attendance defaults to meetings created ahead of the Monday boundary', async () => {

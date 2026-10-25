@@ -2,7 +2,7 @@
   <ion-page>
     <ion-content :fullscreen="true" class="setup-background">
       <main class="setup-waiting"><img src="/minsu-logo.png" alt="Mindoro State University" /></main>
-      <ion-modal class="account-setup-modal" :is-open="open" :backdrop-dismiss="false" :can-dismiss="canDismiss">
+      <ion-modal ref="setupModal" class="account-setup-modal" :is-open="open" :backdrop-dismiss="false" :can-dismiss="canDismiss">
         <section class="setup-dialog-shell">
         <ion-header class="ion-no-border"><ion-toolbar><ion-title>Complete your account</ion-title><ion-buttons slot="end"><ion-button :disabled="leaving" @click="leave">{{ leaving ? 'Signing out…' : 'Sign out' }}</ion-button></ion-buttons></ion-toolbar></ion-header>
         <div class="setup-content">
@@ -39,9 +39,9 @@
 </template>
 
 <script setup lang="ts">
-import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonInput, IonModal, IonPage, IonSpinner, IonTitle, IonToolbar, onIonViewWillEnter } from '@ionic/vue'
+import { IonButton, IonButtons, IonContent, IonHeader, IonIcon, IonInput, IonModal, IonPage, IonSpinner, IonTitle, IonToolbar, onIonViewWillEnter, onIonViewWillLeave } from '@ionic/vue'
 import { arrowForwardOutline, bookOutline, checkmarkCircleOutline, peopleOutline, schoolOutline, shieldCheckmarkOutline } from 'ionicons/icons'
-import { computed, onBeforeUnmount, ref } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { accountPathForProfile, useSession } from '@/composables/useSession'
 import { supabase } from '@/lib/supabase'
@@ -50,7 +50,8 @@ import { toUserFacingErrorMessage } from '@/utils/errors'
 type RegistrationRole = 'student' | 'teacher' | 'parent'
 const router = useRouter()
 const { profile, user, initializeSession, refreshProfile, signOut } = useSession()
-const open = ref(true)
+const open = ref(false)
+const setupModal = ref<{ $el?: { dismiss?: (data?: unknown, role?: string) => Promise<boolean> } }>()
 const busy = ref(false)
 const leaving = ref(false)
 const firstName = ref('')
@@ -62,7 +63,10 @@ const invitationChecked = ref(false)
 let unmounting = false
 let entryRequest = 0
 const canDismiss = () => unmounting || !open.value || (!busy.value && (!user.value || Boolean(profile.value?.onboarding_completed_at)))
-onBeforeUnmount(() => { unmounting = true; entryRequest++ })
+async function closeSetup() { open.value = false; await setupModal.value?.$el?.dismiss?.(undefined, 'navigation') }
+onBeforeUnmount(() => { unmounting = true; entryRequest++; void closeSetup() })
+onIonViewWillLeave(() => { entryRequest++; void closeSetup() })
+watch(() => user.value?.id, (id, previous) => { if (previous && id !== previous) { entryRequest++; void closeSetup() } })
 const roleOptions = [
   { value: 'student', title: 'Student', description: 'Check in, view classes, and plan tasks.', icon: bookOutline },
   { value: 'teacher', title: 'Teacher', description: 'Manage classes, schedules, and attendance.', icon: schoolOutline },
@@ -75,10 +79,10 @@ async function leave() {
   leaving.value = true
   entryRequest++
   try {
+    await closeSetup()
     await signOut()
-    open.value = false
     await router.replace('/login')
-  } catch (error) { errorMessage.value = toUserFacingErrorMessage(error) }
+  } catch (error) { open.value = true; errorMessage.value = toUserFacingErrorMessage(error) }
   finally { leaving.value = false }
 }
 
@@ -97,10 +101,10 @@ async function submit() {
     const { error } = await supabase.rpc('complete_account_setup', { p_first_name: first, p_last_name: last, p_role: role.value })
     if (error) throw error
     if (request !== entryRequest || leaving.value) return
-    const currentProfile = await refreshProfile()
+    const currentProfile = await refreshProfile({ force: true })
     if (request !== entryRequest || leaving.value) return
     if (!currentProfile?.onboarding_completed_at) throw new Error('Your account was not saved. Please try again.')
-    open.value = false
+    await closeSetup()
     await router.replace(accountPathForProfile(currentProfile))
   } catch (error) {
     const message = toUserFacingErrorMessage(error)
@@ -113,6 +117,7 @@ onIonViewWillEnter(async () => {
   const request = ++entryRequest
   const current = () => request === entryRequest && !unmounting && !leaving.value
   open.value = true
+  firstName.value = ''; lastName.value = ''
   role.value = ''
   invitationChecked.value = false
   invitedParent.value = false
@@ -122,7 +127,7 @@ onIonViewWillEnter(async () => {
     if (!current()) return
     const currentProfile = await refreshProfile()
     if (!current()) return
-    if (currentProfile?.onboarding_completed_at) { open.value = false; await router.replace(accountPathForProfile(currentProfile)); return }
+    if (currentProfile?.onboarding_completed_at) { await closeSetup(); await router.replace(accountPathForProfile(currentProfile)); return }
     if (!currentProfile) { errorMessage.value = 'Your account profile could not be loaded. Sign out and try again.'; return }
     const invitation = await supabase.rpc('my_parent_invitation')
     if (!current()) return

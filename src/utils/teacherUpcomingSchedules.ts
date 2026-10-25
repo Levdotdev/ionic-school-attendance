@@ -9,6 +9,20 @@ export interface UpcomingTeacherClass {
   attendanceMode: Mode; room: string | null; meetingId?: string; scheduleId?: string
 }
 
+/** Unchecked follows the active roster, even when former students have saved marks. */
+export function teacherOverviewAttendance(studentIds: string[], records: Array<{
+  student_id: string; status: 'present' | 'absent'; source: string
+  verification_status: 'pending' | 'approved' | 'rejected' | null
+}>) {
+  const marked = new Set(records.map(record => record.student_id))
+  return {
+    present: records.filter(record => record.status === 'present' && (record.verification_status == null || record.verification_status === 'approved')).length,
+    absent: records.filter(record => record.status === 'absent').length,
+    unchecked: new Set(studentIds.filter(id => !marked.has(id))).size,
+    voided: records.filter(record => record.source === 'self_check' && record.verification_status === 'rejected').length,
+  }
+}
+
 /** Independent of the calendar's selected week; actual exceptions override repeats. */
 export function teacherUpcomingSchedules(input: {
   courses: Course[]; schedules: Weekly[]; meetings: Meeting[]

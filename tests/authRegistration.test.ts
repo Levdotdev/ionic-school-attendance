@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   signUp: vi.fn(), signIn: vi.fn(), resetPassword: vi.fn(), replace: vi.fn(),
-  refreshProfile: vi.fn(), beginSocialSignIn: vi.fn(), profile: { value: null },
+  refreshProfile: vi.fn(), completeAuthentication: vi.fn(), beginSocialSignIn: vi.fn(), profile: { value: null },
 }))
 
 vi.mock('/minsu-logo.png', () => ({ default: '/minsu-logo.png' }))
@@ -24,7 +24,7 @@ vi.mock('@ionic/vue', async () => {
 })
 vi.mock('vue-router', () => ({ useRouter: () => ({ replace: mocks.replace }) }))
 vi.mock('@/composables/useSession', () => ({
-  useSession: () => ({ initializeSession: async () => undefined, refreshProfile: mocks.refreshProfile, profile: mocks.profile }),
+  useSession: () => ({ initializeSession: async () => undefined, completeAuthentication: mocks.completeAuthentication, refreshProfile: mocks.refreshProfile, profile: mocks.profile }),
   accountPathForProfile: (profile: { role: string; onboarding_completed_at: string | null }) => profile.onboarding_completed_at ? `/${profile.role}` : '/account/setup',
 }))
 vi.mock('@/composables/useTheme', () => ({ useTheme: () => ({ isDark: false, toggleTheme: vi.fn() }) }))
@@ -46,9 +46,10 @@ import LoginPage from '@/views/LoginPage.vue'
 beforeEach(() => {
   vi.clearAllMocks()
   mocks.signUp.mockResolvedValue({ data: { session: null }, error: null })
-  mocks.signIn.mockResolvedValue({ error: null })
+  mocks.signIn.mockResolvedValue({ data: { session: { user: { id: 'user-1' } } }, error: null })
   mocks.resetPassword.mockResolvedValue({ error: null })
   mocks.refreshProfile.mockResolvedValue({ role: 'student', onboarding_completed_at: null })
+  mocks.completeAuthentication.mockResolvedValue({ role: 'student', onboarding_completed_at: null })
   mocks.beginSocialSignIn.mockResolvedValue(undefined)
 })
 
@@ -65,6 +66,20 @@ async function signupForm() {
 }
 
 describe('shared email and social registration', () => {
+  it.each(['student', 'teacher', 'parent', 'admin'])('navigates a %s password login from the returned session without a page refresh', async role => {
+    const signedIn = { user: { id: 'user-1' } }
+    mocks.signIn.mockResolvedValue({ data: { session: signedIn }, error: null })
+    mocks.completeAuthentication.mockResolvedValue({ role, onboarding_completed_at: '2026-10-25' })
+    const wrapper = mount(LoginPage)
+    await flushPromises()
+    await wrapper.findAll('input')[0].setValue('person@example.com')
+    await wrapper.findAll('input')[1].setValue('A-secure-password')
+    await wrapper.find('form').trigger('submit'); await flushPromises()
+    expect(mocks.completeAuthentication).toHaveBeenCalledWith(signedIn)
+    expect(mocks.replace).toHaveBeenCalledWith(`/${role}`)
+    expect(wrapper.text()).not.toContain('account profile is not ready')
+    wrapper.unmount()
+  })
   it('registers using email/password without name or account-type metadata', async () => {
     const wrapper = await signupForm()
     expect(wrapper.findAll('label').map((label) => label.text())).toEqual(['Email address', 'Password', 'Confirm password'])
@@ -74,7 +89,8 @@ describe('shared email and social registration', () => {
       email: 'test@example.com', password: 'A-secure-password',
       options: { emailRedirectTo: 'https://ionic-school-attendance.vercel.app/auth/callback' },
     })
-    expect(wrapper.text()).toContain('Check your email to confirm your account')
+    expect(wrapper.text()).toContain('Registration request accepted')
+    expect(wrapper.text()).toContain('If you already registered or use Google or Facebook')
     expect(mocks.replace).not.toHaveBeenCalled()
     wrapper.unmount()
   })

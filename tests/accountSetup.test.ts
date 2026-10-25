@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { ref } from 'vue'
 
 interface SetupProfile { id: string; email: string; role: string; full_name: string; onboarding_completed_at: string | null }
-const mocks = vi.hoisted(() => ({ rpc: vi.fn(), initialize: vi.fn(), refresh: vi.fn(), signOut: vi.fn(), replace: vi.fn(), viewEnter: [] as Array<() => Promise<void>> }))
+const mocks = vi.hoisted(() => ({ rpc: vi.fn(), initialize: vi.fn(), refresh: vi.fn(), signOut: vi.fn(), replace: vi.fn(), viewEnter: [] as Array<() => Promise<void>>, viewLeave: [] as Array<() => void> }))
 const profile = ref<SetupProfile | null>(null)
 const user = ref<{ id: string; email: string; user_metadata: Record<string, unknown> } | null>(null)
 
@@ -17,6 +17,7 @@ vi.mock('@ionic/vue', async () => {
     IonButton: defineComponent({ props: ['disabled', 'type'], setup: (props, { slots }) => () => h('button', { type: props.type || 'button', disabled: props.disabled }, slots.default?.()) }),
     IonInput: defineComponent({ props: ['modelValue', 'disabled', 'label'], emits: ['update:modelValue'], setup: (props, { emit }) => () => h('input', { value: props.modelValue, disabled: props.disabled, 'aria-label': props.label, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value) }) }),
     onIonViewWillEnter: (callback: () => Promise<void>) => { mocks.viewEnter.push(callback) },
+    onIonViewWillLeave: (callback: () => void) => { mocks.viewLeave.push(callback) },
   }
 })
 vi.mock('@/lib/supabase', () => ({ supabase: { rpc: mocks.rpc } }))
@@ -31,7 +32,7 @@ import AccountSetupPage from '@/views/AccountSetupPage.vue'
 function state(wrapper: ReturnType<typeof mount>) { return (wrapper.vm as unknown as { $: { setupState: Record<string, any> } }).$.setupState }
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 beforeEach(() => {
-  vi.clearAllMocks(); mocks.viewEnter.length = 0
+  vi.clearAllMocks(); mocks.viewEnter.length = 0; mocks.viewLeave.length = 0
   profile.value = { id: 'new-account', email: 'parent@example.com', role: 'student', full_name: 'New account', onboarding_completed_at: null }
   user.value = { id: 'new-account', email: 'parent@example.com', user_metadata: {} }
   mocks.initialize.mockResolvedValue(undefined)
@@ -42,6 +43,34 @@ beforeEach(() => {
 })
 
 describe('provider-neutral account setup', () => {
+  it('closes an active overlay before sign-out begins, and opens it again on cached view re-entry', async () => {
+    const wrapper = mount(AccountSetupPage)
+    await mocks.viewEnter[0](); await flushPromises()
+    const setup = state(wrapper)
+    mocks.signOut.mockImplementation(async () => { expect(setup.open).toBe(false) })
+    await setup.leave()
+    expect(setup.open).toBe(false)
+    expect(mocks.replace).toHaveBeenCalledWith('/login')
+    await mocks.viewEnter[0](); await flushPromises()
+    expect(setup.open).toBe(true)
+    expect(setup.invitationChecked).toBe(true)
+    mocks.viewLeave[0](); await flushPromises()
+    expect(setup.open).toBe(false)
+    wrapper.unmount()
+  })
+  it('does not let a late entry request re-open an overlay after the Ionic view leaves', async () => {
+    const response = deferred<SetupProfile | null>()
+    mocks.refresh.mockReturnValueOnce(response.promise)
+    const wrapper = mount(AccountSetupPage)
+    const entering = mocks.viewEnter[0]()
+    await flushPromises()
+    mocks.viewLeave[0]()
+    response.resolve(profile.value)
+    await entering; await flushPromises()
+    expect(state(wrapper).open).toBe(false)
+    expect(mocks.rpc).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
   it('does not enable setup when the profile itself cannot be loaded', async () => {
     mocks.refresh.mockResolvedValue(null)
     const wrapper = mount(AccountSetupPage)

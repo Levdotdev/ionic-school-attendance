@@ -13,7 +13,7 @@ vi.mock('@ionic/vue', async () => {
 })
 vi.mock('@/composables/useSession', () => ({
   accountPathForProfile: (value: { role: string }) => `/${value.role}`,
-  useSession: () => ({ initializeSession: mocks.initialize, refreshProfile: mocks.refresh, refreshAuthUser: mocks.refreshAuth, passwordRecovery: recovery, signOut: mocks.signOut }),
+  useSession: () => ({ completeAuthentication: mocks.initialize, refreshProfile: mocks.refresh, refreshAuthUser: mocks.refreshAuth, passwordRecovery: recovery, signOut: mocks.signOut }),
 }))
 vi.mock('@/services/oauth', () => ({ clearOAuthAttempt: mocks.clear, clearIdentityLinkAttempt: mocks.clearLink, completeSocialSignIn: mocks.complete, completeIdentityLink: mocks.completeLink, pendingIdentityLink: mocks.pending }))
 import AuthCallbackPage from '@/views/AuthCallbackPage.vue'

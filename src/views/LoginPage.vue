@@ -246,6 +246,7 @@ import {
   sunnyOutline,
 } from 'ionicons/icons'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import type { Session } from '@supabase/supabase-js'
 import { useRouter } from 'vue-router'
 
 import { accountPathForProfile, useSession } from '@/composables/useSession'
@@ -264,7 +265,7 @@ import { authActionError, requestPasswordReset } from '@/services/account'
 type AuthMode = 'signin' | 'signup'
 
 const router = useRouter()
-const { initializeSession, refreshProfile, profile, signOutNotice } = useSession()
+const { initializeSession, completeAuthentication, profile, signOutNotice } = useSession()
 const { isDark, toggleTheme } = useTheme()
 
 const mode = ref<AuthMode>('signin')
@@ -323,8 +324,9 @@ function validate(): string | null {
   return null
 }
 
-async function redirectSignedInUser() {
-  const currentProfile = await refreshProfile()
+async function redirectSignedInUser(signedInSession: Session | null) {
+  if (!signedInSession) throw new Error('Sign in did not create a session. Please try again.')
+  const currentProfile = await completeAuthentication(signedInSession)
   if (!currentProfile) {
     throw new Error('Your account profile is not ready. Please sign in again in a moment.')
   }
@@ -346,13 +348,13 @@ async function submit() {
 
   try {
     if (mode.value === 'signin') {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email: email.value.trim().toLowerCase(),
         password: password.value,
       })
       if (error) throw error
 
-      await redirectSignedInUser()
+      await redirectSignedInUser(data.session)
       return
     }
 
@@ -366,11 +368,11 @@ async function submit() {
     if (error) throw error
 
     if (data.session) {
-      await redirectSignedInUser()
+      await redirectSignedInUser(data.session)
       return
     }
 
-    message.value = 'Check your email to confirm your account within 30 minutes. After signing in, you can choose student, teacher, or parent and complete your information.'
+    message.value = 'Registration request accepted. If email confirmation is needed, check your inbox and spam folder for a link valid for 30 minutes. If you already registered or use Google or Facebook, sign in with that method instead. After completing your profile, you can add a password in Security.'
     password.value = ''
     passwordConfirmation.value = ''
   } catch (error) {

@@ -52,10 +52,12 @@ Face matching is an attendance aid, not a guarantee of identity. Teachers should
 - Class creation asks for a class name; no section field is required.
 - Teachers can archive and restore classes. Archiving preserves attendance/enrollment history and stops new joins, check-ins, generated meetings, and class reminders. Private archive periods remain recorded after restoration so archived time does not become missed attendance later.
 - A weekly schedule automatically produces the current week's meeting.
-- The teacher Overview shows only the current and next class schedules. Weekly schedules and additional meetings are managed from the selected class in Classes.
+- The teacher Overview shows the current class, or the next class if none is in progress, with that occurrence's attendance totals, class details, and current school-week meeting totals. Weekly schedules and additional meetings are managed from the selected class in Classes.
 - A shared, responsive week/month calendar combines all active classes. Teachers can navigate weeks and open a meeting or recurring schedule from the calendar; students can see courses and dated tasks together.
 - Calendar projections are labeled as planned until an actual meeting is generated. Actual meeting changes take precedence, and a deleted weekly occurrence is not projected again.
 - Parent accounts show linked children's current weekly schedule and their complete available attendance history, including present, recorded absent, inferred absent after a meeting ends, and meetings that were not counted.
+- Parent Overview includes counted present/absent totals plus the latest attendance, its photo when required, submission time, and authorized location details. The full class calendar stays in Weekly schedule.
+- Deleting a weekly schedule deletes its generated past, current-week, and future meetings and their attendance. Independent additional meetings are retained. A protected background worker retries removal of deleted attendance photos through Storage API.
 - Teachers can disable, restore, edit, or remove one meeting without changing the repeating schedule.
 - Weekly schedules save the default attendance mode and optional check-in closing offset. Self-check opens exactly at class start; an empty closing offset uses the class end time. Weekly repetition is automatic and has no repeat toggle.
 - Weekly schedule changes apply to new occurrences and preserve existing meeting overrides. Date inputs show the selected weekday on mobile and desktop.

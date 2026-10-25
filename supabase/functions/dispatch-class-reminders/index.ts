@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
+import { cleanupAttendancePhotos } from './attendancePhotoCleanup.ts'
 
 interface FirebaseServiceAccount {
   project_id: string
@@ -252,6 +253,10 @@ Deno.serve(async (request) => {
         auth: { persistSession: false, autoRefreshToken: false },
       },
     )
+    // Run before reminder claiming/Firebase setup, including quiet minutes.
+    // Cleanup failures are contained and must never interrupt class reminders.
+    const photoCleanup = await cleanupAttendancePhotos(supabaseAdmin)
+    if (photoCleanup.error) console.warn('Attendance photo cleanup will retry', { claimed: photoCleanup.claimed, failed: photoCleanup.failed })
     const workerId = crypto.randomUUID()
     const { data, error: claimError } = await supabaseAdmin.rpc(
       'claim_due_class_notification_deliveries',
@@ -262,7 +267,7 @@ Deno.serve(async (request) => {
 
     const deliveries = (data || []) as ClaimedDelivery[]
     if (deliveries.length === 0) {
-      return Response.json({ claimed: 0, sent: 0, failed: 0 })
+      return Response.json({ claimed: 0, sent: 0, failed: 0, photo_cleanup: photoCleanup })
     }
 
     const account = firebaseServiceAccount()
@@ -306,7 +311,7 @@ Deno.serve(async (request) => {
       }
     }
 
-    return Response.json({ claimed: deliveries.length, sent, failed })
+    return Response.json({ claimed: deliveries.length, sent, failed, photo_cleanup: photoCleanup })
   } catch (error) {
     console.error('Class reminder dispatch failed', error)
     return Response.json(

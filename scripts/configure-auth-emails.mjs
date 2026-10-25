@@ -15,7 +15,7 @@ export const authEmailTemplates = Object.freeze([
 
 /** Narrow PATCH: no SMTP credentials, rate limits, providers, or redirect changes. */
 export async function buildAuthEmailPatch() {
-  const patch = { security_manual_linking_enabled: true, mailer_otp_exp: 1800 }
+  const patch = { security_manual_linking_enabled: true, mailer_otp_exp: 1800, mailer_secure_email_change_enabled: false }
   for (const template of authEmailTemplates) {
     patch[`mailer_subjects_${template.name}`] = template.subject
     patch[`mailer_templates_${template.name}_content`] = await readFile(new URL(`../supabase/templates/${template.name}.html`, import.meta.url), 'utf8')
@@ -43,7 +43,7 @@ export async function applyAuthEmailConfiguration(projectRef, accessToken, { che
   if (!checkOnly) await request('PATCH', patch)
   const current = await request('GET')
   const mismatchedFields = Object.keys(patch).filter(key => current[key] !== patch[key])
-  return { projectRef, mode: checkOnly ? 'check' : 'apply', templates: authEmailTemplates.length, manualLinkingEnabled: current.security_manual_linking_enabled === true, matching: mismatchedFields.length === 0, mismatchedFields }
+  return { projectRef, mode: checkOnly ? 'check' : 'apply', templates: authEmailTemplates.length, manualLinkingEnabled: current.security_manual_linking_enabled === true, newEmailConfirmationOnly: current.mailer_secure_email_change_enabled === false, matching: mismatchedFields.length === 0, mismatchedFields }
 }
 
 async function main() {

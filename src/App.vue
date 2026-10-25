@@ -2,23 +2,31 @@
   <ion-app>
     <div class="portal-layout" :class="{ 'has-navigation': showPortalMenu, 'navigation-collapsed': collapsed }">
       <app-menu v-if="showPortalMenu" />
-      <section id="portal-content" class="portal-outlet"><ion-router-outlet :key="user?.id ?? 'signed-out'" /></section>
+      <div v-if="changingAccount || leavingAccount" class="account-switch-status" role="status">
+        <div>
+          <p>Opening your account…</p>
+          <button type="button" :disabled="leavingAccount" @click="leaveChangingAccount">{{ leavingAccount ? 'Signing out…' : 'Sign out' }}</button>
+          <p v-if="accountSwitchError" class="account-switch-error" role="alert">{{ accountSwitchError }}</p>
+        </div>
+      </div>
+      <section v-show="!changingAccount && !leavingAccount" id="portal-content" class="portal-outlet"><ion-router-outlet :key="outletGeneration" /></section>
     </div>
   </ion-app>
 </template>
 
 <script setup lang="ts">
 import { IonApp, IonRouterOutlet } from '@ionic/vue'
-import { computed, onBeforeUnmount, onMounted, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import AppMenu from '@/components/AppMenu.vue'
-import { useSession } from '@/composables/useSession'
+import { accountPathForProfile, useSession } from '@/composables/useSession'
 import { useNavigation } from '@/composables/useNavigation'
 import { useRealtimeRefresh } from '@/composables/useRealtimeRefresh'
 import { loadStudentTaskData } from '@/services/studentTasks'
 import { isNativeTaskReminders, listenForStudentTaskReminderActions, syncStudentTaskReminders } from '@/services/studentTaskReminders'
 import { initializeNativeOAuthCallback } from '@/services/oauth'
+import { toUserFacingErrorMessage } from '@/utils/errors'
 import {
   listenForClassNotificationActions,
   registerForClassNotifications,
@@ -26,8 +34,49 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { initializeSession, profile, user, refreshProfile, refreshAuthUser } = useSession()
+const { initializeSession, profile, user, refreshProfile, refreshAuthUser, signOut } = useSession()
 const { collapsed } = useNavigation()
+const outletGeneration = ref(0)
+const leavingAccount = ref(false)
+const accountSwitchError = ref('')
+async function leaveChangingAccount() {
+  if (leavingAccount.value) return
+  leavingAccount.value = true
+  accountSwitchError.value = ''
+  try {
+    await signOut()
+    await router.replace('/login')
+  } catch (error) {
+    accountSwitchError.value = toUserFacingErrorMessage(error, 'Unable to sign out. Please try again.')
+  } finally {
+    leavingAccount.value = false
+  }
+}
+const cachedAccountId = ref<string | null>(user.value?.id ?? null)
+const privatePortal = (path: string) => /^\/(student|teacher|parent|admin)(\/|$)/.test(path)
+const changingAccount = computed(() => Boolean(user.value?.id && cachedAccountId.value && user.value.id !== cachedAccountId.value && privatePortal(route.path)))
+watch(() => [user.value?.id ?? null, route.path, profile.value?.id, profile.value?.role, profile.value?.onboarding_completed_at] as const, ([userId, path]) => {
+  // Keep Ionic's active outlet alive while sign-in/sign-out is navigating.
+  // Clear its cached private pages only after the sign-out route commits.
+  if (!userId) {
+    if (path === '/login' && cachedAccountId.value) { cachedAccountId.value = null; outletGeneration.value++ }
+    return
+  }
+  if (!cachedAccountId.value) { cachedAccountId.value = userId; return }
+  if (cachedAccountId.value === userId || profile.value?.id !== userId) return
+
+  const destination = accountPathForProfile(profile.value)
+  const reachedDestination = path === destination || (destination === '/student' && path.startsWith('/student/'))
+  if (reachedDestination) {
+    cachedAccountId.value = userId
+    outletGeneration.value++
+  } else if (privatePortal(path)) {
+    // A different account can arrive through another tab without SIGNED_OUT.
+    // Move to its own role before discarding the previous account's cache;
+    // callback/login pages finish their own navigation without interruption.
+    void router.replace(destination).catch(error => console.warn('Account navigation could not be completed.', error))
+  }
+})
 useRealtimeRefresh({ channel: 'account-profile', onChange: async () => { await refreshAuthUser(); await refreshProfile() } })
 const showPortalMenu = computed(
   () => Boolean(profile.value?.onboarding_completed_at)
@@ -96,6 +145,10 @@ onBeforeUnmount(() => {
 <style scoped>
 .portal-layout { display: grid; grid-template-columns: minmax(0, 1fr); height: 100%; width: 100%; min-height: 0; }
 .portal-outlet { position: relative; min-width: 0; min-height: 0; height: 100%; overflow: hidden; }
+.account-switch-status { display: grid; place-items: center; margin: 0; padding: 24px; color: var(--campus-muted); text-align: center; }
+.account-switch-status button { min-height: 44px; padding: 10px 18px; border: 1px solid var(--campus-border); border-radius: 10px; background: var(--campus-surface); color: var(--campus-text); font: inherit; cursor: pointer; }
+.account-switch-status button:disabled { opacity: .6; cursor: wait; }
+.account-switch-error { max-width: 420px; color: var(--campus-danger); }
 @media (min-width: 992px) {
   .portal-layout.has-navigation { grid-template-columns: 256px minmax(0, 1fr); }
   .portal-layout.has-navigation.navigation-collapsed { grid-template-columns: 76px minmax(0, 1fr); }

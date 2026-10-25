@@ -655,7 +655,7 @@ describe('administrator review dialog', () => {
 })
 
 describe('family history', () => {
-  it('shows only present/absent totals in overview and excludes canceled attendance', async () => {
+  it('shows present/absent totals and latest check-in details in overview while excluding canceled attendance from totals', async () => {
     mocks.profile.value = { id: 'parent-1', role: 'parent' }
     mocks.route.query.section = 'overview'
     queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
@@ -667,8 +667,56 @@ describe('family history', () => {
     expect(wrapper.get('.attendance-total.is-present strong').text()).toBe('1')
     expect(wrapper.get('.attendance-total.is-absent strong').text()).toBe('2')
     expect(wrapper.findComponent(ParentCalendarPanel).exists()).toBe(false)
-    expect(wrapper.find('.latest-grid').exists()).toBe(false)
+    expect(wrapper.find('.latest-grid').exists()).toBe(true)
+    expect(wrapper.get('.status-card').text()).toContain('Latest attendance')
+    expect(wrapper.get('.evidence-card').text()).toContain('Check-in details')
     expect(wrapper.find('.history-card').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('restores manual-attendance details without inventing a photo or GPS reading', async () => {
+    mocks.profile.value = { id: 'parent-1', role: 'parent' }
+    mocks.route.query.section = 'overview'
+    queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
+    const manual = { ...record(), student_id: 'student-1', attendance_enabled: true, class_name: '4F1', verification_status: null, selfie_path: null, latitude: null, longitude: null, distance_m: null, location_status: 'teacher_confirmed_on_campus', is_inferred: false }
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'student_attendance_history' ? [manual] : [], error: null }))
+    const wrapper = shallowMount(ParentPage, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    expect(wrapper.get('.status-card').text()).toContain('Present')
+    expect(wrapper.get('.status-card').text()).toContain('4F1')
+    expect(wrapper.get('.status-card').text()).toContain('Teacher-recorded attendance')
+    expect(wrapper.get('.evidence-card').text()).toContain('No photo required')
+    expect(wrapper.get('.evidence-card').text()).toContain('Inside school · marked present by teacher')
+    expect(wrapper.get('.evidence-card').text()).toContain('Submitted')
+    expect(wrapper.find('.latest-photo-button').exists()).toBe(false)
+    expect(wrapper.find('.evidence-card a').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('opens the latest photo and shows online location only after loading the verified-parent location RPC', async () => {
+    mocks.profile.value = { id: 'parent-1', role: 'parent' }
+    mocks.route.query.section = 'overview'
+    queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
+    const online = { ...record(), attendance_id: 'record-1', student_id: 'student-1', attendance_enabled: true, class_name: '4F1', attendance_mode: 'self_online', latitude: null, longitude: null, distance_m: null, is_inferred: false }
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'student_attendance_history' ? [online] : name === 'parent_online_attendance_locations' ? [{ attendance_id: 'record-1', latitude: 13.1, longitude: 121.2 }] : [], error: null }))
+    const wrapper = shallowMount(ParentPage, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    expect(wrapper.get('.evidence-card a').attributes('href')).toBe('https://www.google.com/maps?q=13.1%2C121.2')
+    expect(wrapper.get('attendance-photo-stub').attributes('path')).toBe(online.selfie_path)
+    await wrapper.get('.latest-photo-button').trigger('click')
+    expect(setupState(wrapper).selectedEvidence).toMatchObject({ id: 'record-1', latitude: 13.1, longitude: 121.2 })
+    wrapper.unmount()
+  })
+  it('identifies inferred absence without calling it teacher-recorded or implying a photo was required', async () => {
+    mocks.profile.value = { id: 'parent-1', role: 'parent' }
+    mocks.route.query.section = 'overview'
+    queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
+    const absent = { ...record(), student_id: 'student-1', status: 'absent', attendance_enabled: true, class_name: '4F1', verification_status: null, selfie_path: null, latitude: null, longitude: null, distance_m: null, submitted_at: null, is_inferred: true }
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'student_attendance_history' ? [absent] : [], error: null }))
+    const wrapper = shallowMount(ParentPage, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    expect(wrapper.get('.status-card').text()).toContain('No check-in recorded')
+    expect(wrapper.get('.status-card').text()).not.toContain('Teacher-recorded attendance')
+    expect(wrapper.get('.evidence-card').text()).toContain('No check-in submitted')
+    expect(wrapper.find('.latest-photo-button').exists()).toBe(false)
     wrapper.unmount()
   })
   it('requires an explicit parent confirmation before accepting a pending student link', async () => {

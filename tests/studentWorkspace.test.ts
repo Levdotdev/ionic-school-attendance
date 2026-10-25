@@ -1,5 +1,5 @@
 import { flushPromises, mount, shallowMount } from '@vue/test-utils'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent, h } from 'vue'
 import StudentPage from '@/views/StudentPage.vue'
 import StudentHistoryPanel from '@/components/StudentHistoryPanel.vue'
@@ -59,6 +59,8 @@ beforeEach(() => {
   handler = () => ({ data: [], error: null })
 })
 
+afterEach(() => { vi.useRealTimers() })
+
 describe('combined student calendar', () => {
   it('combines recurring tasks with weekly classes and respects cancelled, deleted and archived classes', () => {
     const events = makeStudentCalendarEvents({
@@ -110,6 +112,9 @@ describe('student course reminder preferences', () => {
     wrapper.unmount()
   })
   it('opens task details from the exact calendar occurrence and refetches on live changes', async () => {
+    // Keep the initial week distinct from the explicit navigation below.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(new Date('2026-10-24T00:00:00Z'))
     prepare()
     mocks.loadTasks.mockResolvedValue({ tasks: [task()], courses: [course], categories: [] })
     const wrapper = shallowMount(StudentSchedulePanel, { props: { studentId: 'student-1', courses: [course] } })

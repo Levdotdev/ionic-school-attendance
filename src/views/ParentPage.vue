@@ -58,7 +58,32 @@
               <p>Totals include counted class meetings. Canceled meetings are excluded.</p>
             </section>
 
-            <template v-if="dashboard.latest && activeSection === 'history'">
+            <template v-if="dashboard.latest && activeSection !== 'schedule'">
+              <div v-if="activeSection === 'overview'" class="latest-grid">
+                <section class="status-card" :class="dashboard.latest.attendance_enabled === false ? 'is-not-counted' : dashboard.latest.verification_status === 'rejected' || dashboard.latest.status === 'absent' ? 'is-absent' : 'is-present'" :aria-labelledby="`latest-status-heading-${dashboard.student.id}`">
+                  <div class="status-icon" aria-hidden="true"><ion-icon :icon="dashboard.latest.status === 'present' && dashboard.latest.verification_status !== 'rejected' ? checkmarkCircleOutline : closeCircleOutline" /></div>
+                  <p class="eyebrow">Latest attendance</p>
+                  <h3 :id="`latest-status-heading-${dashboard.student.id}`">{{ attendanceLabel(dashboard.latest) }}</h3>
+                  <p class="meeting-name">{{ dashboard.latest.class_name }}</p>
+                  <p class="meeting-time"><ion-icon :icon="calendarOutline" aria-hidden="true" />{{ formatDateTime(dashboard.latest.meeting_starts_at) }}</p>
+                  <span class="verification-pill" :class="dashboard.latest.is_inferred ? 'is-missing' : verificationClass(dashboard.latest.verification_status)"><ion-icon :icon="dashboard.latest.is_inferred ? hourglassOutline : verificationIcon(dashboard.latest.verification_status)" aria-hidden="true" />{{ verificationLabel(dashboard.latest.verification_status, dashboard.latest.is_inferred) }}</span>
+                </section>
+                <section class="evidence-card" :aria-labelledby="`evidence-heading-${dashboard.student.id}`">
+                  <div class="section-title"><div><p class="eyebrow">Attendance details</p><h3 :id="`evidence-heading-${dashboard.student.id}`">Check-in details</h3></div><ion-button size="small" fill="outline" @click="openEvidence(dashboard.latest, dashboard.student.full_name)">View details</ion-button></div>
+                  <div class="evidence-body">
+                    <figure class="photo-proof">
+                      <button v-if="dashboard.latest.selfie_path" type="button" class="photo-button latest-photo-button" :aria-label="`View ${dashboard.student.full_name}'s latest attendance photo`" @click="openEvidence(dashboard.latest, dashboard.student.full_name)"><attendance-photo :path="dashboard.latest.selfie_path" :alt="`${dashboard.student.full_name}'s latest attendance check-in`" /></button>
+                      <div v-else class="photo-placeholder"><ion-icon :icon="imageOutline" aria-hidden="true" /><span>{{ dashboard.latest.is_inferred ? 'No check-in submitted' : 'No photo required' }}</span></div>
+                      <figcaption>Check-in photo</figcaption>
+                    </figure>
+                    <div class="evidence-details">
+                      <div class="detail-row"><span class="detail-icon"><ion-icon :icon="timeOutline" aria-hidden="true" /></span><span><small>Submitted</small><strong>{{ formatDateTime(dashboard.latest.submitted_at) }}</strong></span></div>
+                      <div v-if="dashboard.latest.latitude != null && dashboard.latest.longitude != null" class="detail-row"><span class="detail-icon"><ion-icon :icon="locationOutline" aria-hidden="true" /></span><span><small>Submitted location</small><strong>{{ dashboard.latest.distance_m != null ? `${Math.round(dashboard.latest.distance_m)} m from class location` : 'Location captured' }}</strong><a :href="mapUrl(dashboard.latest.latitude, dashboard.latest.longitude)" target="_blank" rel="noopener">View on Google Maps <ion-icon :icon="openOutline" aria-hidden="true" /></a></span></div>
+                      <div v-else class="detail-row"><span class="detail-icon"><ion-icon :icon="locationOutline" aria-hidden="true" /></span><span><small>Location</small><strong>{{ locationLabel(dashboard.latest) }}</strong></span></div>
+                    </div>
+                  </div>
+                </section>
+              </div>
               <section v-if="activeSection === 'history'" class="history-card" :aria-labelledby="`history-${dashboard.student.id}`">
                 <div class="section-title history-title">
                   <div>
@@ -103,7 +128,7 @@
               </section>
             </template>
 
-            <section v-else-if="activeSection === 'history'" class="student-empty">
+            <section v-else-if="activeSection !== 'schedule'" class="student-empty">
               <div class="empty-icon" aria-hidden="true"><ion-icon :icon="calendarOutline" /></div>
               <div>
                 <h3>No attendance records yet</h3>
@@ -692,7 +717,10 @@ onBeforeUnmount(() => { dashboardRequest++; clearTimeout(successTimeout) })
   display: grid;
   grid-template-columns: minmax(260px, 0.75fr) minmax(410px, 1.25fr);
   gap: 16px;
+  margin-top: 16px;
 }
+.latest-photo-button { display: block; width: 100%; height: 160px; overflow: hidden; border-radius: 12px; }
+.verification-pill.is-missing { color: var(--campus-muted-local); background: var(--campus-surface-soft-local); }
 
 .status-card,
 .evidence-card,

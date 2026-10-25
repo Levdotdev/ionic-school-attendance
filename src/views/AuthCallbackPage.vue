@@ -36,7 +36,7 @@ import { clearIdentityLinkAttempt, clearOAuthAttempt, completeIdentityLink, comp
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const router = useRouter()
-const { initializeSession, refreshProfile, refreshAuthUser, passwordRecovery, finishPasswordRecovery, signOut } = useSession()
+const { completeAuthentication, refreshProfile, refreshAuthUser, passwordRecovery, finishPasswordRecovery, signOut } = useSession()
 const processing = ref(true)
 const errorMessage = ref('')
 const emailConfirmationPending = ref(false)
@@ -71,7 +71,7 @@ onMounted(async () => {
       processing.value = false
       return
     }
-    await initializeSession()
+    await completeAuthentication(result, { loadProfile: false })
     clearOAuthAttempt()
     if (isEmailAction && emailActionType !== 'recovery') finishPasswordRecovery?.()
     if (passwordRecovery.value && (!isEmailAction || emailActionType === 'recovery')) {

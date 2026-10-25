@@ -1,8 +1,7 @@
 import { createRouter, createWebHistory } from '@ionic/vue-router'
 import type { RouteLocationRaw } from 'vue-router'
 import type { AppRole } from '@/types/database'
-import { supabase } from '@/lib/supabase'
-import { readAccountProfile, useSession } from '@/composables/useSession'
+import { useSession } from '@/composables/useSession'
 
 const routes = [
   {
@@ -91,22 +90,19 @@ router.beforeEach(async (to) => {
   // Let the callback finish exchanging its grant before checking the profile.
   if (to.path === '/auth/callback' || to.path === '/privacy-policy' || to.path === '/data-deletion') return true
 
-  const {
-    data: { session },
-  } = await supabase.auth.getSession()
+  const { initializeSession, refreshProfile, session, passwordRecovery } = useSession()
+  await initializeSession()
 
-  if (!session) {
+  if (!session.value) {
     return to.meta.public ? true : '/login'
   }
 
   if (to.path === '/account/recover') return true
-  const { initializeSession, passwordRecovery } = useSession()
-  await initializeSession()
   if (passwordRecovery.value) return '/account/recover'
 
-  const { data: profile, error } = await readAccountProfile(session.user.id)
+  const profile = await refreshProfile().catch(() => null)
 
-  if (error || !profile) {
+  if (!profile) {
     // Keep a recoverable sign-in screen rather than redirecting to an arbitrary
     // student portal when account loading fails.
     return to.path === '/login' || to.path === '/account/setup' ? true : '/account/setup'

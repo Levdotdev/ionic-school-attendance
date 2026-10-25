@@ -41,6 +41,9 @@ let profileRequest = 0
 let authRefreshTimer: ReturnType<typeof setTimeout> | undefined
 let signingOut = false
 let signOutPromise: Promise<void> | null = null
+interface AccountLoad<T> { userId: string; epoch: number; pending: boolean; promise: Promise<T | null> }
+let profileLoad: AccountLoad<AppProfile> | null = null
+let authLoad: AccountLoad<User> | null = null
 
 async function finishNotificationCleanup(): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined
@@ -58,6 +61,7 @@ function clearAccountState() {
   session.value = null; user.value = null; profile.value = null
   errorMessage.value = ''
   initializePromise = null
+  profileLoad = null; authLoad = null
   setPasswordRecovery(false)
 }
 
@@ -114,18 +118,25 @@ export async function readAccountProfile(userId: string) {
   }
 }
 
-export async function refreshProfile(): Promise<AppProfile | null> {
+export function refreshProfile(options: { force?: boolean } = {}): Promise<AppProfile | null> {
   const currentUser = user.value
-  const request = ++profileRequest
   const epoch = authEpoch
-
   if (!currentUser) {
     profile.value = null
-    return null
+    return Promise.resolve(null)
   }
+  if (!options.force && profileLoad?.pending && profileLoad.userId === currentUser.id && profileLoad.epoch === epoch) return profileLoad.promise
+  const request = ++profileRequest
+  const load: AccountLoad<AppProfile> = { userId: currentUser.id, epoch, pending: true, promise: Promise.resolve(null) }
+  load.promise = (async () => {
+  try {
 
   const { data, error } = await readAccountProfile(currentUser.id)
-  if (request !== profileRequest || epoch !== authEpoch || user.value?.id !== currentUser.id) return null
+  if (epoch !== authEpoch || user.value?.id !== currentUser.id || signingOut) return null
+  // A newer explicit reload (for example after saving setup) supersedes this
+  // response. Its callers must receive the newer result, not a false "missing
+  // profile" while that newer request is still loading.
+  if (request !== profileRequest) return profileLoad?.promise ?? null
 
   if (error) {
     errorMessage.value = error.message
@@ -158,15 +169,24 @@ export async function refreshProfile(): Promise<AppProfile | null> {
   }
   errorMessage.value = ''
   return profile.value
+  } finally { load.pending = false }
+  })()
+  profileLoad = load
+  return load.promise
 }
 
-export async function refreshAuthUser(): Promise<User | null> {
+export function refreshAuthUser(options: { force?: boolean } = {}): Promise<User | null> {
   const previousId = user.value?.id
-  if (!previousId || signingOut) return null
+  if (!previousId || signingOut) return Promise.resolve(null)
+  if (!options.force && authLoad?.pending && authLoad.userId === previousId && authLoad.epoch === authEpoch) return authLoad.promise
   const request = ++authRequest
   const epoch = authEpoch
+  const load: AccountLoad<User> = { userId: previousId, epoch, pending: true, promise: Promise.resolve(null) }
+  load.promise = (async () => {
+  try {
   const { data, error } = await supabase.auth.getUser()
-  if (request !== authRequest || epoch !== authEpoch || user.value?.id !== previousId || signingOut) return null
+  if (epoch !== authEpoch || user.value?.id !== previousId || signingOut) return null
+  if (request !== authRequest) return authLoad?.promise ?? null
   if (error) throw error
   if (!data.user) { clearAccountState(); return null }
   if (data.user.id !== previousId) return null
@@ -174,6 +194,34 @@ export async function refreshAuthUser(): Promise<User | null> {
   if (session.value?.user.id === previousId) session.value = { ...session.value, user: data.user }
   if (profile.value?.id === previousId) profile.value = { ...profile.value, email: data.user.email ?? profile.value.email }
   return data.user
+  } finally { load.pending = false }
+  })()
+  authLoad = load
+  return load.promise
+}
+
+function acceptSession(nextSession: Session) {
+  if (user.value?.id !== nextSession.user.id) {
+    authEpoch++; authRequest++; profileRequest++
+    profileLoad = null; authLoad = null
+    profile.value = null
+    user.value = nextSession.user
+    restorePasswordRecovery(nextSession.user.id)
+  }
+  // Cached token events must not replace verified identities or email.
+  session.value = { ...nextSession, user: user.value ?? nextSession.user }
+}
+
+/** Finish the exact SDK sign-in result before routing, independent of events. */
+export async function completeAuthentication(nextSession: Session, options: { loadProfile?: boolean } = {}): Promise<AppProfile | null> {
+  if (signingOut) throw new Error('Sign out is still finishing. Please try signing in again.')
+  clearTimeout(authRefreshTimer)
+  acceptSession(nextSession)
+  const epoch = authEpoch
+  await refreshAuthUser({ force: true })
+  if (epoch !== authEpoch || user.value?.id !== nextSession.user.id || signingOut) return null
+  if (options.loadProfile === false) return null
+  return refreshProfile({ force: true })
 }
 
 function scheduleAuthoritativeRefresh() {
@@ -196,14 +244,7 @@ function installAuthListener() {
       return
     }
 
-    if (user.value?.id !== nextSession.user.id) {
-      authEpoch++; authRequest++; profileRequest++
-      profile.value = null
-      user.value = nextSession.user
-    }
-    // Token refresh and cross-tab events can contain an older user snapshot.
-    // Keep verified identities/email until a new server getUser response arrives.
-    session.value = { ...nextSession, user: user.value ?? nextSession.user }
+    acceptSession(nextSession)
 
     // Defer the database request until the auth callback has returned. This
     // avoids making another Supabase request from inside the auth lock.
@@ -218,7 +259,7 @@ installAuthListener()
 export function initializeSession(): Promise<void> {
   if (initializePromise) return initializePromise
 
-  initializePromise = (async () => {
+  const task = (async () => {
     loading.value = true
     errorMessage.value = ''
 
@@ -233,9 +274,8 @@ export function initializeSession(): Promise<void> {
         if (!signingOut && user.value) { await refreshAuthUser(); await refreshProfile() }
         return
       }
-      session.value = data.session
-      // A cached session supplies tokens, not an authoritative identities list.
-      if (user.value?.id !== data.session?.user.id) user.value = data.session?.user ?? null
+      if (data.session) acceptSession(data.session)
+      else if (user.value) clearAccountState()
       if (user.value) restorePasswordRecovery(user.value.id)
 
       if (user.value) {
@@ -251,8 +291,11 @@ export function initializeSession(): Promise<void> {
       initialized.value = true
     }
   })()
-
-  return initializePromise
+  // Initialization is shared while pending, never cached after an anonymous
+  // visit. A later sign-in must be able to restore its own current account.
+  const pending = task.finally(() => { if (initializePromise === pending) initializePromise = null })
+  initializePromise = pending
+  return pending
 }
 
 export function signOut(): Promise<void> {
@@ -312,6 +355,7 @@ export function useSession() {
     initializeSession,
     refreshProfile,
     refreshAuthUser,
+    completeAuthentication,
     signOut,
   }
 }

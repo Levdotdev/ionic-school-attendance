@@ -7,7 +7,7 @@
         <ion-button fill="outline" size="small" @click="dialog = 'links'">Manage accounts</ion-button>
       </section>
       <section class="security-setting">
-        <div><h3>Email address</h3><p>{{ user?.email }}</p><p v-if="pendingEmail.status === 'pending'" class="pending-email">Pending: {{ pendingEmail.address }}. Check both inboxes. Confirmation links expire 30 minutes after the request.</p><template v-else-if="pendingEmail.status === 'expired'"><p class="pending-email">Previous requested address: {{ pendingEmail.address }}</p><p class="expired-email">Previous email-change link expired. Request a new link. Your current email has not changed.</p></template><p v-else-if="pendingEmail.status === 'unknown'" class="pending-email">Previous requested address: {{ pendingEmail.address }}. Its request time could not be verified. Request a new confirmation link.</p></div>
+        <div><h3>Email address</h3><p>{{ user?.email }}</p><p v-if="pendingEmail.status === 'pending'" class="pending-email">Pending: {{ pendingEmail.address }}. Check your new inbox. The confirmation link expires 30 minutes after the request.</p><template v-else-if="pendingEmail.status === 'expired'"><p class="pending-email">Previous requested address: {{ pendingEmail.address }}</p><p class="expired-email">Previous email-change link expired. Request a new link. Your current email has not changed.</p></template><p v-else-if="pendingEmail.status === 'unknown'" class="pending-email">Previous requested address: {{ pendingEmail.address }}. Its request time could not be verified. Request a new confirmation link.</p></div>
         <ion-button fill="outline" size="small" @click="dialog = 'email'">Change email</ion-button>
       </section>
       <section class="security-setting">
@@ -99,7 +99,7 @@ async function removeIdentity() {
   busyProvider.value = provider; message.value = ''; failed.value = false
   try {
     await unlinkAccountIdentity(provider, user.value.id)
-    await refreshAuthUser()
+    await refreshAuthUser({ force: true })
     confirmProvider.value = null
     message.value = `${providerName(provider)} was removed from your sign-in methods.`
     feedbackTimer = setTimeout(() => { if (!failed.value) message.value = '' }, 6000)

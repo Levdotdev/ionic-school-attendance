@@ -123,7 +123,7 @@ async function savePicture() {
   pictureBusy.value = true; message.value = ''
   try {
     await uploadAvatar(profile.value.id, selectedPicture.value, pictureZoom.value, profile.value.avatar_path)
-    await refreshProfile(); clearPicture(); failed.value = false; message.value = 'Your profile picture has been updated.'
+    await refreshProfile({ force: true }); clearPicture(); failed.value = false; message.value = 'Your profile picture has been updated.'
   } catch (error) { failed.value = true; message.value = toUserFacingErrorMessage(error) }
   finally { pictureBusy.value = false }
 }
@@ -131,7 +131,7 @@ async function deletePicture() {
   if (!profile.value?.avatar_path || pictureBusy.value) return
   pictureBusy.value = true; message.value = ''
   try {
-    await removeAvatar(profile.value.id, profile.value.avatar_path); await refreshProfile(); failed.value = false; message.value = 'Your uploaded profile picture has been removed.'
+    await removeAvatar(profile.value.id, profile.value.avatar_path); await refreshProfile({ force: true }); failed.value = false; message.value = 'Your uploaded profile picture has been removed.'
   } catch (error) { failed.value = true; message.value = toUserFacingErrorMessage(error) }
   finally { pictureBusy.value = false }
 }
@@ -146,7 +146,7 @@ async function saveName() {
     const { data, error } = await supabase.from('profiles').update({ first_name: first, last_name: last }).eq('id', profile.value.id).select('id').single()
     if (error) throw error
     if (!data) throw new Error('Your profile could not be updated. Please sign in again.')
-    await refreshProfile()
+    await refreshProfile({ force: true })
     failed.value = false
     message.value = 'Your name has been updated.'
   } catch (error) {

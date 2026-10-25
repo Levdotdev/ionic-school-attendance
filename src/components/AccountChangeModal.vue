@@ -2,8 +2,8 @@
   <app-modal :open="open" :title="kind === 'email' ? 'Change email address' : 'Change password'" :busy="busy" @close="$emit('close')">
     <form class="account-form" @submit.prevent="save">
       <template v-if="kind === 'email'">
-        <p>Your current email is <strong>{{ user?.email }}</strong>. Confirmation requires both your current and new addresses. New links expire 30 minutes after the request; your email stays unchanged until confirmation is complete.</p>
-        <p v-if="pendingEmail.status === 'pending'" class="request-state">Pending address: {{ pendingEmail.address }}. Check both inboxes before this request’s 30-minute expiry.</p>
+        <p>Your current email is <strong>{{ user?.email }}</strong>. Confirm the change using the link sent to your new email address. The link expires 30 minutes after the request; your current email stays active until you confirm.</p>
+        <p v-if="pendingEmail.status === 'pending'" class="request-state">Pending address: {{ pendingEmail.address }}. Check your new inbox before this request’s 30-minute expiry.</p>
         <p v-else-if="pendingEmail.status === 'expired'" class="request-state expired">Previous email-change link expired. Request a new link.<br>Previous requested address: {{ pendingEmail.address }}. Your current email has not changed.</p>
         <p v-else-if="pendingEmail.status === 'unknown'" class="request-state">Previous requested address: {{ pendingEmail.address }}. Its request time could not be verified. Enter the address below to request a fresh confirmation.</p>
         <ion-input v-model="email" type="email" label="New email address" label-placement="stacked" fill="outline" autocomplete="email" :disabled="busy || saved" required />
@@ -72,15 +72,15 @@ async function save() {
   try {
     if (props.kind === 'email') {
       await changeAccountEmail(email.value)
-      message.value = 'Email change requested. Check both your current and new inboxes for confirmation links within 30 minutes. Your current address remains active until the change is confirmed.'
+      message.value = 'Email change requested. Check your new inbox for the confirmation link within 30 minutes. Your current address remains active until the change is confirmed.'
     } else {
       await changeAccountPassword(password.value, nonce.value)
       message.value = 'Your password has been updated.'
       password.value = ''; confirmation.value = ''; nonce.value = ''
     }
     saved.value = true
-    await refreshAuthUser().catch(() => undefined)
-    await refreshProfile().catch(() => undefined)
+    await refreshAuthUser({ force: true }).catch(() => undefined)
+    await refreshProfile({ force: true }).catch(() => undefined)
   } catch (error) {
     failed.value = true; message.value = authActionError(error)
     if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'reauthentication_needed') needsVerification.value = true

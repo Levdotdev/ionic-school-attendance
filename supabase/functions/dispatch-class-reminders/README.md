@@ -4,6 +4,23 @@ This server-only Edge Function claims due class reminders from Postgres and
 sends Android push notifications through the Firebase Cloud Messaging HTTP v1
 API. Database uniqueness constraints and worker leases prevent duplicate work.
 
+The same authenticated invocation also clears deleted attendance photos through
+the Supabase Storage API, including when no reminders are due or Firebase has
+not been configured. Apply
+`20261025113454_delete_schedule_generated_meetings_and_cleanup_photos.sql` before
+deploying this worker update. The existing one-minute Cron is reused; no new
+secret or schedule is required.
+
+Each call claims at most 100 private deletion requests with a five-minute lease.
+The database excludes unsafe paths and photos still referenced by attendance;
+the worker validates the returned paths again and removes objects only from
+`attendance-selfies`. It acknowledges successful Storage removal afterward.
+Failures release the lease with database-managed retry backoff; if release is
+unavailable, the lease expires for a later invocation. Cleanup failures do not
+stop reminders. Responses include aggregate `photo_cleanup` counts, and neither
+responses nor cleanup logs include photo paths. Keep the minute-by-minute Cron
+active even when push delivery is not enabled so queued photo removal can run.
+
 ## Required setup
 
 1. In Firebase, create/register the Android app with package ID
