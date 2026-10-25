@@ -35,14 +35,25 @@ describe('shared class calendar', () => {
     wrapper.unmount()
   })
 
-  it('uses Manila dates at the UTC boundary and exposes an agenda with each weekday', async () => {
-    const wrapper = mount(ScheduleCalendar, { props: { events: [{ ...classes[0], start: '2026-10-18T16:30:00Z', end: '2026-10-18T17:30:00Z' }], selectedDate: '2026-10-19', initialView: 'agenda' } })
-    const monday = wrapper.findAll('.agenda-day')[0]
+  it('uses Manila dates at the UTC boundary and offers only week and month views', async () => {
+    const wrapper = mount(ScheduleCalendar, { props: { events: [{ ...classes[0], start: '2026-10-18T16:30:00Z', end: '2026-10-18T17:30:00Z' }], selectedDate: '2026-10-19' } })
+    const monday = wrapper.findAll('.calendar-day')[0]
     expect(monday.text()).toContain('Mon')
     expect(monday.text()).toContain('Mathematics')
-    expect(wrapper.findAll('.agenda-day')).toHaveLength(7)
-    await wrapper.get('.agenda-event').trigger('click')
+    expect(wrapper.findAll('.calendar-day')).toHaveLength(7)
+    expect(wrapper.findAll('.calendar-views button').map(button => button.text())).toEqual(['Week', 'Month'])
+    await wrapper.get('.calendar-event').trigger('click')
     expect(wrapper.emitted('select')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('opens the corresponding week from an overflowing month day without hiding events', async () => {
+    const events = Array.from({ length: 6 }, (_, index) => ({ ...classes[0], id: `event-${index}` }))
+    const wrapper = mount(ScheduleCalendar, { props: { events, selectedDate: '2026-10-19', initialView: 'month' } })
+    expect(wrapper.findAll('.calendar-event')).toHaveLength(3)
+    await wrapper.get('.more-events').trigger('click')
+    expect(wrapper.findAll('.calendar-event')).toHaveLength(6)
+    expect(wrapper.emitted('viewChange')?.at(-1)).toEqual(['week'])
     wrapper.unmount()
   })
 })

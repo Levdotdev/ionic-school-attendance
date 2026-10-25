@@ -13,7 +13,7 @@
           <div>
             <p class="eyebrow">Parent and guardian portal</p>
             <h1>{{ activeSection === 'history' ? 'Attendance history' : activeSection === 'schedule' ? 'Your child’s calendar' : 'Your child’s attendance' }}</h1>
-            <p>{{ activeSection === 'history' ? 'Every past class, including present, absent, and meetings that were not counted.' : activeSection === 'schedule' ? 'The same class calendar your child sees, with week, month, and agenda views.' : 'Approve student links, follow attendance, and view check-in photos and locations.' }}</p>
+            <p>{{ activeSection === 'history' ? 'Every past class, including present, absent, and meetings that were not counted.' : activeSection === 'schedule' ? 'The same class calendar your child sees, with week and month views.' : 'A simple summary of your child’s present and absent attendance.' }}</p>
           </div>
         </header>
 
@@ -51,96 +51,14 @@
               <span class="linked-badge"><ion-icon :icon="linkOutline" /> Family access</span>
             </header>
 
-            <parent-calendar-panel v-if="activeSection === 'overview' || activeSection === 'schedule'" :student-id="dashboard.student.id" :student-name="dashboard.student.full_name" :courses="dashboard.courses" />
+            <parent-calendar-panel v-if="activeSection === 'schedule'" :student-id="dashboard.student.id" :student-name="dashboard.student.full_name" :courses="dashboard.courses" />
+            <section v-if="activeSection === 'overview'" class="attendance-totals" :aria-label="`${dashboard.student.full_name}'s attendance totals`">
+              <article class="attendance-total is-present"><ion-icon :icon="checkmarkCircleOutline" aria-hidden="true" /><div><span>Present</span><strong>{{ dashboard.present }}</strong></div></article>
+              <article class="attendance-total is-absent"><ion-icon :icon="closeCircleOutline" aria-hidden="true" /><div><span>Absent</span><strong>{{ dashboard.absent }}</strong></div></article>
+              <p>Totals include counted class meetings. Canceled meetings are excluded.</p>
+            </section>
 
-            <template v-if="dashboard.latest && activeSection !== 'schedule'">
-              <div v-if="activeSection === 'overview'" class="latest-grid">
-                <section
-                  class="status-card"
-                  :class="dashboard.latest.attendance_enabled === false ? 'is-not-counted' : dashboard.latest.status === 'present' ? 'is-present' : 'is-absent'"
-                  :aria-labelledby="`latest-status-heading-${dashboard.student.id}`"
-                >
-                  <div class="status-icon" aria-hidden="true">
-                    <ion-icon :icon="dashboard.latest.status === 'present' ? checkmarkCircleOutline : closeCircleOutline" />
-                  </div>
-                  <p class="eyebrow">Latest attendance</p>
-                  <h3 :id="`latest-status-heading-${dashboard.student.id}`">
-                    {{ attendanceLabel(dashboard.latest) }}
-                  </h3>
-                  <p class="meeting-name">{{ dashboard.latest.class_name }}</p>
-                  <p class="meeting-time">
-                    <ion-icon :icon="calendarOutline" aria-hidden="true" />
-                    {{ formatDateTime(dashboard.latest.meeting_starts_at) }}
-                  </p>
-                  <span class="verification-pill" :class="verificationClass(dashboard.latest.verification_status)">
-                    <ion-icon :icon="verificationIcon(dashboard.latest.verification_status)" aria-hidden="true" />
-                    {{ verificationLabel(dashboard.latest.verification_status) }}
-                  </span>
-                </section>
-
-                <section
-                  class="evidence-card"
-                  :aria-labelledby="`evidence-heading-${dashboard.student.id}`"
-                >
-                  <div class="section-title">
-                    <div>
-                      <p class="eyebrow">Attendance details</p>
-                      <h3 :id="`evidence-heading-${dashboard.student.id}`">Check-in details</h3>
-                    </div>
-                    <ion-button size="small" fill="outline" @click="openEvidence(dashboard.latest, dashboard.student.full_name)">View details</ion-button>
-                  </div>
-
-                  <div class="evidence-body">
-                    <figure class="photo-proof">
-                      <attendance-photo v-if="dashboard.latest.selfie_path" :path="dashboard.latest.selfie_path" :alt="`${dashboard.student.full_name}'s latest attendance check-in`" class="latest-photo" />
-                      <div
-                        v-else
-                        class="photo-placeholder"
-                      >
-                        <ion-icon
-                          :icon="imageOutline"
-                          aria-hidden="true"
-                        />
-                        <span>
-                          No photo required
-                        </span>
-                      </div>
-                      <figcaption>Check-in photo</figcaption>
-                    </figure>
-
-                    <div class="evidence-details">
-                      <div class="detail-row">
-                        <span class="detail-icon"><ion-icon :icon="timeOutline" /></span>
-                        <span><small>Submitted</small><strong>{{ formatDateTime(dashboard.latest.submitted_at) }}</strong></span>
-                      </div>
-
-                      <div v-if="dashboard.latest.latitude != null && dashboard.latest.longitude != null" class="detail-row">
-                        <span class="detail-icon"><ion-icon :icon="locationOutline" /></span>
-                        <span>
-                          <small>Submitted location</small>
-                          <strong v-if="dashboard.latest.distance_m != null">
-                            {{ Math.round(dashboard.latest.distance_m) }} m from class location
-                          </strong>
-                          <strong v-else>Location captured</strong>
-                          <a
-                            :href="mapUrl(dashboard.latest.latitude, dashboard.latest.longitude)"
-                            target="_blank"
-                            rel="noopener"
-                          >
-                            View on Google Maps <ion-icon :icon="openOutline" aria-hidden="true" />
-                          </a>
-                        </span>
-                      </div>
-
-                      <div v-else class="detail-row">
-                        <span class="detail-icon"><ion-icon :icon="locationOutline" /></span>
-                        <span><small>Location</small><strong>{{ locationLabel(dashboard.latest) }}</strong></span>
-                      </div>
-                    </div>
-                  </div>
-                </section>
-              </div>
-
+            <template v-if="dashboard.latest && activeSection === 'history'">
               <section v-if="activeSection === 'history'" class="history-card" :aria-labelledby="`history-${dashboard.student.id}`">
                 <div class="section-title history-title">
                   <div>
@@ -185,7 +103,7 @@
               </section>
             </template>
 
-            <section v-else-if="activeSection !== 'schedule'" class="student-empty">
+            <section v-else-if="activeSection === 'history'" class="student-empty">
               <div class="empty-icon" aria-hidden="true"><ion-icon :icon="calendarOutline" /></div>
               <div>
                 <h3>No attendance records yet</h3>
@@ -290,7 +208,9 @@ const activeSection = computed(() => route.query.section === 'history' ? 'histor
 
 const studentDashboards = computed(() => students.value.map((student) => {
   const records = attendance.value.filter((record) => record.student_id === student.id)
-  return { student, records, latest: records[0] ?? null, courses: studentCourses.value[student.id] || [] }
+  const counted = records.filter(record => record.attendance_enabled !== false)
+  const present = counted.filter(record => record.status === 'present' && record.verification_status !== 'rejected').length
+  return { student, records, latest: records[0] ?? null, courses: studentCourses.value[student.id] || [], present, absent: counted.length - present }
 }))
 
 let dashboardRequest = 0
@@ -474,6 +394,15 @@ onBeforeUnmount(() => { dashboardRequest++; clearTimeout(successTimeout) })
 </script>
 
 <style scoped>
+.attendance-totals { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:16px; }
+.attendance-total { display:flex; align-items:center; gap:18px; padding:26px; border:1px solid var(--campus-border); border-radius:16px; background:var(--campus-surface-soft); }
+.attendance-total > ion-icon { font-size:30px; color:var(--campus-success); }
+.attendance-total.is-absent > ion-icon { color:var(--campus-danger); }
+.attendance-total div { display:grid; gap:7px; }
+.attendance-total span { color:var(--campus-muted); font-size:13px; }
+.attendance-total strong { color:var(--campus-text); font-size:34px; line-height:1; }
+.attendance-totals > p { grid-column:1/-1; margin:0; color:var(--campus-muted); font-size:12px; }
+@media(max-width:520px) { .attendance-totals { gap:10px; }.attendance-total { padding:18px 12px; gap:10px; }.attendance-total > ion-icon { font-size:24px; }.attendance-total strong { font-size:30px; } }
 .link-requests { margin-bottom:24px; padding:22px; border:1px solid var(--campus-border); border-radius:16px; background:var(--campus-surface); }.link-requests h2 { margin:0; color:var(--campus-text); font-size:20px; }.link-requests header>p:last-child,.consent-description { color:var(--campus-muted); font-size:13px; line-height:1.6; }.link-requests article { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:16px; padding:18px 0; border-top:1px solid var(--campus-border); }.link-requests article:last-child { padding-bottom:0; }.link-requests article>div:first-child { display:grid; gap:5px; min-width:0; }.link-requests strong { color:var(--campus-text); font-size:14px; }.link-requests span,.link-requests small { color:var(--campus-muted); font-size:12px; overflow-wrap:anywhere; }.consent-actions { display:flex; flex-wrap:wrap; gap:6px; }.confirm-student { display:flex; align-items:start; gap:12px; padding:14px; border:1px solid var(--campus-border); border-radius:10px; color:var(--campus-text); font-size:13px; line-height:1.6; }.confirm-student input { flex:0 0 auto; width:20px; height:20px; accent-color:var(--campus-accent); }.consent-error { color:var(--campus-danger); font-size:13px; }.consent-success { padding:14px; margin:0 0 18px; border-radius:10px; color:var(--campus-success); background:var(--campus-success-soft); font-size:13px; }.photo-button { padding:0; border:0; cursor:pointer; }.photo-button:focus-visible { outline:3px solid var(--campus-accent); outline-offset:3px; }.latest-photo { height:160px; border-radius:12px; }
 .weekly-schedule-card { border: 1px solid var(--campus-border); border-radius: 16px; background: var(--campus-surface); padding: 22px; margin: 0 0 22px; }
 .weekly-schedule-list { display: grid; margin-top: 16px; }

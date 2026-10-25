@@ -7,7 +7,7 @@
         <ion-button fill="outline" size="small" @click="dialog = 'links'">Manage accounts</ion-button>
       </section>
       <section class="security-setting">
-        <div><h3>Email address</h3><p>{{ user?.email }}</p><p v-if="user?.new_email" class="pending-email">Pending: {{ user.new_email }}. Check both inboxes.</p></div>
+        <div><h3>Email address</h3><p>{{ user?.email }}</p><p v-if="pendingEmail.status === 'pending'" class="pending-email">Pending: {{ pendingEmail.address }}. Check both inboxes. Confirmation links expire 30 minutes after the request.</p><template v-else-if="pendingEmail.status === 'expired'"><p class="pending-email">Previous requested address: {{ pendingEmail.address }}</p><p class="expired-email">Previous email-change link expired. Request a new link. Your current email has not changed.</p></template><p v-else-if="pendingEmail.status === 'unknown'" class="pending-email">Previous requested address: {{ pendingEmail.address }}. Its request time could not be verified. Request a new confirmation link.</p></div>
         <ion-button fill="outline" size="small" @click="dialog = 'email'">Change email</ion-button>
       </section>
       <section class="security-setting">
@@ -48,12 +48,14 @@ import type { UserIdentity } from '@supabase/supabase-js'
 import AppModal from '@/components/AppModal.vue'
 import AccountChangeModal from '@/components/AccountChangeModal.vue'
 import { useSession } from '@/composables/useSession'
+import { usePendingEmailChange } from '@/composables/usePendingEmailChange'
 import { authActionError, linkedAuthMethods, unlinkAccountIdentity } from '@/services/account'
 import { beginIdentityLink, type SocialProvider } from '@/services/oauth'
 
 const props = defineProps<{ open: boolean; linkedProvider?: string }>()
 defineEmits<{ close: [] }>()
 const { user, profile, refreshAuthUser } = useSession()
+const pendingEmail = usePendingEmailChange(() => user.value, () => props.open)
 const dialog = ref<'links' | 'email' | 'password' | null>(null)
 const identities = computed(() => user.value?.identities ?? [])
 const methods = computed(() => linkedAuthMethods(user.value))
@@ -123,6 +125,7 @@ ion-button { margin: 0; flex-shrink: 0; text-transform: none; min-height: 38px; 
 .security-feedback { padding: 12px; border-radius: 9px; color: var(--campus-green); background: var(--campus-green-soft); }
 .security-feedback.error { color: var(--campus-danger); background: var(--campus-danger-soft); }
 .pending-email { margin-top: 5px; color: var(--campus-muted); }
+.expired-email { margin-top: 6px; color: var(--campus-warning); }
 .removal-copy { max-width: 55ch; }
 @media (max-width: 480px) { .security-setting { align-items: start; flex-direction: column; gap: 10px; } .provider-row { gap: 9px; } .provider-row > ion-icon { width: 20px; height: 20px; } }
 </style>

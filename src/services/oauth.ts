@@ -140,41 +140,67 @@ export async function initializeNativeOAuthCallback(): Promise<void> {
  * explicit exchange is a safe fallback for environments where initialization
  * has not processed the callback yet.
  */
-export async function completeSocialSignIn(): Promise<Session> {
+export type SocialSignInResult = Session | { emailChangeConfirmationPending: true }
+export async function completeSocialSignIn(): Promise<SocialSignInResult> {
   const callbackUrl = new URL(window.location.href)
+  if (callbackUrl.searchParams.has('token_hash')) clearIdentityLinkAttempt()
   const hash = new URLSearchParams(callbackUrl.hash.slice(1))
   const providerError = callbackUrl.searchParams.get('error_description')
     ?? callbackUrl.searchParams.get('error')
+    ?? callbackUrl.searchParams.get('error_code')
     ?? hash.get('error_description')
     ?? hash.get('error')
+    ?? hash.get('error_code')
 
   if (providerError) {
+    if (providerError === 'otp_expired' || providerError === 'flow_state_expired') throw new Error('This email link is invalid or has expired. Request a new link from the app.')
     throw new Error(providerError.replaceAll('+', ' '))
   }
 
   const tokenHash = callbackUrl.searchParams.get('token_hash')
-  if (tokenHash) {
+  if (callbackUrl.searchParams.has('token_hash')) {
     // Verify single-use hashes even if this browser already has a session.
     // Admin invites cannot use PKCE; a token hash avoids an incompatible
     // implicit-grant redirect and works across browsers without a verifier.
+    clearIdentityLinkAttempt()
     const type = callbackUrl.searchParams.get('type')
-    if (type !== 'recovery' && type !== 'invite') throw new Error('This email action is not supported. Request a new link from the app.')
-    const result = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
-    if (result.error) throw result.error
-    if (!result.data.session) throw new Error(type === 'recovery' ? 'This recovery link has expired. Request a new password-reset email.' : 'This parent invitation could not be completed. Ask the sender for a new invitation.')
-    return result.data.session
+    try {
+      if (!tokenHash?.trim() || (type !== 'email' && type !== 'email_change' && type !== 'recovery' && type !== 'invite')) throw new Error('This email action is not supported. Request a new link from the app.')
+      const result = await supabase.auth.verifyOtp({ token_hash: tokenHash, type })
+      if (result.error) throw result.error
+      // Secure email changes accept the first mailbox confirmation without
+      // issuing a session. That is not a completed address change.
+      if (type === 'email_change' && !result.data.session && !result.data.user) return { emailChangeConfirmationPending: true }
+      if (!result.data.session) throw new Error('This email link could not be completed. Request a new link from the app.')
+      return result.data.session
+    } finally {
+      // Tokens are single-use credentials; remove them from visible/history
+      // URLs even when the first email confirmation keeps this page open.
+      const clean = new URL(window.location.href)
+      clean.searchParams.delete('token_hash'); clean.searchParams.delete('type')
+      window.history.replaceState(window.history.state, '', clean.toString())
+    }
+  }
+
+  if (callbackUrl.searchParams.has('type') && !callbackUrl.searchParams.has('code')) throw new Error('This email link is incomplete. Request a new link from the app.')
+  if (callbackUrl.searchParams.has('code') && !callbackUrl.searchParams.get('code')?.trim()) throw new Error('This sign-in link is incomplete. Request a new link from the app.')
+
+  // Initialization reports failed automatic PKCE exchanges even when Auth
+  // intentionally keeps an unrelated cached session. Never mistake that
+  // retained session for a successful expired email action.
+  const initialization = await supabase.auth.initialize()
+  if (initialization.error) throw initialization.error
+  const code = new URL(window.location.href).searchParams.get('code')
+  if (code) {
+    const exchangeResult = await supabase.auth.exchangeCodeForSession(code)
+    if (exchangeResult.error) throw exchangeResult.error
+    if (exchangeResult.data.session) return exchangeResult.data.session
+    throw new Error('This sign-in link could not be completed. Request a new link from the app.')
   }
 
   const sessionResult = await supabase.auth.getSession()
   if (sessionResult.error) throw sessionResult.error
   if (sessionResult.data.session) return sessionResult.data.session
-
-  const code = callbackUrl.searchParams.get('code')
-  if (code) {
-    const exchangeResult = await supabase.auth.exchangeCodeForSession(code)
-    if (exchangeResult.error) throw exchangeResult.error
-    if (exchangeResult.data.session) return exchangeResult.data.session
-  }
 
   throw new Error('This sign-in link could not be completed. Open the email link on the same device and browser where you requested it, or return to sign in and request a new link.')
 }

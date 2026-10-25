@@ -1,9 +1,9 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { ref } from 'vue'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({ refresh: vi.fn(), link: vi.fn(), unlink: vi.fn() }))
-const user = ref({ id: 'user-1', email: 'user@example.com', identities: [{ id: 'email-id', provider: 'email', identity_data: {} }, { id: 'google-id', provider: 'google', identity_data: { email: 'user@gmail.com' } }] })
+const user = ref({ id: 'user-1', email: 'user@example.com', new_email: undefined as string | undefined, email_change_sent_at: undefined as string | undefined, identities: [{ id: 'email-id', provider: 'email', identity_data: {} }, { id: 'google-id', provider: 'google', identity_data: { email: 'user@gmail.com' } }] })
 const profile = ref({ role: 'student' })
 vi.mock('@ionic/vue', async () => {
   const { defineComponent, h } = await import('vue')
@@ -25,9 +25,21 @@ vi.mock('@/services/oauth', () => ({ beginIdentityLink: mocks.link }))
 vi.mock('@/services/account', () => ({ linkedAuthMethods: () => ['Email', 'Google'], authActionError: (error: Error) => error.message, unlinkAccountIdentity: mocks.unlink }))
 import SecurityModal from '@/components/SecurityModal.vue'
 
-beforeEach(() => { vi.clearAllMocks(); mocks.refresh.mockResolvedValue(user.value); mocks.link.mockResolvedValue(undefined); mocks.unlink.mockResolvedValue(undefined) })
+beforeEach(() => { vi.clearAllMocks(); user.value.new_email = undefined; user.value.email_change_sent_at = undefined; mocks.refresh.mockResolvedValue(user.value); mocks.link.mockResolvedValue(undefined); mocks.unlink.mockResolvedValue(undefined) })
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
 
 describe('security dialog navigation', () => {
+  it('distinguishes an expired email request from a pending confirmation without prompting for old links', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-10-25T01:00:00Z'))
+    user.value.new_email = 'previous@example.com'; user.value.email_change_sent_at = '2026-10-24T11:02:31Z'
+    const wrapper = mount(SecurityModal, { props: { open: true } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('Previous requested address: previous@example.com')
+    expect(wrapper.text()).toContain('Previous email-change link expired. Request a new link.')
+    expect(wrapper.text()).not.toContain('Check both inboxes')
+    expect(wrapper.text()).toContain('user@example.com')
+    wrapper.unmount()
+  })
   it('has separate account, email, and password actions and returns from their matching dialogs', async () => {
     const wrapper = mount(SecurityModal, { props: { open: true } })
     await flushPromises()

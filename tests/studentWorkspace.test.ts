@@ -170,6 +170,17 @@ describe('student attendance history and face access', () => {
 })
 
 describe('student parent consent', () => {
+  it('registers separate uppercase first/last names without changing the scanned barcode', async () => {
+    handler = q => ({ data: q.table === 'student_profiles' ? { registration_completed_at: null } : [], error: null })
+    const wrapper = shallowMount(StudentPage)
+    await flushPromises()
+    const vm = state(wrapper)
+    vm.firstName = '  María José '; vm.lastName = '  Dela Peña '; vm.rawBarcode = 'Abc-01234'; vm.guardianEmail = ''
+    await vm.completeRegistration()
+    expect(mocks.rpc).toHaveBeenCalledWith('complete_student_registration', { p_first_name: 'MARÍA JOSÉ', p_last_name: 'DELA PEÑA', p_raw_barcode: 'Abc-01234', p_guardian_email: null })
+    expect(vm.rawBarcode).toBeNull()
+    wrapper.unmount()
+  })
   function readyStudent() {
     handler = q => q.table === 'student_profiles'
       ? { data: { registration_completed_at: '2026-10-01', guardian_email: null }, error: null }

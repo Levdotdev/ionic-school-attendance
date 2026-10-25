@@ -655,6 +655,22 @@ describe('administrator review dialog', () => {
 })
 
 describe('family history', () => {
+  it('shows only present/absent totals in overview and excludes canceled attendance', async () => {
+    mocks.profile.value = { id: 'parent-1', role: 'parent' }
+    mocks.route.query.section = 'overview'
+    queryHandler = state => ({ data: ({ guardian_links: [{ student_id: 'student-1' }], profiles: [{ id: 'student-1', full_name: 'Student One', email: 'student@example.com' }], class_enrollments: [] } as Record<string, unknown>)[state.table] ?? [], error: null })
+    const base = { ...record(), student_id: 'student-1', attendance_enabled: true, class_name: 'INTEGRATION', meeting_starts_at: '2026-10-24T01:00:00Z' }
+    const rows = [base, { ...base, id: 'absent', status: 'absent' }, { ...base, id: 'voided', verification_status: 'rejected' }, { ...base, id: 'canceled', attendance_enabled: false }]
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'student_attendance_history' ? rows : [], error: null }))
+    const wrapper = shallowMount(ParentPage, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    expect(wrapper.get('.attendance-total.is-present strong').text()).toBe('1')
+    expect(wrapper.get('.attendance-total.is-absent strong').text()).toBe('2')
+    expect(wrapper.findComponent(ParentCalendarPanel).exists()).toBe(false)
+    expect(wrapper.find('.latest-grid').exists()).toBe(false)
+    expect(wrapper.find('.history-card').exists()).toBe(false)
+    wrapper.unmount()
+  })
   it('requires an explicit parent confirmation before accepting a pending student link', async () => {
     mocks.profile.value = { id: 'parent-1', role: 'parent' }
     const pending = { id: 'request-1', student_id: 'student-1', student_name: 'Student One', student_email: 'student@example.com', status: 'pending', requested_at: '2026-10-24T00:00:00Z' }
@@ -755,6 +771,40 @@ describe('family history', () => {
     const liveOptions = vi.mocked(useRealtimeRefresh).mock.calls.at(-1)![0]
     await liveOptions.onChange()
     expect(state.studentCourses['student-1'][0].name).toBe('Integration')
+    wrapper.unmount()
+  })
+})
+
+describe('admin linked-parent groups', () => {
+  it('separates approved parent connections from pending/no-parent students and updates live', async () => {
+    mocks.profile.value = { id: 'admin-1', role: 'admin' }
+    mocks.route.query.section = 'parents'
+    const students = [{ student_id: 'student-1', full_name: 'STUDENT ONE', email: 'one@example.test', enrolled: true }, { student_id: 'student-2', full_name: 'STUDENT TWO', email: 'two@example.test', enrolled: false }]
+    let approved = false
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'admin_student_face_enrollments' ? students : name === 'admin_student_parent_statuses' ? [{ student_id: 'student-1', has_approved_parent: true, approved_parent_count: 1 }, { student_id: 'student-2', has_approved_parent: approved, approved_parent_count: approved ? 1 : 0 }] : [], error: null }))
+    const wrapper = shallowMount(AdminPage, { global: { renderStubDefaultSlot: true } })
+    await flushPromises()
+    const state = setupState(wrapper)
+    expect(state.familyStudents.map((student: { student_id: string }) => student.student_id)).toEqual(['student-1'])
+    state.familyView = 'unlinked'
+    expect(state.familyStudents.map((student: { student_id: string }) => student.student_id)).toEqual(['student-2'])
+    approved = true
+    await vi.mocked(useRealtimeRefresh).mock.calls.at(-1)![0].onChange()
+    expect(state.familyStudents).toHaveLength(0)
+    expect(state.linkedStudentCount).toBe(2)
+    wrapper.unmount()
+  })
+  it('does not label students unlinked if the approved-parent lookup failed', async () => {
+    mocks.profile.value = { id: 'admin-1', role: 'admin' }
+    mocks.route.query.section = 'parents'
+    mocks.rpc.mockImplementation(async name => ({ data: [], error: name === 'admin_student_parent_statuses' ? { message: 'Consent lookup unavailable' } : null }))
+    const wrapper = shallowMount(AdminPage)
+    await flushPromises()
+    const state = setupState(wrapper)
+    state.familyView = 'unlinked'
+    expect(state.parentStatusesLoaded).toBe(false)
+    expect(state.parentStatusesError).toContain('Consent lookup unavailable')
+    expect(state.familyStudents).toEqual([])
     wrapper.unmount()
   })
 })

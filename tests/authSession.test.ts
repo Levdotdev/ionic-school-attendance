@@ -1,8 +1,9 @@
 import type { Session } from '@supabase/supabase-js'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const mocks = vi.hoisted(() => ({
   getSession: vi.fn(),
+  getUser: vi.fn(),
   onAuthStateChange: vi.fn(),
   signOut: vi.fn(),
   maybeSingle: vi.fn(),
@@ -11,7 +12,7 @@ const mocks = vi.hoisted(() => ({
 }))
 
 vi.mock('@/lib/supabase', () => ({ supabase: {
-  auth: { getSession: mocks.getSession, onAuthStateChange: mocks.onAuthStateChange, signOut: mocks.signOut },
+  auth: { getSession: mocks.getSession, getUser: mocks.getUser, onAuthStateChange: mocks.onAuthStateChange, signOut: mocks.signOut },
   from: () => ({ select: () => ({ eq: () => ({ maybeSingle: mocks.maybeSingle }) }) }),
 } }))
 vi.mock('@/services/notifications', () => ({ unregisterFromClassNotifications: mocks.unregister }))
@@ -26,6 +27,7 @@ beforeEach(() => {
   vi.clearAllMocks()
   window.sessionStorage.clear()
   mocks.getSession.mockResolvedValue({ data: { session: session() }, error: null })
+  mocks.getUser.mockResolvedValue({ data: { user: session().user }, error: null })
   mocks.signOut.mockResolvedValue({ error: null })
   mocks.maybeSingle.mockResolvedValue({ data: {
     id: 'user-1', role: 'teacher', full_name: 'Sample Teacher', email: 'user-1@example.com',
@@ -34,6 +36,8 @@ beforeEach(() => {
   mocks.unregister.mockResolvedValue(undefined)
   mocks.cancelReminders.mockResolvedValue(undefined)
 })
+afterEach(() => { vi.clearAllTimers(); vi.useRealTimers() })
+function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>(done => { resolve = done }); return { promise, resolve } }
 
 describe('account destinations', () => {
   it.each(['student', 'teacher', 'parent', 'admin'] as const)('sends completed %s accounts to their own portal', async (role) => {
@@ -48,6 +52,88 @@ describe('account destinations', () => {
 })
 
 describe('session recovery and cleanup', () => {
+  it('finishes the current profile when the SDK initial-session event races initialization', async () => {
+    vi.useFakeTimers()
+    const restored = deferred<unknown>()
+    mocks.getSession.mockReturnValueOnce(restored.promise)
+    const state = await import('@/composables/useSession')
+    const ready = state.initializeSession()
+    mocks.onAuthStateChange.mock.calls[0][0]('INITIAL_SESSION', session())
+    restored.resolve({ data: { session: session() }, error: null })
+    await ready
+    expect(state.useSession().user.value?.id).toBe('user-1')
+    expect(state.useSession().profile.value?.id).toBe('user-1')
+  })
+  it.each(['google', 'facebook', 'email'])('does not restore a removed %s method from stale token or cross-tab events', async provider => {
+    vi.useFakeTimers()
+    const cached = { ...session(), user: { ...session().user, identities: [{ provider }, { provider: 'another-method' }] } }
+    mocks.getSession.mockResolvedValue({ data: { session: cached }, error: null })
+    mocks.getUser.mockResolvedValue({ data: { user: { ...cached.user, identities: [{ provider: 'another-method' }] } }, error: null })
+    const state = await import('@/composables/useSession')
+    await state.initializeSession()
+    const listener = mocks.onAuthStateChange.mock.calls[0][0]
+    listener('TOKEN_REFRESHED', cached)
+    expect(state.useSession().user.value?.identities?.some(identity => identity.provider === provider)).toBe(false)
+    listener('SIGNED_IN', cached)
+    expect(state.useSession().user.value?.identities?.some(identity => identity.provider === provider)).toBe(false)
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.useSession().user.value?.identities?.some(identity => identity.provider === provider)).toBe(false)
+  })
+  it('uses the authoritative current email and does not restore the old email from a token event', async () => {
+    vi.useFakeTimers()
+    mocks.getUser.mockResolvedValue({ data: { user: { ...session().user, email: 'new@example.com' } }, error: null })
+    const state = await import('@/composables/useSession')
+    await state.initializeSession()
+    mocks.onAuthStateChange.mock.calls[0][0]('TOKEN_REFRESHED', session())
+    expect(state.useSession().user.value?.email).toBe('new@example.com')
+    expect(state.useSession().profile.value?.email).toBe('new@example.com')
+    await vi.advanceTimersByTimeAsync(0)
+    expect(state.useSession().profile.value?.email).toBe('new@example.com')
+  })
+  it('rejects out-of-order Auth responses after a more recent identity update', async () => {
+    const state = await import('@/composables/useSession')
+    await state.initializeSession()
+    const old = deferred<unknown>(), latest = deferred<unknown>()
+    mocks.getUser.mockReturnValueOnce(old.promise).mockReturnValueOnce(latest.promise)
+    const first = state.refreshAuthUser(), second = state.refreshAuthUser()
+    latest.resolve({ data: { user: { ...session().user, identities: [] } }, error: null })
+    await second
+    old.resolve({ data: { user: { ...session().user, identities: [{ provider: 'google' }] } }, error: null })
+    await first
+    expect(state.useSession().user.value?.identities).toEqual([])
+  })
+  it('does not restore a signed-out session from an unfinished initialization or profile fetch', async () => {
+    const cached = deferred<unknown>()
+    mocks.getSession.mockReturnValueOnce(cached.promise)
+    const state = await import('@/composables/useSession')
+    const pending = state.initializeSession()
+    await state.signOut()
+    cached.resolve({ data: { session: session() }, error: null })
+    await pending
+    expect(state.useSession().user.value).toBeNull()
+    expect(state.useSession().profile.value).toBeNull()
+    mocks.getSession.mockResolvedValue({ data: { session: session() }, error: null })
+    await state.initializeSession()
+    const profile = deferred<unknown>()
+    mocks.maybeSingle.mockReturnValueOnce(profile.promise)
+    const loading = state.refreshProfile()
+    await state.signOut()
+    profile.resolve({ data: { id: 'user-1', role: 'student', full_name: 'Old account' }, error: null })
+    await loading
+    expect(state.useSession().user.value).toBeNull()
+    expect(state.useSession().profile.value).toBeNull()
+  })
+  it('reinitializes the next incomplete account after signing out instead of reusing the old initialization', async () => {
+    const state = await import('@/composables/useSession')
+    await state.initializeSession(); await state.signOut()
+    mocks.getSession.mockResolvedValue({ data: { session: session('user-2') }, error: null })
+    mocks.getUser.mockResolvedValue({ data: { user: session('user-2').user }, error: null })
+    mocks.maybeSingle.mockResolvedValue({ data: { id: 'user-2', role: 'student', full_name: 'New Person', onboarding_completed_at: null }, error: null })
+    await state.initializeSession()
+    expect(state.useSession().user.value?.id).toBe('user-2')
+    expect(state.useSession().profile.value?.id).toBe('user-2')
+    expect(state.useSession().profile.value?.onboarding_completed_at).toBeNull()
+  })
   it('supports existing profiles until the onboarding migration has been deployed', async () => {
     mocks.maybeSingle.mockResolvedValueOnce({ data: null, error: { code: '42703', message: 'column profiles.onboarding_completed_at does not exist' } })
     mocks.maybeSingle.mockResolvedValueOnce({ data: { id: 'user-1', role: 'teacher', created_at: '2026-10-01' }, error: null })
@@ -107,6 +193,20 @@ describe('session recovery and cleanup', () => {
     await expect(signOut()).resolves.toBeUndefined()
     expect(mocks.signOut).toHaveBeenCalledOnce()
   })
+  it('does not trap logout on a notification task that never settles', async () => {
+    vi.useFakeTimers()
+    mocks.unregister.mockReturnValue(new Promise(() => undefined))
+    const state = await import('@/composables/useSession')
+    await state.initializeSession()
+    const first = state.signOut(), duplicate = state.signOut()
+    expect(first).toBe(duplicate)
+    await vi.advanceTimersByTimeAsync(2000)
+    await first
+    expect(mocks.signOut).toHaveBeenCalledOnce()
+    expect(state.useSession().user.value).toBeNull()
+    expect(state.useSession().signOutNotice.value).toContain('Some device reminders could not be cleared')
+    mocks.unregister.mockResolvedValue(undefined)
+  })
 
   it('clears stale local credentials when the server session is already gone', async () => {
     mocks.signOut.mockResolvedValueOnce({ error: { code: 'session_not_found', status: 403 } }).mockResolvedValueOnce({ error: null })
@@ -116,12 +216,14 @@ describe('session recovery and cleanup', () => {
     expect(useSession().session.value).toBeNull()
   })
 
-  it('does not claim sign-out succeeded when a real network error remains', async () => {
+  it('leaves setup after clearing this device even if global sign-out fails, with honest device-only notice', async () => {
     const error = { code: 'unexpected_failure', message: 'Network failure' }
     mocks.signOut.mockResolvedValueOnce({ error })
     const { initializeSession, signOut, useSession } = await import('@/composables/useSession')
     await initializeSession()
-    await expect(signOut()).rejects.toEqual(error)
-    expect(useSession().session.value).not.toBeNull()
+    await expect(signOut()).resolves.toBeUndefined()
+    expect(mocks.signOut).toHaveBeenNthCalledWith(2, { scope: 'local' })
+    expect(useSession().session.value).toBeNull()
+    expect(useSession().signOutNotice.value).toContain('Signed out on this device')
   })
 })

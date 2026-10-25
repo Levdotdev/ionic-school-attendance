@@ -10,7 +10,7 @@
 
     <div class="calendar-legend"><span><i class="weekly-dot"></i>Weekly schedule</span><span><i class="meeting-dot"></i>Meeting</span><span v-if="taskLegend"><i class="task-dot"></i>Task</span><span><i class="cancelled-dot"></i>Not counted</span></div>
 
-    <div v-if="view !== 'agenda'" class="calendar-grid" :class="{ 'month-grid': view === 'month', 'week-grid': view === 'week' }">
+    <div class="calendar-grid" :class="{ 'month-grid': view === 'month', 'week-grid': view === 'week' }">
       <div v-for="day in weekdays" :key="day" class="weekday-heading">{{ day }}</div>
       <article v-for="day in visibleDays" :key="day.key" class="calendar-day" :class="{ 'outside-month': view === 'month' && day.outsideMonth, today: day.key === todayKey, 'selected-day': day.key === anchor }">
         <button type="button" class="day-heading" :aria-label="day.longLabel" :aria-current="day.key === todayKey ? 'date' : undefined" @click="selectDay(day.key)"><span class="mobile-weekday">{{ day.weekday }}</span><span class="day-number">{{ day.number }}</span></button>
@@ -18,15 +18,12 @@
           <button v-for="event in (view === 'month' ? day.events.slice(0, 3) : day.events)" :key="event.id" type="button" class="calendar-event" :class="eventClass(event)" :style="event.color ? { '--event-color': event.color } : undefined" :title="eventAccessibleLabel(event)" @click="$emit('select', event)">
             <time>{{ formatTime(event.start) }}</time><strong>{{ event.title }}</strong><span v-if="event.className && event.className !== event.title">{{ event.className }}</span><small v-if="event.status && isCancelled(event)">Not counted</small><small v-else-if="event.subtext">{{ event.subtext }}</small>
           </button>
-          <button v-if="view === 'month' && day.events.length > 3" class="more-events" type="button" @click="selectDay(day.key); view = 'agenda'">+{{ day.events.length - 3 }} more</button>
+          <button v-if="view === 'month' && day.events.length > 3" class="more-events" type="button" @click="selectDay(day.key); view = 'week'">+{{ day.events.length - 3 }} more</button>
         </div>
         <span v-else class="day-empty">No events</span>
       </article>
     </div>
 
-    <div v-else class="calendar-agenda">
-      <article v-for="day in visibleDays" :key="day.key" class="agenda-day" :class="{ today: day.key === todayKey }"><button class="agenda-date" type="button" @click="selectDay(day.key)"><strong>{{ day.weekday }}</strong><span>{{ day.shortLabel }}</span><small v-if="day.key === todayKey">Today</small></button><div v-if="day.events.length" class="agenda-events"><button v-for="event in day.events" :key="event.id" type="button" class="agenda-event" :class="eventClass(event)" :style="event.color ? { '--event-color': event.color } : undefined" @click="$emit('select', event)"><span class="agenda-time">{{ formatTime(event.start) }}<small>{{ formatTime(event.end) }}</small></span><span class="agenda-copy"><strong>{{ event.title }}</strong><span v-if="event.className && event.className !== event.title">{{ event.className }}</span><small v-if="isCancelled(event)">Not counted</small><small v-else-if="event.subtext">{{ event.subtext }}</small></span><span class="agenda-arrow" aria-hidden="true">›</span></button></div><p v-else class="agenda-empty">Nothing scheduled</p></article>
-    </div>
     <p v-if="!eventsInRange" class="calendar-empty-note">No events are scheduled in this {{ view === 'month' ? 'month' : 'week' }}.</p>
   </section>
 </template>
@@ -45,12 +42,12 @@ export interface CalendarEvent {
   color?: string
   subtext?: string
 }
-export type CalendarView = 'month' | 'week' | 'agenda'
+export type CalendarView = 'month' | 'week'
 const props = withDefaults(defineProps<{ events: CalendarEvent[]; selectedDate?: string; initialView?: CalendarView; heading?: string; taskLegend?: boolean }>(), { initialView: 'week', heading: 'Class calendar', taskLegend: false })
 const emit = defineEmits<{ select: [event: CalendarEvent]; dateChange: [date: string]; viewChange: [view: CalendarView]; rangeChange: [range: { start: string; end: string }] }>()
 const TIME_ZONE = 'Asia/Manila'
 const weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const views: Array<{ value: CalendarView; label: string }> = [{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }, { value: 'agenda', label: 'Agenda' }]
+const views: Array<{ value: CalendarView; label: string }> = [{ value: 'week', label: 'Week' }, { value: 'month', label: 'Month' }]
 const todayKey = keyInManila(new Date())
 const anchor = ref(props.selectedDate || todayKey)
 const view = ref<CalendarView>(props.initialView)

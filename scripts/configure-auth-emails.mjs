@@ -15,7 +15,7 @@ export const authEmailTemplates = Object.freeze([
 
 /** Narrow PATCH: no SMTP credentials, rate limits, providers, or redirect changes. */
 export async function buildAuthEmailPatch() {
-  const patch = { security_manual_linking_enabled: true }
+  const patch = { security_manual_linking_enabled: true, mailer_otp_exp: 1800 }
   for (const template of authEmailTemplates) {
     patch[`mailer_subjects_${template.name}`] = template.subject
     patch[`mailer_templates_${template.name}_content`] = await readFile(new URL(`../supabase/templates/${template.name}.html`, import.meta.url), 'utf8')

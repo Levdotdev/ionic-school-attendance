@@ -1,0 +1,26 @@
+/* Shared by Vue and generated public pages. */
+.policy-page { margin:0; background:var(--campus-bg,var(--policy-bg,#f4f6f2)); color:var(--campus-text,var(--policy-text,#1e3027)); font-family:Arial,Helvetica,sans-serif; }
+.policy-page * { box-sizing:border-box; }
+@media(prefers-color-scheme:dark) { :root { --policy-bg:#17201b; --policy-surface:#202c25; --policy-surface-soft:#27352c; --policy-text:#e1e9e1; --policy-muted:#b5c6b8; --policy-border:#3b4e40; --policy-accent:#a0d5ac; --policy-accent-soft:#293f31; --policy-on-accent:#17271b; } }
+.policy-page ion-content { --background:var(--campus-bg,var(--policy-bg,#f4f6f2)); }
+.policy-shell { max-width:1000px; margin:0 auto; padding:28px 24px 40px; }
+.policy-header { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:26px; }
+.policy-brand { display:flex; align-items:center; gap:12px; color:var(--campus-text,var(--policy-text,#1e3027)); text-decoration:none; }
+.policy-brand img { width:48px; height:48px; object-fit:contain; border-radius:50%; background:#fff; }
+.policy-brand strong,.policy-brand small { display:block; }.policy-brand strong { font-size:15px; }.policy-brand small { margin-top:4px; color:var(--campus-muted,var(--policy-muted,#4b6255)); font-size:11px; }
+.back-link { font-size:13px; white-space:nowrap; }
+.policy-navigation { display:flex; flex-wrap:wrap; gap:9px; margin-bottom:18px; }
+.policy-navigation a { padding:10px 14px; border:1px solid var(--campus-border,var(--policy-border,#d7e1d8)); border-radius:10px; color:var(--campus-muted,var(--policy-muted,#4b6255)); font-size:12px; text-decoration:none; }
+.policy-navigation a[aria-current=page] { color:var(--campus-accent,var(--policy-accent,#145f3d)); background:var(--campus-accent-soft,var(--policy-accent-soft,#e5f1e7)); border-color:var(--campus-accent,var(--policy-accent,#145f3d)); }
+.policy-card { padding:clamp(24px,5vw,54px); border:1px solid var(--campus-border,var(--policy-border,#d7e1d8)); border-radius:20px; background:var(--campus-surface,var(--policy-surface,#ffffff)); color:var(--campus-text,var(--policy-text,#1e3027)); }
+.policy-eyebrow { color:var(--campus-accent,var(--policy-accent,#145f3d)); font-size:11px; font-weight:700; letter-spacing:.1em; text-transform:uppercase; }
+.policy-page h1 { margin:10px 0 12px; font-size:clamp(30px,5vw,44px); line-height:1.1; letter-spacing:-.025em; }
+.policy-updated { margin:0 0 24px; color:var(--campus-muted,var(--policy-muted,#4b6255)); font-size:12px; }
+.policy-page section { margin-top:30px; }.policy-page h2 { margin:0 0 12px; font-size:19px; letter-spacing:-.01em; }
+.policy-page p,.policy-page li { font-size:14px; line-height:1.8; color:var(--campus-muted,var(--policy-muted,#4b6255)); }.policy-page p { margin:10px 0; }.policy-page li { margin:9px 0; }.policy-page ul,.policy-page ol { padding-left:23px; }.policy-page strong { color:var(--campus-text,var(--policy-text,#1e3027)); }.policy-page a { color:var(--campus-accent,var(--policy-accent,#145f3d)); text-underline-offset:3px; overflow-wrap:anywhere; }
+.project-notice,.safety-note { padding:18px 20px; border:1px solid var(--campus-border,var(--policy-border,#d7e1d8)); border-radius:12px; background:var(--campus-surface-soft,var(--policy-surface-soft,#edf3eb)); }
+.policy-page .project-notice p,.policy-page .safety-note p { margin:7px 0 0; font-size:13px; }.project-notice strong,.safety-note strong { font-size:13px; }.safety-note { margin-top:28px; }
+.policy-page .request-button { display:inline-flex; align-items:center; justify-content:center; min-height:46px; margin-top:12px; padding:12px 20px; border-radius:10px; background:var(--campus-accent,var(--policy-accent,#145f3d)); color:var(--campus-on-accent,var(--policy-on-accent,#ffffff)); font-size:13px; font-weight:650; text-decoration:none; }
+.policy-page .compose-note { font-size:12px; }.policy-footer { display:flex; flex-wrap:wrap; justify-content:space-between; gap:12px; padding:24px 4px 0; color:var(--campus-muted,var(--policy-muted,#4b6255)); font-size:11px; }
+.policy-page a:focus-visible { outline:3px solid var(--campus-accent,var(--policy-accent,#145f3d)); outline-offset:4px; }
+@media(max-width:540px) { .policy-shell { padding:20px 14px 28px; }.policy-header { gap:12px; }.policy-brand img { width:38px; height:38px; }.policy-brand strong { font-size:13px; }.back-link { font-size:11px; }.policy-card { border-radius:16px; } }

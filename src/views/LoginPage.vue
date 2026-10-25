@@ -29,30 +29,26 @@
           </div>
 
           <div class="story-copy">
-            <p class="eyebrow">Attendance and student support</p>
-            <h1>Attendance everyone can trust.</h1>
-            <p>
-              A secure place for teachers to manage classes, students to check in,
-              and families to stay informed.
-            </p>
+            <p class="story-kicker"><span></span> Your campus. Connected.</p>
+            <h1>One campus.<br /><em>Closer together.</em></h1>
+            <p>From the first class to the last check-in, keep school days organized and families in the loop.</p>
           </div>
 
-          <ul class="trust-list" aria-label="System features">
-            <li>
-              <span class="trust-icon"><ion-icon :icon="scanOutline" /></span>
-              <span><strong>Verified student check-ins</strong><small>Camera-scanned school ID and fresh photo evidence</small></span>
-            </li>
-            <li>
-              <span class="trust-icon"><ion-icon :icon="locationOutline" /></span>
-              <span><strong>Location-aware attendance</strong><small>On-site submissions checked against the school area</small></span>
-            </li>
-            <li>
-              <span class="trust-icon"><ion-icon :icon="shieldCheckmarkOutline" /></span>
-              <span><strong>Role-protected access</strong><small>Private views for students, families, teachers, and admins</small></span>
-            </li>
-          </ul>
+          <div class="campus-connection" aria-label="How your school day connects">
+            <div class="connection-heading"><span>A connected school day</span><ion-icon :icon="shieldCheckmarkOutline" aria-hidden="true" /></div>
+            <div class="campus-scene" aria-hidden="true">
+              <span class="scene-orbit orbit-one"></span><span class="scene-orbit orbit-two"></span>
+              <div class="campus-building"><span class="building-roof"></span><span class="building-name">M I N S U</span><div class="building-columns"><i></i><i></i><i></i><i></i></div><span class="building-steps"></span></div>
+              <span class="scene-badge"><ion-icon :icon="checkmarkCircleOutline" /> A little more peace of mind</span>
+            </div>
+            <ol class="connection-steps">
+              <li><span class="step-symbol"><ion-icon :icon="calendarOutline" /></span><strong>Classes planned</strong><small>A clear school week</small></li>
+              <li><span class="step-symbol"><ion-icon :icon="scanOutline" /></span><strong>Check-ins verified</strong><small>Identity & attendance</small></li>
+              <li><span class="step-symbol"><ion-icon :icon="peopleOutline" /></span><strong>Families informed</strong><small>Connected, wherever</small></li>
+            </ol>
+          </div>
 
-          <p class="story-foot"><span aria-hidden="true"></span> Mindoro State University · Academic portal</p>
+          <p class="story-foot"><span aria-hidden="true"></span> Mindoro State University <span class="story-foot-divider">/</span> Attendance & student life</p>
         </section>
 
         <section class="auth-panel" aria-labelledby="auth-heading">
@@ -82,6 +78,7 @@
           </div>
 
           <div class="auth-card">
+            <p v-if="signOutNotice" class="auth-notice" role="status">{{ signOutNotice }}</p>
             <div class="auth-heading">
               <p class="eyebrow">Welcome</p>
               <h2 id="auth-heading">{{ mode === 'signin' ? 'Sign in to your account' : 'Create your account' }}</h2>
@@ -200,6 +197,11 @@
               <ion-icon :icon="lockClosedOutline" aria-hidden="true" />
               Your attendance information is protected and visible only to authorized users.
             </p>
+            <nav class="policy-links" aria-label="Privacy information">
+              <a href="/privacy-policy.html">Privacy policy</a>
+              <span aria-hidden="true">·</span>
+              <a href="/data-deletion.html">Data deletion</a>
+            </nav>
           </div>
         </section>
       </main>
@@ -232,11 +234,13 @@ import {
   alertCircleOutline,
   arrowForwardOutline,
   checkmarkCircleOutline,
+  calendarOutline,
   locationOutline,
   lockClosedOutline,
   logoFacebook,
   logoGoogle,
   moonOutline,
+  peopleOutline,
   scanOutline,
   shieldCheckmarkOutline,
   sunnyOutline,
@@ -260,7 +264,7 @@ import { authActionError, requestPasswordReset } from '@/services/account'
 type AuthMode = 'signin' | 'signup'
 
 const router = useRouter()
-const { initializeSession, refreshProfile, profile } = useSession()
+const { initializeSession, refreshProfile, profile, signOutNotice } = useSession()
 const { isDark, toggleTheme } = useTheme()
 
 const mode = ref<AuthMode>('signin')
@@ -297,7 +301,7 @@ async function sendRecoveryEmail() {
   try {
     await requestPasswordReset(recoveryEmail.value)
     recoveryRequested.value = true
-    recoveryMessage.value = 'Reset request accepted. If an account uses this email, check its inbox and spam folder for the link. This response does not confirm email delivery.'
+    recoveryMessage.value = 'Reset request accepted. If an account uses this email, check its inbox and spam folder for the link. Authentication links expire after 30 minutes. This response does not confirm email delivery.'
     recoveryCooldown.value = 60
     clearInterval(recoveryTimer)
     recoveryTimer = setInterval(() => { recoveryCooldown.value--; if (recoveryCooldown.value <= 0) clearInterval(recoveryTimer) }, 1000)
@@ -366,7 +370,7 @@ async function submit() {
       return
     }
 
-    message.value = 'Check your email to confirm your account. After signing in, you can choose student, teacher, or parent and complete your information.'
+    message.value = 'Check your email to confirm your account within 30 minutes. After signing in, you can choose student, teacher, or parent and complete your information.'
     password.value = ''
     passwordConfirmation.value = ''
   } catch (error) {
@@ -411,6 +415,8 @@ onMounted(async () => {
 </script>
 
 <style scoped>
+.policy-links { display: flex; justify-content: center; gap: 10px; flex-wrap: wrap; margin-top: 16px; font-size: 12px; color: var(--app-text-muted); }
+.policy-links a { color: inherit; text-underline-offset: 3px; }
 .auth-page {
   --campus-accent-local: var(--campus-green, #087443);
   --campus-navy-local: var(--campus-navy, #063f2a);
@@ -557,8 +563,34 @@ ion-button.theme-button-on-dark {
   position: relative;
   z-index: 1;
   max-width: 560px;
-  margin: auto 0 44px;
+  margin: auto 0 26px;
 }
+.story-kicker { display:flex; align-items:center; gap:9px; margin:0 0 16px; color:#c8d6ca; font-size:11px; letter-spacing:.11em; text-transform:uppercase; font-weight:650; }
+.story-kicker > span { width:22px; height:1px; background:#d9bd77; }
+.story-copy h1 em { color:#e0c785; font-weight:inherit; }
+.campus-connection { position:relative; flex:0 1 auto; min-height:0; z-index:1; overflow:hidden; border:1px solid #ffffff24; border-radius:22px; background:#ffffff09; box-shadow:0 15px 40px #00000012; }
+.connection-heading { display:flex; align-items:center; justify-content:space-between; padding:17px 20px 0; color:#d6e2d8; font-size:11px; letter-spacing:.02em; }
+.connection-heading ion-icon { color:#e0c785; font-size:18px; }
+.campus-scene { position:relative; height:148px; overflow:hidden; display:grid; place-items:center; }
+.scene-orbit { position:absolute; width:210px; height:210px; border:1px solid #ffffff10; border-radius:50%; top:15px; left:calc(50% - 105px); }
+.scene-orbit.orbit-two { width:290px; height:290px; top:-25px; left:calc(50% - 145px); border-style:dashed; }
+.campus-building { position:relative; display:grid; justify-items:center; width:140px; height:95px; margin-top:10px; }
+.building-roof { width:138px; height:24px; background:#d7c28c; clip-path:polygon(50% 0,100% 86%,100% 100%,0 100%,0 86%); }
+.building-name { width:128px; padding:5px 0; color:#e7e8d9; border-bottom:1px solid #ffffff22; text-align:center; font-size:9px; font-weight:750; letter-spacing:3px; }
+.building-columns { display:flex; align-items:stretch; justify-content:space-between; width:120px; height:34px; padding:0 7px; }
+.building-columns i { display:block; width:11px; background:linear-gradient(90deg,#c4cbbd,#f0eee1 55%,#c4cbbd); border-radius:0 0 2px 2px; }
+.building-steps { width:150px; height:9px; background:#b6c2af; box-shadow:0 5px 0 3px #899e89; }
+.scene-badge { position:absolute; right:15px; bottom:12px; display:flex; align-items:center; gap:6px; padding:8px 10px; border:1px solid #ffffff25; border-radius:8px; background:#284b3a; color:#e3e9dd; font-size:9px; box-shadow:0 7px 18px #0002; transform:rotate(-3deg); }
+.scene-badge ion-icon { color:#dfca8c; font-size:14px; }
+.connection-steps { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; list-style:none; margin:0; padding:8px 16px 19px; }
+.connection-steps li { position:relative; display:grid; justify-items:center; gap:7px; text-align:center; min-width:0; }
+.connection-steps li:not(:last-child)::after { content:''; position:absolute; left:calc(50% + 22px); top:17px; width:calc(100% - 36px); height:1px; background:#ffffff25; }
+.step-symbol { display:grid; place-items:center; width:35px; height:35px; border:1px solid #d7c28c55; border-radius:50%; background:#ffffff0a; color:#e0cb92; }
+.step-symbol ion-icon { font-size:16px; }
+.connection-steps strong { color:#e3eade; font-size:10px; font-weight:650; }
+.connection-steps small { color:#b7c9bb; font-size:8px; line-height:1.4; }
+.story-foot .story-foot-divider { width:auto; height:auto; border-radius:0; color:#94ab9b; background:none; box-shadow:none; margin:0 2px; }
+.auth-notice { margin:0 0 20px; padding:13px 15px; border:1px solid var(--campus-border); border-radius:10px; color:var(--campus-muted); background:var(--campus-surface-soft); font-size:12px; line-height:1.6; }
 
 .eyebrow {
   margin: 0 0 8px;
@@ -576,7 +608,7 @@ ion-button.theme-button-on-dark {
 .story-copy h1 {
   max-width: 520px;
   margin: 0;
-  font-size: clamp(38px, 5vw, 62px);
+  font-size: clamp(38px, 4.8vw, 66px);
   font-weight: 600;
   letter-spacing: -0.045em;
   line-height: 1.03;
@@ -586,7 +618,7 @@ ion-button.theme-button-on-dark {
   max-width: 510px;
   margin: 22px 0 0;
   color: rgba(244, 249, 252, 0.73);
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1.7;
 }
 
@@ -679,8 +711,11 @@ ion-button.theme-button-on-dark {
   }
 
   .story-copy {
-    margin: auto 0 24px;
+    margin: auto 0 20px;
   }
+  .campus-scene { height:120px; }
+  .connection-steps { padding-bottom:14px; }
+  .connection-heading { padding-top:12px; }
 
   .story-copy h1 {
     font-size: clamp(32px, 4vw, 48px);
@@ -702,7 +737,7 @@ ion-button.theme-button-on-dark {
 }
 
 @media (min-width: 901px) and (max-height: 560px) {
-  .trust-list,
+  .trust-list, .campus-connection,
   .story-foot {
     display: none;
   }

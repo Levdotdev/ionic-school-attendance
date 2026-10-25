@@ -5,6 +5,10 @@ project_id = "minsu-attendance-auth-emails"
 [auth]
 enable_manual_linking = true
 
+# User-approved shared lifetime for registration, invitation, recovery and email-change links.
+[auth.email]
+otp_expiry = 1800
+
 [auth.email.template.confirmation]
 subject = "MinSU Attendance — Confirm your account"
 content_path = "./supabase/templates/confirmation.html"

@@ -12,7 +12,8 @@ describe('branded authentication emails', () => {
     for (const template of authEmailTemplates) {
       const html = patch[`mailer_templates_${template.name}_content`]
       expect(html).toContain('MinSU Attendance')
-      expect(html).toContain('{{ .SiteURL }}/minsu-logo.png')
+      expect(html).toContain('src="https://ionic-school-attendance.vercel.app/minsu-logo.png"')
+      expect(html).not.toContain('{{ .SiteURL }}/minsu-logo.png')
       expect(html).toContain('role="presentation"')
       expect(html).not.toContain('MathVerse')
       const variables = [...String(html).matchAll(/{{\s*\.([A-Za-z]+)\s*}}/g)].map(match => match[1])
@@ -20,20 +21,27 @@ describe('branded authentication emails', () => {
       if (template.name !== 'email_change') expect(html).not.toContain('.NewEmail')
       if (template.name !== 'email_changed_notification') expect(html).not.toContain('.OldEmail')
       if (!template.name.startsWith('identity_')) expect(html).not.toContain('.Provider')
+      if (['confirmation', 'email_change', 'recovery', 'invite'].includes(template.name)) expect(html).toContain('30 minutes')
+      else expect(html).not.toContain('30 minutes')
     }
     expect(patch.mailer_templates_recovery_content).toContain('?token_hash={{ .TokenHash }}&amp;type=recovery')
     expect(patch.mailer_templates_invite_content).toContain('does not automatically link a child')
     expect(patch.mailer_templates_invite_content).toContain('?token_hash={{ .TokenHash }}&amp;type=invite')
+    expect(patch.mailer_templates_confirmation_content).toContain('?token_hash={{ .TokenHash }}&amp;type=email')
+    expect(patch.mailer_templates_email_change_content).toContain('?token_hash={{ .TokenHash }}&amp;type=email_change')
   })
   it('configures local Auth paths and every hosted security notification without touching SMTP or rate limits', async () => {
     const config = await readFile('supabase/config.toml', 'utf8')
     const patch = await buildAuthEmailPatch()
     expect(patch.security_manual_linking_enabled).toBe(true)
+    expect(patch.mailer_otp_exp).toBe(1800)
+    expect(config).toContain('otp_expiry = 1800')
     expect(Object.keys(patch).filter(key => /mailer_notifications_.*_enabled/.test(key))).toHaveLength(4)
     expect(Object.keys(patch).some(key => /smtp|rate_limit|site_url|external_/.test(key))).toBe(false)
     for (const template of authEmailTemplates) expect(config).toContain(`./supabase/templates/${template.name}.html`)
     const narrowConfig = await readFile('scripts/auth-config/supabase/config.toml', 'utf8')
     expect(narrowConfig).toContain('enable_manual_linking = true')
+    expect(narrowConfig).toContain('otp_expiry = 1800')
     expect(narrowConfig).not.toMatch(/^\s*(smtp_|site_url|additional_redirect_urls|minimum_password_length|email_sent|max_frequency|enable_signup|enable_confirmations)\s*=/m)
     for (const template of authEmailTemplates) {
       expect(narrowConfig).toContain(`./supabase/templates/${template.name}.html`)

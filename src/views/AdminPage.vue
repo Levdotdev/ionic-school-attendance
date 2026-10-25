@@ -52,7 +52,16 @@
           <div v-else class="applicant-list"><article v-for="student in visibleStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><small>{{ student.enrolled ? `Enrolled ${formatDateTime(student.enrolled_at)}` : 'Face enrollment not completed' }}</small><small v-if="student.can_retake">A one-time retake is authorized.</small></div></div><div class="review-panel verification-actions"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.enrolled ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'Retake authorized' : student.enrolled ? 'Enrolled' : 'Not enrolled' }}</span><ion-button v-if="student.enrolled && !student.can_retake" fill="outline" class="approve-button" @click="openRetake(student)">Authorize retake</ion-button></div></article></div>
         </section>
 
-        <section v-if="activeSection === 'parents'" class="queue-card" aria-labelledby="family-connections-heading"><header class="queue-heading"><div><p class="eyebrow">Parent access</p><h2 id="family-connections-heading">Student family connections</h2></div><ion-button @click="inviteParentOpen = true">Invite a parent</ion-button></header><div class="queue-search"><label class="student-search"><span class="sr-only">Find a student for parent links</span><input v-model="familySearch" type="search" placeholder="Search student name or email" /></label></div><div v-if="loadingFaces" class="loading-state"><ion-spinner /><p>Loading students…</p></div><div v-else-if="!familyStudents.length" class="queue-empty"><h3>No matching students</h3></div><div v-else class="applicant-list"><article v-for="student in familyStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name) }}</span><div class="applicant-copy"><h3>{{ student.full_name }}</h3><p>{{ student.email }}</p></div></div><ion-button fill="outline" @click="guardianStudent = { id: student.student_id, full_name: student.full_name }">View linked parents</ion-button></article></div></section>
+        <section v-if="activeSection === 'parents'" class="queue-card" aria-labelledby="family-connections-heading">
+          <header class="queue-heading"><div><p class="eyebrow">Parent access</p><h2 id="family-connections-heading">Student family connections</h2></div><ion-button @click="inviteParentOpen = true">Invite a parent</ion-button></header>
+          <div class="status-tabs" role="group" aria-label="Parent connection status"><button type="button" :aria-pressed="familyView === 'linked'" :class="{ selected: familyView === 'linked' }" @click="familyView = 'linked'">Linked parents <span>{{ linkedStudentCount }}</span></button><button type="button" :aria-pressed="familyView === 'unlinked'" :class="{ selected: familyView === 'unlinked' }" @click="familyView = 'unlinked'">No linked parent <span>{{ parentStatusesLoaded ? faceStudents.length - linkedStudentCount : '—' }}</span></button></div>
+          <div class="queue-search"><label class="student-search"><span class="sr-only">Find a student for parent links</span><input v-model="familySearch" type="search" placeholder="Search student name or email" /></label></div>
+          <p class="family-help">Only parent-approved connections count as linked. Pending and declined requests appear under no linked parent.</p>
+          <div v-if="loadingFaces || loadingParentStatuses" class="loading-state" role="status"><ion-spinner /><p>Loading parent connections…</p></div>
+          <div v-else-if="parentStatusesError" class="queue-empty" role="alert"><h3>Parent connections could not be loaded</h3><p>{{ parentStatusesError }}</p></div>
+          <div v-else-if="!familyStudents.length" class="queue-empty"><h3>{{ familySearch ? 'No matching students' : familyView === 'linked' ? 'No students have an approved parent yet' : 'Every student has an approved parent' }}</h3></div>
+          <div v-else class="applicant-list"><article v-for="student in familyStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name) }}</span><div class="applicant-copy"><h3>{{ student.full_name }}</h3><p>{{ student.email }}</p><small>{{ parentStatusByStudent.get(student.student_id)?.has_approved_parent ? 'Parent-approved connection' : 'Parent approval needed' }}</small></div></div><ion-button fill="outline" @click="guardianStudent = { id: student.student_id, full_name: student.full_name }">View parent connections</ion-button></article></div>
+        </section>
 
         <section v-if="activeSection === 'teachers'" class="queue-card" aria-labelledby="queue-heading">
           <header class="queue-heading">
@@ -249,6 +258,7 @@ interface TeacherApplicant {
   created_at: string
 }
 interface FaceEnrollment { student_id: string; full_name: string; email: string; enrolled: boolean; can_retake: boolean; granted_at: string | null; enrolled_at: string | null }
+interface ParentStatus { student_id: string; has_approved_parent: boolean; approved_parent_count: number }
 
 type QueueView = 'pending' | 'approved' | 'rejected'
 
@@ -272,10 +282,14 @@ const studentSearch = ref(''), retakeNote = ref(''), retakeError = ref('')
 const loadingFaces = ref(false), grantingRetake = ref(false)
 const faceView = ref<'enrolled' | 'not_enrolled'>('enrolled')
 const teacherSearch = ref(''), familySearch = ref(''), inviteParentOpen = ref(false)
+const familyView = ref<'linked' | 'unlinked'>('linked')
+const parentStatuses = ref<ParentStatus[]>([]), loadingParentStatuses = ref(false), parentStatusesLoaded = ref(false), parentStatusesError = ref('')
+const parentStatusByStudent = computed(() => new Map(parentStatuses.value.map(status => [status.student_id, status])))
+const linkedStudentCount = computed(() => faceStudents.value.filter(student => parentStatusByStudent.value.get(student.student_id)?.has_approved_parent).length)
 const guardianStudent = ref<{ id: string; full_name: string } | null>(null)
 const enrolledCount = computed(() => faceStudents.value.filter(student => student.enrolled).length)
 const visibleStudents = computed(() => faceStudents.value.filter(student => student.enrolled === (faceView.value === 'enrolled') && `${student.full_name} ${student.email}`.toLowerCase().includes(studentSearch.value.trim().toLowerCase())))
-const familyStudents = computed(() => faceStudents.value.filter(student => `${student.full_name} ${student.email}`.toLowerCase().includes(familySearch.value.trim().toLowerCase())))
+const familyStudents = computed(() => parentStatusesLoaded.value ? faceStudents.value.filter(student => Boolean(parentStatusByStudent.value.get(student.student_id)?.has_approved_parent) === (familyView.value === 'linked') && `${student.full_name} ${student.email}`.toLowerCase().includes(familySearch.value.trim().toLowerCase())) : [])
 
 const pendingCount = computed(() => applicants.value.filter((applicant) => !applicant.teacher_approval_status || applicant.teacher_approval_status === 'pending').length)
 const approvedCount = computed(() => applicants.value.filter((applicant) => applicant.teacher_approval_status === 'approved').length)
@@ -284,7 +298,7 @@ const visibleApplicants = computed(() => applicants.value.filter(applicant => (a
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(feedbackTimeout); if (value) feedbackTimeout = setTimeout(clearMessage, 5000) })
 watch(activeSection, () => { clearMessage(); selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null })
-watch(() => profile.value?.id, () => { clearMessage(); applicants.value = []; faceStudents.value = []; selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null; inviteParentOpen.value = false })
+watch(() => profile.value?.id, () => { clearMessage(); applicants.value = []; faceStudents.value = []; parentStatuses.value = []; parentStatusesLoaded.value = false; selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null; inviteParentOpen.value = false })
 onBeforeUnmount(() => { clearTimeout(feedbackTimeout) })
 
 async function loadApplicants(background = false) {
@@ -323,6 +337,21 @@ async function loadFaceStudents() {
     faceStudents.value = (data ?? []) as FaceEnrollment[]
   } catch (error) { showError(error) }
   finally { loadingFaces.value = false }
+}
+let parentStatusRequest = 0
+async function loadParentStatuses() {
+  const actor = profile.value?.id, request = ++parentStatusRequest
+  if (!actor || profile.value?.role !== 'admin') return
+  loadingParentStatuses.value = !parentStatusesLoaded.value
+  try {
+    const { data, error } = await supabase.rpc('admin_student_parent_statuses')
+    if (request !== parentStatusRequest || profile.value?.id !== actor || profile.value?.role !== 'admin') return
+    if (error) throw error
+    parentStatuses.value = Array.isArray(data) ? data : []
+    parentStatusesLoaded.value = true; parentStatusesError.value = ''
+  } catch (error) {
+    if (request === parentStatusRequest && profile.value?.id === actor) { parentStatuses.value = []; parentStatusesLoaded.value = false; parentStatusesError.value = toUserFacingErrorMessage(error, 'Unable to load parent connections.') }
+  } finally { if (request === parentStatusRequest) loadingParentStatuses.value = false }
 }
 function openRetake(student: FaceEnrollment) { selectedStudent.value = student; retakeNote.value = ''; retakeError.value = '' }
 async function grantRetake() {
@@ -432,18 +461,19 @@ async function logout() {
 
 onMounted(async () => {
   await initializeSession()
-  if (profile.value?.role === 'admin') await Promise.all([loadApplicants(), loadFaceStudents()])
+  if (profile.value?.role === 'admin') await Promise.all([loadApplicants(), loadFaceStudents(), loadParentStatuses()])
   else loading.value = false
 })
 
 onIonViewWillEnter(async () => {
   if (loading.value || signingOut.value || reviewingTeacherId.value || selectedApplicant.value || profile.value?.role !== 'admin') return
-  await Promise.all([loadApplicants(true), loadFaceStudents()])
+  await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses()])
 })
-useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.role === 'admin', onChange: async () => { await Promise.all([loadApplicants(true), loadFaceStudents()]) } })
+useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.role === 'admin', onChange: async () => { await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses()]) } })
 </script>
 
 <style scoped>
+.family-help { margin:0 22px 20px; color:var(--campus-muted); font-size:12px; line-height:1.6; }
 .admin-page {
   --campus-accent-local: var(--campus-accent, #087443);
   --campus-navy-local: var(--campus-navy, #063f2a);

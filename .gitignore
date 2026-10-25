@@ -8,6 +8,7 @@ android/app/build/
 android/app/google-services.json
 ios/App/Pods/
 coverage/
+tmp/
 **/supabase/.temp/
 .DS_Store
 *.log

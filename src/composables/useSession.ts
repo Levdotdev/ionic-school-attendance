@@ -12,6 +12,9 @@ export interface AppProfile {
   id: string
   role: AppRole
   full_name: string
+  first_name?: string
+  last_name?: string
+  name_review_required?: boolean
   email: string
   teacher_approval_status: TeacherApprovalStatus | null
   teacher_approval_note: string | null
@@ -27,10 +30,36 @@ const loading = ref(true)
 const initialized = ref(false)
 const errorMessage = ref('')
 const passwordRecovery = ref(false)
+const signOutNotice = ref('')
 const PASSWORD_RECOVERY_USER_KEY = 'minsu-password-recovery-user'
 
 let initializePromise: Promise<void> | null = null
 let listenerInstalled = false
+let authEpoch = 0
+let authRequest = 0
+let profileRequest = 0
+let authRefreshTimer: ReturnType<typeof setTimeout> | undefined
+let signingOut = false
+let signOutPromise: Promise<void> | null = null
+
+async function finishNotificationCleanup(): Promise<boolean> {
+  let timer: ReturnType<typeof setTimeout> | undefined
+  try {
+    return await Promise.race([
+      Promise.allSettled([unregisterFromClassNotifications(), cancelStudentTaskReminders()]).then(results => results.every(result => result.status === 'fulfilled')),
+      new Promise<boolean>(resolve => { timer = setTimeout(() => resolve(false), 2000) }),
+    ])
+  } finally { clearTimeout(timer) }
+}
+
+function clearAccountState() {
+  authEpoch++; authRequest++; profileRequest++
+  clearTimeout(authRefreshTimer)
+  session.value = null; user.value = null; profile.value = null
+  errorMessage.value = ''
+  initializePromise = null
+  setPasswordRecovery(false)
+}
 
 function setPasswordRecovery(next: boolean, userId?: string) {
   passwordRecovery.value = next
@@ -60,7 +89,13 @@ function isTeacherApprovalStatus(value: unknown): value is TeacherApprovalStatus
 
 export async function readAccountProfile(userId: string) {
   const columns = 'id,role,full_name,email,teacher_approval_status,teacher_approval_note,teacher_approved_at,created_at'
-  let result = await supabase.from('profiles').select(`${columns},onboarding_completed_at,avatar_path`).eq('id', userId).maybeSingle()
+  const named = await supabase.from('profiles').select(`${columns},first_name,last_name,name_review_required,onboarding_completed_at,avatar_path`).eq('id', userId).maybeSingle()
+  if (!named.error || !['42703', 'PGRST204'].includes(named.error.code) || !/first_name|last_name/.test(named.error.message)) {
+    if (!named.error || !['42703', 'PGRST204'].includes(named.error.code) || !/avatar_path|onboarding_completed_at/.test(named.error.message)) return named
+  }
+  let result = /first_name|last_name/.test(named.error?.message ?? '')
+    ? await supabase.from('profiles').select(`${columns},onboarding_completed_at,avatar_path`).eq('id', userId).maybeSingle()
+    : named
   if (result.error && ['42703', 'PGRST204'].includes(result.error.code) && result.error.message.includes('avatar_path')) {
     result = await supabase.from('profiles').select(`${columns},onboarding_completed_at`).eq('id', userId).maybeSingle()
   }
@@ -81,6 +116,8 @@ export async function readAccountProfile(userId: string) {
 
 export async function refreshProfile(): Promise<AppProfile | null> {
   const currentUser = user.value
+  const request = ++profileRequest
+  const epoch = authEpoch
 
   if (!currentUser) {
     profile.value = null
@@ -88,6 +125,7 @@ export async function refreshProfile(): Promise<AppProfile | null> {
   }
 
   const { data, error } = await readAccountProfile(currentUser.id)
+  if (request !== profileRequest || epoch !== authEpoch || user.value?.id !== currentUser.id) return null
 
   if (error) {
     errorMessage.value = error.message
@@ -106,7 +144,10 @@ export async function refreshProfile(): Promise<AppProfile | null> {
     id: data.id,
     role: data.role,
     full_name: data.full_name,
-    email: currentUser.email || data.email || '',
+    first_name: 'first_name' in data ? String(data.first_name ?? '') : '',
+    last_name: 'last_name' in data ? String(data.last_name ?? '') : '',
+    name_review_required: 'name_review_required' in data && data.name_review_required === true,
+    email: user.value?.email || data.email || '',
     teacher_approval_status: isTeacherApprovalStatus(data.teacher_approval_status)
       ? data.teacher_approval_status
       : null,
@@ -121,12 +162,25 @@ export async function refreshProfile(): Promise<AppProfile | null> {
 
 export async function refreshAuthUser(): Promise<User | null> {
   const previousId = user.value?.id
-  if (!previousId) return null
+  if (!previousId || signingOut) return null
+  const request = ++authRequest
+  const epoch = authEpoch
   const { data, error } = await supabase.auth.getUser()
+  if (request !== authRequest || epoch !== authEpoch || user.value?.id !== previousId || signingOut) return null
   if (error) throw error
-  if (user.value?.id !== previousId || data.user?.id !== previousId) return null
+  if (!data.user) { clearAccountState(); return null }
+  if (data.user.id !== previousId) return null
   user.value = data.user
+  if (session.value?.user.id === previousId) session.value = { ...session.value, user: data.user }
+  if (profile.value?.id === previousId) profile.value = { ...profile.value, email: data.user.email ?? profile.value.email }
   return data.user
+}
+
+function scheduleAuthoritativeRefresh() {
+  clearTimeout(authRefreshTimer)
+  authRefreshTimer = setTimeout(() => {
+    if (!signingOut) void refreshAuthUser().then(() => refreshProfile()).catch(() => undefined)
+  }, 0)
 }
 
 function installAuthListener() {
@@ -134,24 +188,26 @@ function installAuthListener() {
   listenerInstalled = true
 
   supabase.auth.onAuthStateChange((event, nextSession) => {
+    if (signingOut && nextSession) return
     if (event === 'PASSWORD_RECOVERY') setPasswordRecovery(true, nextSession?.user.id)
     else if (nextSession && user.value?.id !== nextSession.user.id) restorePasswordRecovery(nextSession.user.id)
-    if (user.value?.id !== nextSession?.user.id) profile.value = null
-    session.value = nextSession
-    user.value = nextSession?.user ?? null
-
     if (!nextSession) {
-      setPasswordRecovery(false)
-      profile.value = null
-      errorMessage.value = ''
+      clearAccountState()
       return
     }
 
+    if (user.value?.id !== nextSession.user.id) {
+      authEpoch++; authRequest++; profileRequest++
+      profile.value = null
+      user.value = nextSession.user
+    }
+    // Token refresh and cross-tab events can contain an older user snapshot.
+    // Keep verified identities/email until a new server getUser response arrives.
+    session.value = { ...nextSession, user: user.value ?? nextSession.user }
+
     // Defer the database request until the auth callback has returned. This
     // avoids making another Supabase request from inside the auth lock.
-    queueMicrotask(() => {
-      void refreshProfile().catch(() => undefined)
-    })
+    scheduleAuthoritativeRefresh()
   })
 }
 
@@ -167,14 +223,23 @@ export function initializeSession(): Promise<void> {
     errorMessage.value = ''
 
     try {
+      const epoch = authEpoch
       const { data, error } = await supabase.auth.getSession()
       if (error) throw error
-
+      if (epoch !== authEpoch || signingOut) {
+        // SDK INITIAL_SESSION/SIGNED_IN can arrive while getSession waits for
+        // its auth lock. Finish loading that current account before callers
+        // render their dashboard; never restore the superseded snapshot.
+        if (!signingOut && user.value) { await refreshAuthUser(); await refreshProfile() }
+        return
+      }
       session.value = data.session
-      user.value = data.session?.user ?? null
+      // A cached session supplies tokens, not an authoritative identities list.
+      if (user.value?.id !== data.session?.user.id) user.value = data.session?.user ?? null
       if (user.value) restorePasswordRecovery(user.value.id)
 
       if (user.value) {
+        await refreshAuthUser()
         await refreshProfile()
       }
 
@@ -190,25 +255,38 @@ export function initializeSession(): Promise<void> {
   return initializePromise
 }
 
-export async function signOut(): Promise<void> {
-  // Remove the signed-in user's device mapping before Supabase clears the JWT.
-  // A notification failure must not trap someone inside their account.
-  await unregisterFromClassNotifications().catch(() => undefined)
-  await cancelStudentTaskReminders().catch(() => undefined)
+export function signOut(): Promise<void> {
+  if (signOutPromise) return signOutPromise
+  signOutPromise = performSignOut().finally(() => { signOutPromise = null })
+  return signOutPromise
+}
 
-  const { error } = await supabase.auth.signOut()
-  if (error) {
-    if (error.code !== 'session_not_found') throw error
-    // The server already removed this session. Clear this device's stale
-    // credentials too, rather than trapping the person in an expired account.
-    const local = await supabase.auth.signOut({ scope: 'local' })
-    if (local.error && local.error.code !== 'session_not_found') throw local.error
-  }
-
-  session.value = null
-  user.value = null
-  profile.value = null
-  setPasswordRecovery(false)
+async function performSignOut(): Promise<void> {
+  signingOut = true
+  authEpoch++; authRequest++; profileRequest++
+  signOutNotice.value = ''
+  clearTimeout(authRefreshTimer)
+  try {
+    const notices: string[] = []
+    // Remove device mappings while the JWT still exists, but never block
+    // leaving an incomplete account on a never-resolving native/network job.
+    if (!await finishNotificationCleanup()) notices.push('Some device reminders could not be cleared. Check this device’s notification settings.')
+    let error: unknown
+    try { error = (await supabase.auth.signOut()).error } catch (failure) { error = failure }
+    if (error) {
+      let localError: unknown
+      try { localError = (await supabase.auth.signOut({ scope: 'local' })).error } catch (failure) { localError = failure }
+      if (localError && !(typeof localError === 'object' && 'code' in localError && localError.code === 'session_not_found')) {
+        // Current Supabase clears local credentials even when remote
+        // revocation fails. Verify that before allowing the router to leave.
+        const cached = await supabase.auth.getSession()
+        if (cached.error || cached.data.session) throw localError
+      }
+      if (!(typeof error === 'object' && 'code' in error && error.code === 'session_not_found')) notices.unshift('Signed out on this device. Other devices could not be signed out because the server was unavailable.')
+    }
+    clearAccountState()
+    signOutNotice.value = notices.join(' ')
+  } finally { signingOut = false }
 }
 
 export function homePathForRole(role: AppRole): string {
@@ -228,6 +306,7 @@ export function useSession() {
     initialized: readonly(initialized),
     errorMessage: readonly(errorMessage),
     passwordRecovery: readonly(passwordRecovery),
+    signOutNotice: readonly(signOutNotice),
     finishPasswordRecovery: () => { setPasswordRecovery(false) },
     isAuthenticated: computed(() => Boolean(session.value)),
     initializeSession,

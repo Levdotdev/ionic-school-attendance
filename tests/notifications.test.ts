@@ -233,10 +233,35 @@ describe('device push registration lifetime', () => {
     await flushPromises()
     const unregistering = service.unregisterFromClassNotifications()
     await flushPromises()
+    expect(native.pushUnregister).toHaveBeenCalledOnce()
     expect(writes).toEqual([])
     saving.resolve({ data: null, error: null })
     await Promise.allSettled([registering, unregistering])
     expect(writes).toEqual(['registered', 'unregistered'])
+    expect(native.pushUnregister).toHaveBeenCalledOnce()
+  })
+
+  it('does not let delayed logout cleanup remove a newer account’s device mapping', async () => {
+    const oldSave = deferred<{ data: null; error: null }>()
+    let saves = 0
+    native.rpc.mockImplementation(async (name: string) => {
+      if (name === 'register_device_push_token' && ++saves === 1) return oldSave.promise
+      return { data: null, error: null }
+    })
+    const original = service.registerForClassNotifications()
+    await flushPromises()
+    native.pushHandlers.get('registration')!({ value: 'old-token' })
+    await flushPromises()
+    const removing = service.unregisterFromClassNotifications()
+    expect(native.pushUnregister).toHaveBeenCalledOnce()
+    native.getUser.mockResolvedValue({ data: { user: { id: 'user-2' } }, error: null })
+    const replacement = service.registerForClassNotifications()
+    await flushPromises()
+    native.pushHandlers.get('registration')!({ value: 'new-token' })
+    await replacement
+    oldSave.resolve({ data: null, error: null })
+    await Promise.allSettled([original, removing])
+    expect(native.rpc.mock.calls.some(call => call[0] === 'unregister_device_push_token')).toBe(false)
     expect(native.pushUnregister).toHaveBeenCalledOnce()
   })
 

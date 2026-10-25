@@ -45,15 +45,17 @@
 
             <form class="registration-form" @submit.prevent="completeRegistration">
               <ion-input
-                v-model="fullName"
+                v-model="firstName"
                 class="campus-input"
-                label="Student full name"
+                label="First name"
                 label-placement="stacked"
                 fill="outline"
-                autocomplete="name"
+                autocomplete="given-name"
                 :disabled="savingRegistration"
                 required
               />
+              <ion-input v-model="lastName" class="campus-input" label="Last name" label-placement="stacked" fill="outline" autocomplete="family-name" :disabled="savingRegistration" required />
+              <p class="guardian-help">Names are saved in uppercase and class lists are sorted by last name.</p>
 
               <ion-input
                 v-model="guardianEmail"
@@ -414,7 +416,8 @@ const joiningClass = ref(false)
 const studentProfile = ref<StudentProfileRow | null>(null)
 const meetings = ref<AvailableMeeting[]>([])
 const courses = ref<StudentCourse[]>([])
-const fullName = ref('')
+const firstName = ref('')
+const lastName = ref('')
 const guardianEmail = ref('')
 const rawBarcode = ref<string | null>(null)
 const joinCode = ref('')
@@ -562,11 +565,12 @@ async function loadCoursesAndSchedule() {
 
 async function completeRegistration() {
   registrationMessage.value = ''
-  const name = fullName.value.trim()
+  const first = firstName.value.trim().toUpperCase()
+  const last = lastName.value.trim().toUpperCase()
   const email = guardianEmail.value.trim().toLowerCase()
 
-  if (name.length < 2) {
-    registrationMessage.value = 'Enter the student full name.'
+  if (!first || !last || `${first} ${last}`.length > 120) {
+    registrationMessage.value = 'Enter your first name and last name (up to 120 characters combined).'
     return
   }
   if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
@@ -582,7 +586,8 @@ async function completeRegistration() {
 
   try {
     const { error } = await supabase.rpc('complete_student_registration', {
-      p_full_name: name,
+      p_first_name: first,
+      p_last_name: last,
       p_raw_barcode: rawBarcode.value,
       p_guardian_email: email || null,
     })
@@ -757,7 +762,8 @@ async function loadStudentDashboard(promptForFaceEnrollment = false) {
     await initializeSession()
     if (!user.value || profile.value?.role !== 'student') return
 
-    fullName.value = profile.value.full_name
+    firstName.value = profile.value.first_name || ''
+    lastName.value = profile.value.last_name || ''
     await loadStudentProfile()
     if (registrationCompleted.value) {
       await Promise.all([

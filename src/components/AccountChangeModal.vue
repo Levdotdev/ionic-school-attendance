@@ -2,7 +2,10 @@
   <app-modal :open="open" :title="kind === 'email' ? 'Change email address' : 'Change password'" :busy="busy" @close="$emit('close')">
     <form class="account-form" @submit.prevent="save">
       <template v-if="kind === 'email'">
-        <p>Your current email is <strong>{{ user?.email }}</strong>. Confirm the change using the links sent to your current and new addresses. Your email stays unchanged until confirmation is complete.</p>
+        <p>Your current email is <strong>{{ user?.email }}</strong>. Confirmation requires both your current and new addresses. New links expire 30 minutes after the request; your email stays unchanged until confirmation is complete.</p>
+        <p v-if="pendingEmail.status === 'pending'" class="request-state">Pending address: {{ pendingEmail.address }}. Check both inboxes before this request’s 30-minute expiry.</p>
+        <p v-else-if="pendingEmail.status === 'expired'" class="request-state expired">Previous email-change link expired. Request a new link.<br>Previous requested address: {{ pendingEmail.address }}. Your current email has not changed.</p>
+        <p v-else-if="pendingEmail.status === 'unknown'" class="request-state">Previous requested address: {{ pendingEmail.address }}. Its request time could not be verified. Enter the address below to request a fresh confirmation.</p>
         <ion-input v-model="email" type="email" label="New email address" label-placement="stacked" fill="outline" autocomplete="email" :disabled="busy || saved" required />
       </template>
       <template v-else>
@@ -29,12 +32,14 @@ import { IonButton, IonInput, IonSpinner } from '@ionic/vue'
 import { onBeforeUnmount, ref, watch } from 'vue'
 import AppModal from '@/components/AppModal.vue'
 import { useSession } from '@/composables/useSession'
+import { usePendingEmailChange } from '@/composables/usePendingEmailChange'
 import { authActionError, changeAccountEmail, changeAccountPassword } from '@/services/account'
 import { supabase } from '@/lib/supabase'
 
 const props = defineProps<{ open: boolean; kind: 'email' | 'password' }>()
 defineEmits<{ close: [] }>()
 const { user, refreshAuthUser, refreshProfile } = useSession()
+const pendingEmail = usePendingEmailChange(() => user.value, () => props.open && props.kind === 'email')
 const email = ref(''), password = ref(''), confirmation = ref(''), nonce = ref(''), message = ref('')
 const busy = ref(false), failed = ref(false), saved = ref(false), needsVerification = ref(false), codeBusy = ref(false), codeCooldown = ref(0)
 let cooldown: ReturnType<typeof setInterval> | undefined
@@ -67,7 +72,7 @@ async function save() {
   try {
     if (props.kind === 'email') {
       await changeAccountEmail(email.value)
-      message.value = 'Email change requested. Check both your current and new inboxes for confirmation links. Your current address remains active until the change is confirmed.'
+      message.value = 'Email change requested. Check both your current and new inboxes for confirmation links within 30 minutes. Your current address remains active until the change is confirmed.'
     } else {
       await changeAccountPassword(password.value, nonce.value)
       message.value = 'Your password has been updated.'
@@ -92,4 +97,6 @@ ion-button { margin: 0; min-height: 42px; text-transform: none; }
 .account-message { padding: 12px; border-radius: 10px; color: var(--campus-green); background: var(--campus-green-soft); }
 .account-message.error { color: var(--campus-danger); background: var(--campus-danger-soft); }
 .verification-fields { border-top: 1px solid var(--campus-border); padding-top: 16px; }
+.request-state { padding: 12px; border: 1px solid var(--campus-border); border-radius: 10px; background: var(--campus-surface-soft); }
+.request-state.expired { color: var(--campus-warning); }
 </style>

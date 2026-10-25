@@ -26,9 +26,9 @@ import {
 
 const route = useRoute()
 const router = useRouter()
-const { initializeSession, profile, user, refreshProfile } = useSession()
+const { initializeSession, profile, user, refreshProfile, refreshAuthUser } = useSession()
 const { collapsed } = useNavigation()
-useRealtimeRefresh({ channel: 'account-profile', onChange: async () => { await refreshProfile() } })
+useRealtimeRefresh({ channel: 'account-profile', onChange: async () => { await refreshAuthUser(); await refreshProfile() } })
 const showPortalMenu = computed(
   () => Boolean(profile.value?.onboarding_completed_at)
     && /^\/(student|teacher|parent|admin)(\/|$)/.test(route.path)

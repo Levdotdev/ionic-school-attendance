@@ -48,6 +48,14 @@ const students: Row[] = names.map((full_name, index) => ({ id: `student-${index 
 const roleNames: Record<string, string> = { student: names[0], teacher: 'Maria Villanueva', parent: 'Patricia Brito', admin: 'School Administrator' }
 const actorId = role === 'student' ? 'student-1' : `${role}-1`
 const actor: Row = { id: actorId, role, full_name: roleNames[role], email: `${role}@example.test`, onboarding_completed_at: created, created_at: created, teacher_approval_status: role === 'teacher' ? 'approved' : null, teacher_approval_note: null, teacher_approved_at: role === 'teacher' ? created : null, avatar_path: `${actorId}/avatar.jpg` }
+for (const profile of [...students, actor]) {
+  const parts = profile.full_name.toUpperCase().split(' ')
+  profile.last_name = parts.pop()
+  profile.first_name = parts.join(' ')
+  profile.full_name = `${profile.first_name} ${profile.last_name}`
+  profile.name_review_required = false
+}
+if (params.get('page') === 'setup') actor.onboarding_completed_at = null
 const teachers: Row[] = [actor.role === 'teacher' ? actor : { id: 'teacher-1', role: 'teacher', full_name: 'Maria Villanueva', email: 'maria@example.test', teacher_approval_status: 'approved', teacher_approval_note: 'Faculty identity verified.', teacher_approved_at: created, created_at: created }, { id: 'teacher-2', role: 'teacher', full_name: 'Daniel Mendoza', email: 'daniel@example.test', teacher_approval_status: 'pending', teacher_approval_note: null, teacher_approved_at: null, created_at: new Date(Date.now() - 86_400_000).toISOString() }, { id: 'teacher-3', role: 'teacher', full_name: 'Andrea Santos', email: 'andrea@example.test', teacher_approval_status: 'rejected', teacher_approval_note: 'Please contact the registrar to verify your faculty details.', teacher_approved_at: created, created_at: created }]
 const classes: Row[] = ['System Integration and Architecture', 'Application Development', 'Database Administration'].map((name, index) => ({ id: `class-${index + 1}`, teacher_id: 'teacher-1', name, section: null, timezone: 'Asia/Manila', join_code: ['SYS412', 'APP301', 'DBA204'][index], archived_at: null, default_latitude: null, default_longitude: null, default_radius_m: 180, default_max_accuracy_m: 100, created_at: created }))
 const schedules: Row[] = classes.map((course, index) => ({ id: `schedule-${index + 1}`, class_id: course.id, day_of_week: [1, 3, 5][index], starts_at: ['08:00:00', '10:00:00', '13:00:00'][index], ends_at: ['09:30:00', '11:30:00', '14:30:00'][index], room: ['Room 201', 'Computer Laboratory', 'Room 305'][index], is_active: true, attendance_mode: index === 1 ? 'self_online' : 'self_on_site', check_in_minutes_after_start: 30 }))
@@ -92,10 +100,19 @@ function query(table: string) {
 const sampleImage = `data:image/svg+xml,${encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="520" height="360"><rect width="520" height="360" fill="#dce9df"/><circle cx="260" cy="130" r="62" fill="#789985"/><path d="M130 320c5-100 255-100 260 0" fill="#789985"/><rect y="310" width="520" height="50" fill="#173d2b"/><text x="20" y="340" fill="#fff" font-size="16" font-family="sans-serif">Sample fixture photo · No real student data</text></svg>')}`
 const fakeUser: Row = { id: actor.id, email: actor.email, aud: 'authenticated', role: 'authenticated', app_metadata: { provider: 'email', providers: ['email', 'google', 'facebook'] }, user_metadata: { full_name: actor.full_name }, identities: [{ provider: 'email', identity_id: 'email-identity' }, { provider: 'google', identity_id: 'google-identity' }, { provider: 'facebook', identity_id: 'facebook-identity' }], created_at: created }
 const fakeSession = { user: fakeUser, access_token: 'local-fixture-only', refresh_token: 'local-fixture-only', expires_at: Math.floor(Date.now() / 1000) + 3600, expires_in: 3600, token_type: 'bearer' }
+let fixtureSignedOut = params.get('page') === 'login'
 const client = supabase as any
 client.from = query
 client.rpc = (name: string, args?: Row) => {
   if (name === 'my_parent_invitation') return { data: false, error: null }
+  if (name === 'admin_student_parent_statuses') return { data: students.map((student, index) => ({ student_id: student.id, has_approved_parent: index % 3 !== 0, approved_parent_count: index % 3 === 0 ? 0 : 1 })), error: null }
+  if (name === 'teacher_class_attendance_report') return { data: {
+    class_id: args?.p_class_id, class_name: classes.find(course => course.id === args?.p_class_id)?.name,
+    teacher_name: 'MARIA VILLANUEVA', as_of: now.toISOString(), meeting_count: 12,
+    students: students.map((student, index) => ({ student_id: student.id, first_name: student.first_name, last_name: student.last_name, full_name: student.full_name, is_active: true, present_count: 12 - index % 4, absent_count: index % 4, total_count: 12, attendance_rate: (12 - index % 4) / 12 * 100 })),
+    totals: { student_count: students.length, present_count: 126, absent_count: 18, total_count: 144, attendance_rate: 87.5 },
+    accounting_note: 'Canceled meetings are excluded. Missing attendance counts only after the meeting and check-in window have ended.'
+  }, error: null }
   if (name === 'student_guardian_summary') return { data: [{ request_id: 'approved-link', parent_id: 'parent-1', parent_name: 'Patricia Brito', parent_email: 'parent@example.test', status: params.has('pending') ? 'pending' : 'approved', requested_at: created, responded_at: created, review_note: null }], error: null }
   if (name === 'my_parent_link_requests') return { data: [{ id: 'pending-link', parent_id: 'parent-1', parent_email: 'parent@example.test', student_id: 'student-2', student_name: 'Alex Reyes', student_email: 'student2@example.test', status: 'pending', requested_at: created, responded_at: null, review_note: null }], error: null }
   if (name === 'my_face_enrollment_access') return { data: [{ is_enrolled: true, can_retake: false, granted_at: null }], error: null }
@@ -111,8 +128,8 @@ client.rpc = (name: string, args?: Row) => {
 client.channel = () => { const channel = { on: () => channel, subscribe: () => channel, unsubscribe: async () => ({ error: null }) }; return channel }
 client.removeChannel = async () => 'ok'
 client.storage.from = () => ({ createSignedUrl: async () => ({ data: { signedUrl: sampleImage }, error: null }), upload: async () => ({ data: { path: `${actor.id}/new-avatar.jpg` }, error: null }), remove: async () => ({ data: [], error: null }) })
-client.auth.getSession = async () => ({ data: { session: fakeSession }, error: null })
-client.auth.getUser = async () => ({ data: { user: fakeUser }, error: null })
+client.auth.getSession = async () => ({ data: { session: fixtureSignedOut ? null : fakeSession }, error: null })
+client.auth.getUser = async () => ({ data: { user: fixtureSignedOut ? null : fakeUser }, error: null })
 client.auth.onAuthStateChange = () => ({ data: { subscription: { unsubscribe: () => {} } } })
 client.auth.updateUser = async (attributes: Row) => { Object.assign(fakeUser, attributes); return { data: { user: fakeUser }, error: null } }
 client.auth.resetPasswordForEmail = async () => ({ data: {}, error: null })
@@ -120,7 +137,7 @@ client.auth.reauthenticate = async () => ({ data: {}, error: null })
 client.auth.getUserIdentities = async () => ({ data: { identities: fakeUser.identities }, error: null })
 client.auth.linkIdentity = async () => ({ data: {}, error: { message: 'External sign-in is disabled in this local preview.' } })
 client.functions.invoke = async () => ({ data: { accepted: true, message: 'Local sample only; no email was sent.' }, error: null })
-client.auth.signOut = async () => ({ error: null })
+client.auth.signOut = async () => { fixtureSignedOut = true; return { error: null } }
 
 const [{ default: App }, { initializeTheme }, { initializeSession }] = await Promise.all([import('@/App.vue'), import('@/composables/useTheme'), import('@/composables/useSession')])
 const routes = [
@@ -131,12 +148,13 @@ const routes = [
   { path: '/parent', component: () => import('@/views/ParentPage.vue') },
   { path: '/admin', component: () => import('@/views/AdminPage.vue') },
   { path: '/login', component: () => import('@/views/LoginPage.vue') },
+  { path: '/account-setup', component: () => import('@/views/AccountSetupPage.vue') },
 ]
 const router = createRouter({ history: createMemoryHistory(), routes })
 initializeTheme()
 await initializeSession()
 const app = createApp(App).use(IonicVue).use(router)
-const destination = params.get('page') === 'tasks' && role === 'student' ? '/student/tasks' : `/${role}`
+const destination = params.get('page') === 'login' ? '/login' : params.get('page') === 'setup' ? '/account-setup' : params.get('page') === 'tasks' && role === 'student' ? '/student/tasks' : `/${role}`
 await router.replace({ path: destination, query: params.get('section') ? { section: params.get('section')! } : {} })
 await router.isReady()
 app.mount('#app')

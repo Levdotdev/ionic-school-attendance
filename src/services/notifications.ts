@@ -149,7 +149,7 @@ export function registerForClassNotifications(): Promise<NotificationRegistratio
     return Promise.resolve({ supported: false, permission: 'unsupported', tokenRegistered: false })
   }
   if (!registrationPromise) {
-    const epoch = registrationEpoch
+    const epoch = ++registrationEpoch
     const pending = registerNativeNotifications(epoch).finally(() => {
       if (registrationPromise === pending) registrationPromise = null
     })
@@ -222,15 +222,20 @@ async function registerNativeNotifications(epoch: number): Promise<NotificationR
  * invalidate its native registration token.
  */
 export async function unregisterFromClassNotifications(): Promise<void> {
-  registrationEpoch++
+  const epoch = ++registrationEpoch
   registrationPromise = null
   if (!isNativeNotificationPlatform()) return
+  const installationId = getStoredInstallationId()
+  // Start OS removal before waiting for any network save. A stalled network
+  // request must not keep the old account's push token active during logout.
+  const nativeRemoval = PushNotifications.unregister().then(() => null, error => error)
 
   // Finish any already-sent registration before removing this installation.
   // The epoch check rejects callbacks that arrive after sign-out starts.
   await Promise.allSettled([...pendingTokenSaves])
-
-  const installationId = getStoredInstallationId()
+  // A subsequent account may already have registered this installation.
+  // Never let delayed cleanup delete that newer device mapping.
+  if (epoch !== registrationEpoch) { await nativeRemoval; return }
   let serverError: unknown
 
   if (installationId) {
@@ -240,10 +245,9 @@ export async function unregisterFromClassNotifications(): Promise<void> {
     serverError = error
   }
 
-  // Always invalidate the OS token, even if the database cleanup failed. This
-  // prevents a signed-out device from continuing to receive account reminders.
-  await PushNotifications.unregister()
+  const nativeError = await nativeRemoval
   if (serverError) throw serverError
+  if (nativeError) throw nativeError
 }
 
 function classReminderRoute(data: unknown): ClassReminderRoute | null {

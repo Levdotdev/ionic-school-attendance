@@ -30,6 +30,14 @@ beforeEach(async () => {
 })
 
 describe('provider-neutral role routing', () => {
+  it.each(['/privacy-policy', '/data-deletion'])('keeps %s accessible without Auth, profile, onboarding, or recovery checks', async path => {
+    mocks.passwordRecovery.value = true
+    mocks.getSession.mockRejectedValue(new Error('Auth unavailable'))
+    expect(await guard({ path, meta: { public: true } })).toBe(true)
+    expect(mocks.getSession).not.toHaveBeenCalled()
+    expect(mocks.initializeSession).not.toHaveBeenCalled()
+    expect(mocks.maybeSingle).not.toHaveBeenCalled()
+  })
   it('leaves the auth callback free to finish exchanging its code', async () => {
     expect(await guard({ path: '/auth/callback', meta: { public: true } })).toBe(true)
     expect(mocks.getSession).not.toHaveBeenCalled()

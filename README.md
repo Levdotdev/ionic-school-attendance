@@ -7,6 +7,7 @@ An Ionic Vue school attendance system backed by Supabase Auth, PostgreSQL, Row L
 ### Accounts and access
 
 - Email/password registration asks only for credentials. A shared account-setup dialog follows authentication.
+- Setup and Profile use separate first and last names, stored in uppercase. Student lists and teacher reports sort by last name, then first name. Existing full names are split provisionally and require the account holder to review the result, especially compound surnames.
 - Google and Facebook sign-in support through Supabase OAuth.
 - New teacher accounts remain pending until an administrator approves them.
 - Role-based side menus for administrators, teachers, students, and parents.
@@ -49,15 +50,24 @@ Face matching is an attendance aid, not a guarantee of identity. Teachers should
 
 - Teachers can create, edit, and delete classes, weekly schedules, and individual meetings through modals.
 - Class creation asks for a class name; no section field is required.
-- Teachers can archive and restore classes. Archiving preserves attendance/enrollment history and stops new joins, check-ins, generated meetings, and class reminders.
+- Teachers can archive and restore classes. Archiving preserves attendance/enrollment history and stops new joins, check-ins, generated meetings, and class reminders. Private archive periods remain recorded after restoration so archived time does not become missed attendance later.
 - A weekly schedule automatically produces the current week's meeting.
-- A shared, responsive week/month/agenda calendar combines all active classes. Teachers can navigate weeks and open a meeting or recurring schedule from the calendar; students can see courses and dated tasks together.
+- The teacher Overview shows only the current and next class schedules. Weekly schedules and additional meetings are managed from the selected class in Classes.
+- A shared, responsive week/month calendar combines all active classes. Teachers can navigate weeks and open a meeting or recurring schedule from the calendar; students can see courses and dated tasks together.
 - Calendar projections are labeled as planned until an actual meeting is generated. Actual meeting changes take precedence, and a deleted weekly occurrence is not projected again.
 - Parent accounts show linked children's current weekly schedule and their complete available attendance history, including present, recorded absent, inferred absent after a meeting ends, and meetings that were not counted.
 - Teachers can disable, restore, edit, or remove one meeting without changing the repeating schedule.
-- Weekly schedules save the default attendance mode and both check-in opening and closing offsets. An empty closing offset uses the class end time. Weekly repetition is automatic and has no repeat toggle.
+- Weekly schedules save the default attendance mode and optional check-in closing offset. Self-check opens exactly at class start; an empty closing offset uses the class end time. Weekly repetition is automatic and has no repeat toggle.
 - Weekly schedule changes apply to new occurrences and preserve existing meeting overrides. Date inputs show the selected weekday on mobile and desktop.
 - The database uses the Asia/Manila timezone when creating weekly occurrences and reminders.
+
+### Teacher attendance reports
+
+- Each class has cumulative PDF and CSV exports, including archived classes, with class totals and per-student present/absent counts, attendance opportunities, and rates. Reports are ordered by last name and show their calculation timestamp.
+- Only the approved teacher who owns the class can export it. Reports contain attendance totals, without photos, coordinates, or facial data. The browser downloads a file; Android opens the system save/share sheet using a temporary file in app-private cache.
+- Future, disabled/not-counted meetings and meetings overlapping a recorded archive period are excluded. Recorded attendance counts once class starts; a missing check-in becomes absent only after both the class and its check-in window close. Voided check-ins count as absent.
+
+Known enrollment periods preserve withdrawal/rejoin gaps. For legacy inactive enrollments whose withdrawal dates are unknown, reports retain recorded attendance only; they do not invent missing absences. Archive periods known at migration time and subsequent archive/restore actions are retained; earlier unrecorded archive or enrollment dates cannot be reconstructed. The required migration is `20261025012148_structured_names_attendance_reports_and_auth_sync.sql`.
 
 ### Notifications
 

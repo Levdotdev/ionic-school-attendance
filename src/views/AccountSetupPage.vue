@@ -4,7 +4,7 @@
       <main class="setup-waiting"><img src="/minsu-logo.png" alt="Mindoro State University" /></main>
       <ion-modal class="account-setup-modal" :is-open="open" :backdrop-dismiss="false" :can-dismiss="canDismiss">
         <section class="setup-dialog-shell">
-        <ion-header class="ion-no-border"><ion-toolbar><ion-title>Complete your account</ion-title><ion-buttons slot="end"><ion-button :disabled="busy" @click="leave">Sign out</ion-button></ion-buttons></ion-toolbar></ion-header>
+        <ion-header class="ion-no-border"><ion-toolbar><ion-title>Complete your account</ion-title><ion-buttons slot="end"><ion-button :disabled="leaving" @click="leave">{{ leaving ? 'Signing out…' : 'Sign out' }}</ion-button></ion-buttons></ion-toolbar></ion-header>
         <div class="setup-content">
           <form class="setup-form" @submit.prevent="submit">
             <img src="/minsu-logo.png" alt="" class="setup-logo" />
@@ -12,7 +12,8 @@
             <h1>Make yourself at home.</h1>
             <p class="setup-description">Choose how you use MinSU Attendance. This works the same whether you signed in with email, Google, or Facebook.</p>
             <p class="signed-in-email">{{ profile?.email || user?.email }}</p>
-            <ion-input v-model="fullName" label="Full name" label-placement="stacked" fill="outline" autocomplete="name" :maxlength="120" :disabled="busy" required />
+            <div class="name-fields"><ion-input v-model="firstName" label="First name" label-placement="stacked" fill="outline" autocomplete="given-name" autocapitalize="characters" :maxlength="80" :disabled="busy || leaving" required /><ion-input v-model="lastName" label="Last name" label-placement="stacked" fill="outline" autocomplete="family-name" autocapitalize="characters" :maxlength="80" :disabled="busy || leaving" required /></div>
+            <p class="setup-note">Names are saved in uppercase. Use your correct last name for class lists and reports.</p>
             <fieldset class="role-picker" :disabled="busy">
               <legend>I am a</legend>
               <label v-for="option in availableRoles" :key="option.value" class="role-option" :class="{ selected: role === option.value }">
@@ -27,7 +28,7 @@
             <p v-else-if="role === 'student'" class="setup-note">Next, scan your school ID and enroll your face in your student profile.</p>
             <p v-else-if="role === 'parent'" class="setup-note">Review and approve your child’s link request after setup. Your attendance access begins only after you approve.</p>
             <p v-if="errorMessage" class="setup-error" role="alert">{{ errorMessage }}</p>
-            <ion-button type="submit" expand="block" :disabled="busy || !role || !invitationChecked"><ion-spinner v-if="busy" name="crescent" /><template v-else>Continue<ion-icon slot="end" :icon="arrowForwardOutline" /></template></ion-button>
+            <ion-button type="submit" expand="block" :disabled="busy || leaving || !role || !invitationChecked"><ion-spinner v-if="busy" name="crescent" /><template v-else>Continue<ion-icon slot="end" :icon="arrowForwardOutline" /></template></ion-button>
             <p class="setup-note">Your role is saved securely. Contact the administrator if you later need it changed.</p>
           </form>
         </div>
@@ -51,14 +52,17 @@ const router = useRouter()
 const { profile, user, initializeSession, refreshProfile, signOut } = useSession()
 const open = ref(true)
 const busy = ref(false)
-const fullName = ref('')
+const leaving = ref(false)
+const firstName = ref('')
+const lastName = ref('')
 const role = ref<RegistrationRole | ''>('')
 const errorMessage = ref('')
 const invitedParent = ref(false)
 const invitationChecked = ref(false)
 let unmounting = false
+let entryRequest = 0
 const canDismiss = () => unmounting || !open.value || (!busy.value && (!user.value || Boolean(profile.value?.onboarding_completed_at)))
-onBeforeUnmount(() => { unmounting = true })
+onBeforeUnmount(() => { unmounting = true; entryRequest++ })
 const roleOptions = [
   { value: 'student', title: 'Student', description: 'Check in, view classes, and plan tasks.', icon: bookOutline },
   { value: 'teacher', title: 'Teacher', description: 'Manage classes, schedules, and attendance.', icon: schoolOutline },
@@ -67,28 +71,34 @@ const roleOptions = [
 const availableRoles = computed(() => invitedParent.value ? roleOptions.filter(option => option.value === 'parent') : roleOptions)
 
 async function leave() {
-  if (busy.value) return
-  busy.value = true
+  if (leaving.value) return
+  leaving.value = true
+  entryRequest++
   try {
     await signOut()
     open.value = false
     await router.replace('/login')
   } catch (error) { errorMessage.value = toUserFacingErrorMessage(error) }
-  finally { busy.value = false }
+  finally { leaving.value = false }
 }
 
 async function submit() {
-  if (busy.value) return
+  if (busy.value || leaving.value) return
   if (!invitationChecked.value) { errorMessage.value = 'Wait while your invitation is checked.'; return }
   if (invitedParent.value && role.value !== 'parent') { errorMessage.value = 'This invitation requires a parent / guardian account.'; return }
-  if (fullName.value.trim().length < 2) { errorMessage.value = 'Enter your full name (at least 2 characters).'; return }
+  const first = firstName.value.trim().replace(/\s+/g, ' ').toUpperCase()
+  const last = lastName.value.trim().replace(/\s+/g, ' ').toUpperCase()
+  if (!first || !last || first.length > 80 || last.length > 80 || `${first} ${last}`.length > 120) { errorMessage.value = 'Enter your first and last name (up to 120 characters combined).'; return }
   if (!role.value) { errorMessage.value = 'Choose how you will use your account.'; return }
   busy.value = true
   errorMessage.value = ''
   try {
-    const { error } = await supabase.rpc('complete_account_setup', { p_full_name: fullName.value.trim(), p_role: role.value })
+    const request = entryRequest
+    const { error } = await supabase.rpc('complete_account_setup', { p_first_name: first, p_last_name: last, p_role: role.value })
     if (error) throw error
+    if (request !== entryRequest || leaving.value) return
     const currentProfile = await refreshProfile()
+    if (request !== entryRequest || leaving.value) return
     if (!currentProfile?.onboarding_completed_at) throw new Error('Your account was not saved. Please try again.')
     open.value = false
     await router.replace(accountPathForProfile(currentProfile))
@@ -100,6 +110,8 @@ async function submit() {
 }
 
 onIonViewWillEnter(async () => {
+  const request = ++entryRequest
+  const current = () => request === entryRequest && !unmounting && !leaving.value
   open.value = true
   role.value = ''
   invitationChecked.value = false
@@ -107,17 +119,22 @@ onIonViewWillEnter(async () => {
   errorMessage.value = ''
   try {
     await initializeSession()
+    if (!current()) return
     const currentProfile = await refreshProfile()
+    if (!current()) return
     if (currentProfile?.onboarding_completed_at) { open.value = false; await router.replace(accountPathForProfile(currentProfile)); return }
     if (!currentProfile) { errorMessage.value = 'Your account profile could not be loaded. Sign out and try again.'; return }
     const invitation = await supabase.rpc('my_parent_invitation')
+    if (!current()) return
     if (invitation.error) throw invitation.error
     invitedParent.value = invitation.data === true
     if (invitedParent.value) role.value = 'parent'
     invitationChecked.value = true
-    const suggestedName = user.value?.user_metadata?.full_name ?? user.value?.user_metadata?.name
-    fullName.value = typeof suggestedName === 'string' ? suggestedName : ''
-  } catch (error) { errorMessage.value = toUserFacingErrorMessage(error) }
+    const metadata = user.value?.user_metadata
+    const suggested = String(metadata?.full_name ?? metadata?.name ?? '').trim().split(/\s+/).filter(Boolean)
+    firstName.value = String(currentProfile.first_name || metadata?.given_name || suggested.slice(0, -1).join(' ') || (suggested.length === 1 ? suggested[0] : '')).toUpperCase()
+    lastName.value = String(currentProfile.last_name || metadata?.family_name || (suggested.length > 1 ? suggested.at(-1) : '') || '').toUpperCase()
+  } catch (error) { if (current()) errorMessage.value = toUserFacingErrorMessage(error) }
 })
 </script>
 
@@ -150,6 +167,9 @@ h1 { font: 34px/1.1 Georgia, serif; letter-spacing: -.02em; margin: -6px 0 0; }
 .approval-note ion-icon { font-size: 19px; flex: 0 0 auto; }
 .setup-note { font-size: 12px; color: var(--campus-muted); line-height: 1.6; margin: 0; }
 .setup-error { font-size: 13px; color: var(--campus-danger); background: var(--campus-danger-soft); border-radius: 10px; padding: 12px; line-height: 1.5; margin: 0; }
+.name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.name-fields ion-input { text-transform: uppercase; }
+@media (max-width: 420px) { .name-fields { grid-template-columns: 1fr; } }
 ion-button[type=submit] { margin: 0; min-height: 46px; --border-radius: 12px; text-transform: none; }
 ion-input { --border-color: var(--campus-border); --border-radius: 12px; }
 @media (max-width: 575px) { .account-setup-modal { --width: calc(100% - 20px); --border-radius: 18px; } .setup-form { padding: 20px; } }

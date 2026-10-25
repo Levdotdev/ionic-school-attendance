@@ -9,6 +9,11 @@
             <h1>{{ linking ? 'Connecting your sign-in method' : 'Completing sign in' }}</h1>
             <p>Please wait while we securely connect your account.</p>
           </template>
+          <template v-else-if="emailConfirmationPending">
+            <h1>Confirm your other email address</h1>
+            <p>The first confirmation was accepted. Your email has not changed yet. Open the confirmation link sent to your other email address within 30 minutes of the original request.</p>
+            <ion-button expand="block" @click="returnToSecurity">Return to your account</ion-button>
+          </template>
           <template v-else-if="errorMessage">
             <ion-icon :icon="alertCircleOutline" class="error-icon" />
             <h1>{{ linking ? 'Account was not linked' : 'Sign in was not completed' }}</h1>
@@ -31,10 +36,14 @@ import { clearIdentityLinkAttempt, clearOAuthAttempt, completeIdentityLink, comp
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const router = useRouter()
-const { initializeSession, refreshProfile, refreshAuthUser, passwordRecovery, signOut } = useSession()
+const { initializeSession, refreshProfile, refreshAuthUser, passwordRecovery, finishPasswordRecovery, signOut } = useSession()
 const processing = ref(true)
 const errorMessage = ref('')
-const linking = Boolean(pendingIdentityLink())
+const emailConfirmationPending = ref(false)
+const callbackUrl = new URL(window.location.href)
+const isEmailAction = callbackUrl.searchParams.has('token_hash')
+const emailActionType = callbackUrl.searchParams.get('type')
+const linking = !isEmailAction && Boolean(pendingIdentityLink())
 
 async function returnToSecurity() {
   clearIdentityLinkAttempt()
@@ -55,10 +64,17 @@ async function returnToLogin() {
 
 onMounted(async () => {
   try {
-    await completeSocialSignIn()
+    const result = await completeSocialSignIn()
+    if ('emailChangeConfirmationPending' in result) {
+      clearOAuthAttempt(); clearIdentityLinkAttempt()
+      emailConfirmationPending.value = true
+      processing.value = false
+      return
+    }
     await initializeSession()
     clearOAuthAttempt()
-    if (passwordRecovery.value) {
+    if (isEmailAction && emailActionType !== 'recovery') finishPasswordRecovery?.()
+    if (passwordRecovery.value && (!isEmailAction || emailActionType === 'recovery')) {
       clearIdentityLinkAttempt()
       await router.replace('/account/recover')
       return

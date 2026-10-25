@@ -11,6 +11,8 @@ let originalClaimSql = ''
 let claimFixSql = ''
 const beforeParentConsentMigrations: string[] = []
 let parentConsentMigration = ''
+const beforeStructuredNamesMigrations: string[] = []
+let structuredNamesMigration = ''
 
 // Supabase-owned tables/functions and Cron transport are the only scaffolds.
 // Application schemas, triggers, policies, grants, and RPCs below are the
@@ -20,6 +22,7 @@ const platformScaffold = `
   create role authenticated;
   create role service_role bypassrls;
   create role supabase_admin;
+  create role supabase_auth_admin;
   create schema auth;
   create table auth.users (
     id uuid primary key, aud text, role text, email text,
@@ -28,6 +31,12 @@ const platformScaffold = `
     raw_user_meta_data jsonb default '{}'::jsonb,
     created_at timestamptz default now(), updated_at timestamptz default now()
   );
+  create table auth.identities (
+    id uuid primary key default gen_random_uuid(), user_id uuid not null references auth.users(id) on delete cascade,
+    provider text not null, identity_data jsonb not null default '{}'::jsonb
+  );
+  grant usage on schema auth to supabase_auth_admin;
+  grant all on auth.users,auth.identities to supabase_auth_admin;
   create function auth.uid() returns uuid language sql stable as $$
     select (nullif(current_setting('request.jwt.claims', true), '')::jsonb ->> 'sub')::uuid
   $$;
@@ -66,6 +75,8 @@ beforeAll(async () => {
   const migrations = (await readdir(migrationDirectory)).filter((file) => file.endsWith('.sql')).sort()
   for (const file of migrations) {
     const sql = await readFile(`${migrationDirectory}/${file}`, 'utf8')
+    if (file.endsWith('structured_names_attendance_reports_and_auth_sync.sql')) structuredNamesMigration = sql
+    else if (!structuredNamesMigration) beforeStructuredNamesMigrations.push(sql)
     if (file.endsWith('parent_consent_and_meeting_simplification.sql')) parentConsentMigration = sql
     else if (!parentConsentMigration) beforeParentConsentMigrations.push(sql)
     if (file.endsWith('class_notification_infrastructure.sql')) {
@@ -159,6 +170,316 @@ async function seedOnlineEvidence() {
 }
 
 describe('actual database migrations', () => {
+  it('backfills uppercase name parts conservatively and flags every legacy surname for confirmation', async () => {
+    const legacy = new PGlite({ extensions: { pgcrypto } })
+    try {
+      await legacy.exec(platformScaffold)
+      for (const sql of beforeStructuredNamesMigrations) await legacy.exec(sql.replace(/^create extension if not exists pg_cron with schema pg_catalog;\r?$/gim, ''))
+      await legacy.exec(`insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data) values
+        ('${studentId}','legacy-compound@example.invalid',now(),'{"full_name":"Lance Kianne De la Cruz"}'),
+        ('${parentId}','legacy-single@example.invalid',now(),'{"full_name":"Cher"}');`)
+      await legacy.exec(structuredNamesMigration)
+      expect((await legacy.query(`select first_name,last_name,full_name,name_review_required from public.profiles order by email`)).rows)
+        .toEqual([
+          { first_name: 'LANCE KIANNE DE LA', last_name: 'CRUZ', full_name: 'LANCE KIANNE DE LA CRUZ', name_review_required: true },
+          { first_name: 'CHER', last_name: '', full_name: 'CHER', name_review_required: true },
+        ])
+    } finally { await legacy.close() }
+  })
+
+  it('calculates cumulative counts without canceled, future or still-open missing check-ins and sorts by surname', async () => {
+    await seedClass('teacher_manual')
+    await database.exec(`delete from public.meetings;
+      update public.class_enrollments set joined_at=now()-interval '30 days';
+      update private.class_enrollment_periods set enrolled_at=now()-interval '30 days';
+      update public.profiles set first_name='Zeta',last_name='Zulu' where id='${studentId}';
+      insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','historical-student@example.invalid',now());
+      update public.profiles set first_name='Ana',last_name='Alpha' where id='${unrelatedId}';
+      insert into public.class_enrollments(class_id,student_id,is_active) values('${classId}','${unrelatedId}',false);
+      insert into public.meetings(id,class_id,meeting_date,starts_at,ends_at,attendance_mode,attendance_enabled,attendance_opens_at,attendance_closes_at,created_by)
+      select ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'${classId}',current_date,
+        case when n=5 then now()+interval '1 day' when n=6 then now()-interval '30 minutes' else now()-interval '1 day' end,
+        case when n=5 then now()+interval '25 hours' when n=6 then now()+interval '30 minutes' else now()-interval '23 hours' end,
+        case when n=7 then 'self_online'::public.attendance_mode else 'teacher_manual'::public.attendance_mode end,n<>4,
+        now()-interval '1 day',case when n=7 then now()+interval '1 hour' when n=5 then now()+interval '26 hours' else now()+interval '1 minute' end,'${teacherId}'
+      from generate_series(1,8) n;
+      insert into public.attendance_records(meeting_id,student_id,status,source,recorded_by)
+      select ('10000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'${studentId}',
+        case when n=2 then 'absent'::public.attendance_status else 'present'::public.attendance_status end,'teacher','${teacherId}'
+      from unnest(array[1,2,4,5,6]) n;
+      insert into public.attendance_records(meeting_id,student_id,status,source,selfie_path,recorded_by,verification_status,reviewed_by,reviewed_at)
+      values('10000000-0000-4000-8000-000000000008','${studentId}','absent','self_check','Private/Photo.jpg','${studentId}','rejected','${teacherId}',now());
+      insert into public.attendance_records(meeting_id,student_id,status,source,recorded_by)
+      values('10000000-0000-4000-8000-000000000001','${unrelatedId}','present','teacher','${teacherId}');`)
+    await become(teacherId)
+    const report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.students.map((student: { last_name: string }) => student.last_name)).toEqual(['ALPHA','ZULU'])
+    expect(report.students[0]).toMatchObject({ student_id: unrelatedId, is_active: false, present_count: 1, absent_count: 0, total_count: 1, attendance_rate: 100 })
+    expect(report.students[1]).toMatchObject({ student_id: studentId, present_count: 2, absent_count: 3, total_count: 5, attendance_rate: 40 })
+    expect(report.totals).toEqual({ student_count: 2, present_count: 3, absent_count: 3, total_count: 6, attendance_rate: 50 })
+    expect(report.meeting_count).toBe(5)
+    expect(JSON.stringify(report)).not.toContain('Private/Photo.jpg')
+  })
+
+  it('retains prior attendance periods while excluding leave/rejoin gaps and meetings after archive', async () => {
+    await seedClass('teacher_manual')
+    await database.exec(`delete from public.meetings;
+      update private.class_enrollment_periods set enrolled_at=now()-interval '10 days';
+      update public.class_enrollments set is_active=false where student_id='${studentId}';
+      update private.class_enrollment_periods set withdrawn_at=now()-interval '4 days';
+      update public.class_enrollments set is_active=true where student_id='${studentId}';
+      update private.class_enrollment_periods set enrolled_at=now()-interval '1 day' where withdrawn_at is null;
+      insert into public.meetings(class_id,meeting_date,starts_at,ends_at,attendance_mode,attendance_opens_at,attendance_closes_at,created_by)
+      select '${classId}',current_date,now()-make_interval(days=>n)-interval '1 hour',now()-make_interval(days=>n),
+        'teacher_manual',now()-make_interval(days=>n)-interval '1 hour',now()-make_interval(days=>n),'${teacherId}'
+      from unnest(array[5,2,0]) n;`)
+    await become(teacherId)
+    let report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.students[0]).toMatchObject({ present_count: 0, absent_count: 2, total_count: 2 })
+    await database.exec(`reset role; delete from public.class_enrollments where student_id='${studentId}';`)
+    await become(teacherId)
+    report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.students[0]).toMatchObject({ is_active: false, absent_count: 2, total_count: 2 })
+    await database.exec(`reset role; update public.classes set archived_at=now()-interval '2 days' where id='${classId}';`)
+    await become(teacherId)
+    report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.students[0]).toMatchObject({ absent_count: 1, total_count: 1 })
+    expect((await database.query(`select has_table_privilege('authenticated','private.class_enrollment_periods','SELECT') as exposed`)).rows)
+      .toEqual([{ exposed: false }])
+  })
+
+  it('keeps archived occurrences not counted after restore in reports and student/parent history without deleting evidence', async () => {
+    await seedClass('teacher_manual')
+    const beforeId='20000000-0000-4000-8000-000000000001', archivedId='20000000-0000-4000-8000-000000000002'
+    const archivedMissingId='20000000-0000-4000-8000-000000000003', boundaryId='20000000-0000-4000-8000-000000000004'
+    const selfie=`${studentId}/${archivedId}/Preserved-Selfie.jpg`
+    await database.exec(`delete from public.meetings;
+      update public.class_enrollments set joined_at=now()-interval '30 days';
+      update private.class_enrollment_periods set enrolled_at=now()-interval '30 days';
+      insert into public.meetings(id,class_id,meeting_date,starts_at,ends_at,attendance_opens_at,attendance_closes_at,created_by)
+      values('${beforeId}','${classId}',current_date-3,now()-interval '73 hours',now()-interval '72 hours',now()-interval '73 hours',now()-interval '72 hours','${teacherId}');
+      insert into public.attendance_records(meeting_id,student_id,status,source,recorded_by)
+      values('${beforeId}','${studentId}','present','teacher','${teacherId}');`)
+    await become(teacherId)
+    const readReport=async () => (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect((await readReport()).totals).toMatchObject({ present_count: 1, absent_count: 0, total_count: 1 })
+    await database.exec(`select public.set_class_archived('${classId}'); reset role;
+      update public.classes set archived_at=now()-interval '2 days' where id='${classId}';
+      insert into public.meetings(id,class_id,meeting_date,starts_at,ends_at,attendance_opens_at,attendance_closes_at,created_by)
+      values('${archivedId}','${classId}',current_date-1,now()-interval '25 hours',now()-interval '24 hours',now()-interval '25 hours',now()-interval '24 hours','${teacherId}'),
+      ('${archivedMissingId}','${classId}',current_date-1,now()-interval '26 hours',now()-interval '25 hours',now()-interval '26 hours',now()-interval '25 hours','${teacherId}'),
+      ('${boundaryId}','${classId}',current_date-2,now()-interval '49 hours',now()-interval '47 hours',now()-interval '49 hours',now()-interval '47 hours','${teacherId}');
+      insert into public.attendance_records(meeting_id,student_id,status,source,recorded_by,selfie_path)
+      values('${archivedId}','${studentId}','present','teacher','${teacherId}','${selfie}');
+      insert into storage.objects(bucket_id,name) values('attendance-selfies','${selfie}');`)
+    await become(teacherId)
+    await database.exec('savepoint archived_manual_denied;')
+    await expect(database.query(`select public.record_manual_attendance('${archivedId}','${studentId}','present',null)`)).rejects.toThrow('Restore the archived class')
+    await database.exec('rollback to savepoint archived_manual_denied;')
+    expect((await readReport()).totals).toMatchObject({ present_count: 1, absent_count: 0, total_count: 1 })
+    await database.exec(`select public.set_class_archived('${classId}',false); select public.set_class_archived('${classId}',false);`)
+    expect((await readReport()).totals).toMatchObject({ present_count: 1, absent_count: 0, total_count: 1 })
+    for (const actor of [studentId,parentId]) {
+      await become(actor)
+      const history=(await database.query(`select meeting_id,attendance_enabled,selfie_path,is_inferred from public.student_attendance_history('${studentId}')`)).rows
+      expect(history).toHaveLength(2)
+      expect(history).toContainEqual({ meeting_id: beforeId, attendance_enabled: true, selfie_path: null, is_inferred: false })
+      expect(history).toContainEqual({ meeting_id: archivedId, attendance_enabled: false, selfie_path: selfie, is_inferred: false })
+    }
+    await database.exec('reset role;')
+    expect((await database.query('select count(*)::integer as count from private.class_archive_periods')).rows).toEqual([{ count: 1 }])
+    expect((await database.query(`select count(*)::integer as count from storage.objects where name='${selfie}'`)).rows).toEqual([{ count: 1 }])
+    expect((await database.query(`select count(*)::integer as count from public.attendance_records where student_id='${studentId}'`)).rows).toEqual([{ count: 2 }])
+    // A subsequent occurrence starting exactly at restore is countable again.
+    await database.exec(`update private.class_archive_periods set restored_at=now()-interval '12 hours';
+      insert into public.meetings(class_id,meeting_date,starts_at,ends_at,attendance_opens_at,attendance_closes_at,created_by)
+      values('${classId}',current_date,now()-interval '12 hours',now()-interval '11 hours',now()-interval '12 hours',now()-interval '11 hours','${teacherId}');`)
+    await become(teacherId)
+    expect((await readReport()).totals).toMatchObject({ present_count: 1, absent_count: 1, total_count: 2 })
+    await database.exec(`select public.set_class_archived('${classId}'); select public.set_class_archived('${classId}'); reset role;`)
+    expect((await database.query('select count(*)::integer as count from private.class_archive_periods')).rows).toEqual([{ count: 2 }])
+    expect((await database.query('select count(*)::integer as count from private.class_archive_periods where restored_at is null')).rows).toEqual([{ count: 1 }])
+    expect((await database.query(`select has_table_privilege('authenticated','private.class_archive_periods','SELECT') as exposed`)).rows).toEqual([{ exposed: false }])
+  })
+
+  it('requires explicit name parts, preserves compound surnames and keeps profile authorization protected', async () => {
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${studentId}','structured-student@example.invalid',now());`)
+    await become(studentId)
+    await database.exec('savepoint missing_surname;')
+    await expect(database.query("select public.complete_account_setup('Lance','','student')")).rejects.toThrow('first name and last name')
+    await database.exec('rollback to savepoint missing_surname;')
+    await database.exec("select public.complete_account_setup('  Lance   Kianne ','De la Cruz','student');")
+    expect((await database.query('select first_name,last_name,full_name,name_review_required from public.profiles')).rows)
+      .toEqual([{ first_name: 'LANCE KIANNE', last_name: 'DE LA CRUZ', full_name: 'LANCE KIANNE DE LA CRUZ', name_review_required: false }])
+    await database.exec("update public.profiles set first_name='Lance Kianne',last_name='De la Cruz';")
+    expect((await database.query('select last_name,name_review_required from public.profiles')).rows)
+      .toEqual([{ last_name: 'DE LA CRUZ', name_review_required: false }])
+    await database.exec('savepoint role_reassignment;')
+    await expect(database.query("update public.profiles set role='admin'")).rejects.toThrow('permission denied')
+    await database.exec('rollback to savepoint role_reassignment;')
+    await database.exec("update public.profiles set full_name='Lance Brito';")
+    expect((await database.query('select full_name,last_name,name_review_required from public.profiles')).rows)
+      .toEqual([{ full_name: 'LANCE BRITO', last_name: 'BRITO', name_review_required: true }])
+  })
+
+  it('registers uppercase structured names without modifying the scanned credential or guardian email', async () => {
+    await seedClass()
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','new-structured@example.invalid',now());`)
+    await become(unrelatedId)
+    await database.exec(`select public.complete_account_setup('Ana María','De los Santos','student');
+      select public.complete_student_registration('Ana María','De los Santos','Case-Sensitive-id-aB12','VERIFIED-PARENT@EXAMPLE.INVALID');`)
+    expect((await database.query(`select first_name,last_name,full_name,name_review_required from public.profiles where id='${unrelatedId}'`)).rows)
+      .toEqual([{ first_name: 'ANA MARÍA', last_name: 'DE LOS SANTOS', full_name: 'ANA MARÍA DE LOS SANTOS', name_review_required: false }])
+    expect((await database.query(`select guardian_email from public.student_profiles where user_id='${unrelatedId}'`)).rows)
+      .toEqual([{ guardian_email: 'verified-parent@example.invalid' }])
+    await database.exec('reset role;')
+    expect((await database.query(`select barcode_hash=encode(extensions.digest('Case-Sensitive-id-aB12','sha256'),'hex') as exact_payload
+      from private.student_credentials where student_id='${unrelatedId}'`)).rows).toEqual([{ exact_payload: true }])
+  })
+
+  it('normalizes ordinary text server-side but preserves URLs, file keys, emails and status values', async () => {
+    await seedClass('teacher_manual')
+    await become(studentId)
+    await database.exec(`insert into public.student_tasks(id,student_id,title,description,due_at,priority)
+      values('${workerId}','${studentId}','Read chapter one','Read https://Example.test/CaseSensitive?token=aBcd and email Parent@Example.test',now()+interval '1 day','high');
+      insert into public.student_task_links(task_id,title,url) values('${workerId}','Video reference','https://Example.test/CaseSensitive?token=aBcd');`)
+    expect((await database.query('select title,description,priority from public.student_tasks')).rows)
+      .toEqual([{ title: 'READ CHAPTER ONE', description: 'READ https://Example.test/CaseSensitive?token=aBcd AND EMAIL Parent@Example.test', priority: 'high' }])
+    expect((await database.query('select title,url from public.student_task_links')).rows)
+      .toEqual([{ title: 'VIDEO REFERENCE', url: 'https://Example.test/CaseSensitive?token=aBcd' }])
+    await become(teacherId)
+    await database.exec(`update public.classes set name='System integration' where id='${classId}';
+      update public.class_schedules set room='Room a-2' where id='${scheduleId}';`)
+    expect((await database.query(`select name,timezone from public.classes where id='${classId}'`)).rows)
+      .toEqual([{ name: 'SYSTEM INTEGRATION', timezone: 'Asia/Manila' }])
+    expect((await database.query(`select room from public.class_schedules where id='${scheduleId}'`)).rows).toEqual([{ room: 'ROOM A-2' }])
+  })
+
+  it('invalidates only the identity owner for link, update, removal and confirmed email changes', async () => {
+    await seedClass()
+    const revisions = async () => (await database.query<{ user_id: string; revision: number }>(`select user_id,revision from public.portal_change_events where user_id in('${studentId}','${teacherId}') order by user_id`)).rows
+    const original = await revisions()
+    await database.exec(`insert into auth.identities(id,user_id,provider) values('${workerId}','${studentId}','google');`)
+    const inserted = await revisions()
+    expect(Number(inserted.find(row => row.user_id===studentId)!.revision)).toBe(Number(original.find(row => row.user_id===studentId)!.revision)+1)
+    expect(inserted.find(row => row.user_id===teacherId)!.revision).toBe(original.find(row => row.user_id===teacherId)!.revision)
+    await database.exec(`update auth.identities set provider='facebook' where id='${workerId}'; delete from auth.identities where id='${workerId}';`)
+    expect(Number((await revisions()).find(row => row.user_id===studentId)!.revision)).toBe(Number(original.find(row => row.user_id===studentId)!.revision)+3)
+    await database.exec(`update auth.users set email='changed-student@example.invalid' where id='${studentId}';`)
+    expect(Number((await revisions()).find(row => row.user_id===studentId)!.revision)).toBeGreaterThan(Number(original.find(row => row.user_id===studentId)!.revision)+3)
+    await become(studentId)
+    expect((await database.query('select user_id from public.portal_change_events')).rows).toEqual([{ user_id: studentId }])
+    expect((await database.query(`select has_table_privilege('authenticated','auth.identities','INSERT') as can_forge`)).rows).toEqual([{ can_forge: false }])
+  })
+
+  it('runs identity invalidation with managed Auth permissions without exposing private counter writes', async () => {
+    await seedClass()
+    const revision = Number((await database.query<{ revision: number }>(`select revision from public.portal_change_events where user_id='${studentId}'`)).rows[0].revision)
+    await database.exec(`set local role supabase_auth_admin;
+      insert into auth.identities(id,user_id,provider) values('${workerId}','${studentId}','google');
+      update auth.identities set identity_data='{"email":"provider@example.invalid"}' where id='${workerId}';
+      delete from auth.identities where id='${workerId}';
+      update auth.users set email='managed-email@example.invalid' where id='${studentId}'; reset role;`)
+    expect(Number((await database.query<{ revision: number }>(`select revision from public.portal_change_events where user_id='${studentId}'`)).rows[0].revision)).toBeGreaterThanOrEqual(revision+4)
+    expect((await database.query(`select has_table_privilege('supabase_auth_admin','public.portal_change_events','UPDATE') as direct_write`)).rows)
+      .toEqual([{ direct_write: false }])
+  })
+
+  it('keeps report/name endpoints invoker-only and private enrollment data protected by RLS and explicit grants', async () => {
+    expect((await database.query(`select p.proname,p.prosecdef,p.proretset from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='public' and p.proname in('admin_student_parent_statuses','teacher_class_attendance_report') order by p.proname`)).rows)
+      .toEqual([
+        { proname: 'admin_student_parent_statuses', prosecdef: false, proretset: false },
+        { proname: 'teacher_class_attendance_report', prosecdef: false, proretset: false },
+      ])
+    expect((await database.query(`select c.relrowsecurity as rls,has_table_privilege('authenticated',c.oid,'SELECT') as signed_in,
+      has_table_privilege('anon',c.oid,'SELECT') as anonymous from pg_class c join pg_namespace n on n.oid=c.relnamespace
+      where n.nspname='private' and c.relname='class_enrollment_periods'`)).rows)
+      .toEqual([{ rls: true, signed_in: false, anonymous: false }])
+    expect((await database.query(`select count(*)::integer as unsafe from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='private' and p.proname in('teacher_class_attendance_report_impl','admin_student_parent_statuses_impl','auth_identity_changed','track_class_enrollment_period')
+      and (not p.prosecdef or not coalesce(p.proconfig @> array['search_path=""'],false))`)).rows)
+      .toEqual([{ unsafe: 0 }])
+  })
+
+  it('returns complete scalar JSON arrays beyond the Data API row cap for school family status and class exports', async () => {
+    await seedClass('teacher_manual')
+    // This case exercises scalar report payloads, not bulk invalidation fanout.
+    // All authorization/name/enrollment triggers and RPCs remain real; the
+    // realtime counter's functional behavior is covered in separate cases.
+    await database.exec(`alter table public.class_enrollments disable trigger portal_resource_changed;
+      insert into auth.users(id,email,email_confirmed_at,raw_user_meta_data)
+      select gen_random_uuid(),'bulk-student-'||n||'@example.invalid',now(),jsonb_build_object('full_name','Student '||n) from generate_series(1,1001) n;
+      insert into public.class_enrollments(class_id,student_id,is_active)
+      select '${classId}',id,false from public.profiles where email like 'bulk-student-%';
+      alter table public.class_enrollments enable trigger portal_resource_changed;
+      insert into auth.users(id,email,email_confirmed_at) values('${adminId}','bulk-admin@example.invalid',now());
+      update public.profiles set role='admin',onboarding_completed_at=now() where id='${adminId}';`)
+    await become(adminId)
+    expect((await database.query<{ count: number }>('select jsonb_array_length(public.admin_student_parent_statuses()) as count')).rows[0].count).toBe(1002)
+    await become(teacherId)
+    const report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.students).toHaveLength(1002)
+    expect(report.totals.student_count).toBe(1002)
+  })
+
+  it('permits trusted invitation retry after the 30-minute link lifetime while suppressing immediate duplicates', async () => {
+    await seedClass()
+    await database.exec('set local role service_role;')
+    const first = (await database.query<{ invitation_id: string }>(`select invitation_id from public.reserve_parent_invitation('${studentId}','expired-half-hour@example.invalid')`)).rows[0].invitation_id
+    expect((await database.query(`select should_send from public.reserve_parent_invitation('${studentId}','expired-half-hour@example.invalid')`)).rows).toEqual([{ should_send: false }])
+    await database.exec(`reset role; update private.parent_invitations set requested_at=now()-interval '31 minutes' where id='${first}'; set local role service_role;`)
+    const retry = (await database.query<{ invitation_id: string; should_send: boolean }>(`select * from public.reserve_parent_invitation('${studentId}','expired-half-hour@example.invalid')`)).rows[0]
+    expect(retry.should_send).toBe(true)
+    expect(retry.invitation_id).not.toBe(first)
+    await database.exec(`select public.finish_parent_invitation('${first}',true); reset role;`)
+    expect((await database.query(`select status from private.parent_invitations where id='${retry.invitation_id}'`)).rows).toEqual([{ status: 'reserved' }])
+  })
+
+  it('separates verified approved family links from pending, rejected and unverified parent connections for admins', async () => {
+    await seedClass()
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${adminId}','family-admin@example.invalid',now());
+      update public.profiles set role='admin',onboarding_completed_at=now() where id='${adminId}';`)
+    await become(studentId)
+    await database.exec('savepoint private_admin_family;')
+    await expect(database.query('select * from public.admin_student_parent_statuses()')).rejects.toThrow('Administrator access required')
+    await database.exec('rollback to savepoint private_admin_family;')
+    await become(adminId)
+    expect((await database.query<{ statuses: unknown }>('select public.admin_student_parent_statuses() as statuses')).rows[0].statuses)
+      .toEqual([{ student_id: studentId, has_approved_parent: true, approved_parent_count: 1 }])
+    await database.exec(`reset role; update public.guardian_link_requests set status='pending';`)
+    await become(adminId)
+    expect((await database.query<{ statuses: unknown }>('select public.admin_student_parent_statuses() as statuses')).rows[0].statuses)
+      .toEqual([{ student_id: studentId, has_approved_parent: false, approved_parent_count: 0 }])
+    await database.exec(`reset role; update public.guardian_link_requests set status='approved'; update auth.users set email_confirmed_at=null where id='${parentId}';`)
+    await become(adminId)
+    expect((await database.query<{ statuses: unknown }>('select public.admin_student_parent_statuses() as statuses')).rows[0].statuses)
+      .toEqual([{ student_id: studentId, has_approved_parent: false, approved_parent_count: 0 }])
+  })
+
+  it('restricts cumulative exports to the approved owner teacher, including archived classes', async () => {
+    await seedClass()
+    for (const actor of [studentId,parentId,pendingTeacherId]) {
+      await become(actor); await database.exec('savepoint report_denied;')
+      await expect(database.query(`select public.teacher_class_attendance_report('${classId}')`)).rejects.toThrow('Approved teacher access required')
+      await database.exec('rollback to savepoint report_denied;')
+    }
+    await database.exec(`reset role; insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','other-teacher@example.invalid',now());
+      update public.profiles set role='teacher',teacher_approval_status='approved',teacher_approved_at=now(),onboarding_completed_at=now() where id='${unrelatedId}';`)
+    await become(unrelatedId); await database.exec('savepoint other_teacher_report;')
+    await expect(database.query(`select public.teacher_class_attendance_report('${classId}')`)).rejects.toThrow('Only this class teacher')
+    await database.exec('rollback to savepoint other_teacher_report;')
+    await become(teacherId)
+    await database.exec(`select public.set_class_archived('${classId}');`)
+    const report = (await database.query<{ report: any }>(`select public.teacher_class_attendance_report('${classId}') as report`)).rows[0].report
+    expect(report.class_id).toBe(classId)
+    expect(report.class_name).toBe('DATABASE INTEGRATION')
+    expect(report.totals.student_count).toBe(1)
+    expect(report.students[0].attendance_rate).toBeNull()
+    expect(JSON.stringify(report)).not.toMatch(/latitude|longitude|selfie_path|embedding|guardian_email/)
+    expect((await database.query(`select has_function_privilege('anon','public.teacher_class_attendance_report(uuid)','EXECUTE') as anonymous`)).rows)
+      .toEqual([{ anonymous: false }])
+  })
   it('migrates legacy email-only links to pending consent without deleting attendance or enrollments', async () => {
     const legacy = new PGlite({ extensions: { pgcrypto } })
     try {
@@ -543,7 +864,7 @@ describe('actual database migrations', () => {
     expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
     expect((await database.query(`select * from public.visible_schedule_meeting_exceptions(current_date-7,current_date+7)`)).rows).toHaveLength(0)
     await become(studentId)
-    expect((await database.query("select name from public.join_class('DBTEST01')")).rows).toEqual([{ name: 'Database integration' }])
+    expect((await database.query("select name from public.join_class('DBTEST01')")).rows).toEqual([{ name: 'DATABASE INTEGRATION' }])
     await become(teacherId)
     expect((await database.query(`select parent_email,status from public.student_guardian_summary('${studentId}')`)).rows)
       .toEqual([{ parent_email: 'verified-parent@example.invalid', status: 'approved' }])

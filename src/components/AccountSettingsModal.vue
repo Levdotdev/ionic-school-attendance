@@ -20,8 +20,10 @@
         <div v-if="selectedPicture" class="picture-crop"><label for="avatar-zoom">Adjust crop</label><input id="avatar-zoom" v-model.number="pictureZoom" type="range" min="1" max="3" step="0.05" :disabled="pictureBusy" /><div class="picture-actions"><ion-button size="small" :disabled="pictureBusy" @click="savePicture">{{ pictureBusy ? 'Saving…' : 'Save picture' }}</ion-button><ion-button size="small" fill="clear" :disabled="pictureBusy" @click="clearPicture">Cancel</ion-button></div></div>
       </section>
       <form class="name-form" @submit.prevent="saveName">
-        <ion-input v-model="name" label="Full name" label-placement="stacked" fill="outline" autocomplete="name" required :minlength="2" :maxlength="120" />
-        <ion-button type="submit" :disabled="saving || name.trim() === profile.full_name || name.trim().length < 2">
+        <p v-if="profile.name_review_required" class="name-review">Please confirm your first and last name. Your older single-field name was split automatically, so a compound last name may need correction.</p>
+        <div class="profile-name-fields"><ion-input v-model="firstName" label="First name" label-placement="stacked" fill="outline" autocomplete="given-name" autocapitalize="characters" required :maxlength="80" /><ion-input v-model="lastName" label="Last name" label-placement="stacked" fill="outline" autocomplete="family-name" autocapitalize="characters" required :maxlength="80" /></div>
+        <p class="name-help">Names are saved in uppercase and class lists are sorted by last name.</p>
+        <ion-button type="submit" :disabled="saving || !firstName.trim() || !lastName.trim() || (!profile.name_review_required && firstName.trim().toUpperCase() === profile.first_name && lastName.trim().toUpperCase() === profile.last_name)">
           {{ saving ? 'Saving…' : 'Save name' }}
         </ion-button>
       </form>
@@ -58,7 +60,8 @@ const { profile, refreshProfile, refreshAuthUser } = useSession()
 const { avatarUrl, initials, onAvatarError } = useProfileAvatar()
 const native = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
 const nativeCamera = Capacitor.isNativePlatform()
-const name = ref('')
+const firstName = ref('')
+const lastName = ref('')
 const saving = ref(false)
 const registering = ref(false)
 const message = ref('')
@@ -77,7 +80,12 @@ watch(message, value => {
 })
 
 watch(() => props.open, open => {
-  if (open) { name.value = profile.value?.full_name ?? ''; message.value = ''; notificationMessage.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined) }
+  if (open) {
+    const legacy = (profile.value?.full_name ?? '').trim().split(/\s+/).filter(Boolean)
+    firstName.value = (profile.value?.first_name || legacy.slice(0, -1).join(' ') || (legacy.length === 1 ? legacy[0] : '')).toUpperCase()
+    lastName.value = (profile.value?.last_name || (legacy.length > 1 ? legacy.at(-1) : '') || '').toUpperCase()
+    message.value = ''; notificationMessage.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined)
+  }
   else clearPicture()
 })
 onBeforeUnmount(() => { clearPicture(); clearTimeout(feedbackTimer) })
@@ -129,12 +137,13 @@ async function deletePicture() {
 }
 
 async function saveName() {
-  const fullName = name.value.trim()
-  if (!profile.value || fullName.length < 2 || fullName.length > 120) return
+  const first = firstName.value.trim().replace(/\s+/g, ' ').toUpperCase()
+  const last = lastName.value.trim().replace(/\s+/g, ' ').toUpperCase()
+  if (!profile.value || !first || !last || first.length > 80 || last.length > 80 || `${first} ${last}`.length > 120) { failed.value = true; message.value = 'Enter your first and last name (up to 120 characters combined).'; return }
   saving.value = true
   message.value = ''
   try {
-    const { data, error } = await supabase.from('profiles').update({ full_name: fullName }).eq('id', profile.value.id).select('id').single()
+    const { data, error } = await supabase.from('profiles').update({ first_name: first, last_name: last }).eq('id', profile.value.id).select('id').single()
     if (error) throw error
     if (!data) throw new Error('Your profile could not be updated. Please sign in again.')
     await refreshProfile()
@@ -160,6 +169,11 @@ async function enableReminders() {
 </script>
 
 <style scoped>
+.profile-name-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.profile-name-fields ion-input { text-transform: uppercase; }
+.name-help { font-size: 12px; color: var(--campus-muted); line-height: 1.6; }
+.name-review { margin: 0; padding: 12px; border-radius: 10px; color: var(--campus-warning); background: var(--campus-warning-soft); font-size: 12px; line-height: 1.6; }
+@media (max-width: 420px) { .profile-name-fields { grid-template-columns: 1fr; } }
 .settings-content { display: grid; gap: 26px; padding: 6px 2px; }
 .settings-label { margin: 0 0 8px; color: var(--campus-muted); font-size: 11px; text-transform: uppercase; letter-spacing: .1em; }
 h2 { font-family: var(--campus-heading-font); font-weight: 500; margin: 0; font-size: 28px; }

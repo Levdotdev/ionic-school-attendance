@@ -15,6 +15,18 @@ const routes = [
     meta: { public: true },
   },
   {
+    path: '/privacy-policy',
+    component: () => import('@/views/PublicPolicyPage.vue'),
+    props: { kind: 'privacy' },
+    meta: { public: true },
+  },
+  {
+    path: '/data-deletion',
+    component: () => import('@/views/PublicPolicyPage.vue'),
+    props: { kind: 'deletion' },
+    meta: { public: true },
+  },
+  {
     path: '/auth/callback',
     component: () => import('@/views/AuthCallbackPage.vue'),
     meta: { public: true },
@@ -77,7 +89,7 @@ const roleDestination = (role?: AppRole | null): RouteLocationRaw => {
 
 router.beforeEach(async (to) => {
   // Let the callback finish exchanging its grant before checking the profile.
-  if (to.path === '/auth/callback') return true
+  if (to.path === '/auth/callback' || to.path === '/privacy-policy' || to.path === '/data-deletion') return true
 
   const {
     data: { session },
