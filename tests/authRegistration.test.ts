@@ -38,7 +38,7 @@ vi.mock('@/lib/supabase', () => ({ supabase: { auth: {
 vi.mock('@/services/oauth', () => ({
   beginSocialSignIn: mocks.beginSocialSignIn,
   initializeNativeOAuthCallback: async () => undefined,
-  oauthRedirectUrl: () => 'https://ionic-school-attendance.vercel.app/auth/callback',
+  emailRedirectUrl: () => 'https://ionic-school-attendance.vercel.app/auth/callback',
 }))
 
 import LoginPage from '@/views/LoginPage.vue'

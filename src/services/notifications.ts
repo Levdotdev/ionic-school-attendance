@@ -14,6 +14,8 @@ export type ReminderAudience = 'teacher' | 'student'
 export type ClassReminderRoute =
   | '/teacher?section=schedules'
   | '/student?section=schedule'
+  | '/student?section=history'
+  | '/parent?section=history'
 
 export interface NotificationRegistrationResult {
   supported: boolean
@@ -114,6 +116,26 @@ async function ensureClassReminderChannel(): Promise<void> {
     lights: true,
     lightColor: '#EFB71B',
   })
+  await PushNotifications.createChannel({
+    id: 'attendance-updates', name: 'Attendance updates', description: 'Present and absent attendance updates',
+    importance: 4, visibility: 0, vibration: true, lights: true, lightColor: '#EFB71B',
+  })
+}
+
+/** Read-only profile status; never prompts for permission or registers a token. */
+export async function getDeviceNotificationStatus(): Promise<boolean> {
+  if (!isNativeNotificationPlatform()) return false
+  const installation = getStoredInstallationId()
+  if (!installation) return false
+  const permission = await PushNotifications.checkPermissions()
+  if (permission.receive !== 'granted') return false
+  const current = await supabase.auth.getUser()
+  if (current.error) throw current.error
+  if (!current.data.user) return false
+  const { data, error } = await supabase.from('device_push_tokens').select('id').eq('user_id', current.data.user.id)
+    .eq('installation_id', installation).eq('is_active', true).limit(1)
+  if (error) throw error
+  return Boolean(data?.length)
 }
 
 async function saveNativePushToken(token: string, expectedUserId: string, epoch: number): Promise<void> {
@@ -254,6 +276,12 @@ function classReminderRoute(data: unknown): ClassReminderRoute | null {
   if (!data || typeof data !== 'object') return null
 
   const payload = data as Record<string, unknown>
+  if (payload.kind === 'attendance-status') {
+    if (payload.status !== 'present' && payload.status !== 'absent') return null
+    if (payload.audience === 'parent') return '/parent?section=history'
+    if (payload.audience === 'student') return '/student?section=history'
+    return null
+  }
   if (payload.kind !== 'class-reminder') return null
   if (payload.audience === 'teacher') return '/teacher?section=schedules'
   if (payload.audience === 'student') return '/student?section=schedule'

@@ -13,12 +13,33 @@ const IDENTITY_LINK_KEY = 'minsu-identity-link-attempt'
 const IDENTITY_LINK_WINDOW_MS = 15 * 60 * 1000
 const NEW_ACCOUNT_WINDOW_MS = 5 * 60 * 1000
 const NATIVE_CALLBACK_URL = 'edu.minsu.attendance://auth/callback'
+const NATIVE_EMAIL_PAGE = 'https://ionic-school-attendance.vercel.app/auth/mobile'
+const NATIVE_CALLBACK_HISTORY_KEY = 'minsu-native-callback-digests'
 
 let nativeCallbackInstalled = false
+let nativeCallbackQueue: Promise<void> = Promise.resolve()
 
 export function oauthRedirectUrl(): string {
   if (Capacitor.isNativePlatform()) return NATIVE_CALLBACK_URL
   return new URL('/auth/callback', window.location.origin).toString()
+}
+
+/** HTTPS links remain clickable in Gmail and offer an explicit native handoff. */
+export function emailRedirectUrl(): string {
+  return Capacitor.isNativePlatform() ? NATIVE_EMAIL_PAGE : new URL('/auth/callback', window.location.origin).toString()
+}
+
+export function nativeEmailActionLink(value: string): string | null {
+  try {
+    const url = new URL(value)
+    const token = url.searchParams.get('token_hash')
+    const type = url.searchParams.get('type')
+    if (!token?.trim() || !['email', 'email_change', 'recovery', 'invite'].includes(type ?? '')) return null
+    const result = new URL(NATIVE_CALLBACK_URL)
+    result.searchParams.set('token_hash', token)
+    result.searchParams.set('type', type!)
+    return result.toString()
+  } catch { return null }
 }
 
 export async function beginSocialSignIn(provider: SocialProvider): Promise<void> {
@@ -97,7 +118,7 @@ export async function completeIdentityLink(): Promise<string> {
   return `${attempt.returnPath}?account=security&linked=${attempt.provider}`
 }
 
-function nativeCallbackPath(value: string): string | null {
+export function nativeCallbackPath(value: string): string | null {
   try {
     const url = new URL(value)
     const isExpectedCallback = url.protocol === 'edu.minsu.attendance:'
@@ -115,24 +136,36 @@ function nativeCallbackPath(value: string): string | null {
  * can exchange the PKCE authorization code. The launch URL check also covers
  * the operating system recreating the app while the provider browser is open.
  */
-export async function initializeNativeOAuthCallback(): Promise<void> {
+export async function initializeNativeOAuthCallback(navigate: (path: string) => void = path => window.location.assign(path)): Promise<void> {
   if (!Capacitor.isNativePlatform() || nativeCallbackInstalled) return
   nativeCallbackInstalled = true
 
-  const continueInApp = async (value: string) => {
+  const continueInApp = async (value: string, isLaunchReplay: boolean) => {
     const path = nativeCallbackPath(value)
     if (!path) return
-
+    // getLaunchUrl keeps returning the original launch link after a webview
+    // reload. Remember only a digest, so a cold launch cannot replay/reload its
+    // grant indefinitely or overwrite a later warm-link callback.
+    const bytes = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value))
+    const digest = Array.from(new Uint8Array(bytes), byte => byte.toString(16).padStart(2, '0')).join('')
+    let history: string[] = []
+    try {
+      const stored: unknown = JSON.parse(window.sessionStorage.getItem(NATIVE_CALLBACK_HISTORY_KEY) ?? '[]')
+      if (Array.isArray(stored)) history = stored.filter(item => typeof item === 'string' && /^[a-f0-9]{64}$/.test(item)).slice(-20)
+    } catch { /* The in-memory current-URL check still avoids identical reloads. */ }
+    // Explicit appUrlOpen intents can retry a link after a temporary failure.
+    // Suppress only the launch URL automatically repeated after each reload.
+    if (isLaunchReplay && history.includes(digest)) return
+    try { window.sessionStorage.setItem(NATIVE_CALLBACK_HISTORY_KEY, JSON.stringify([...history, digest].slice(-20))) } catch { /* Session storage may be disabled. */ }
     await Browser.close().catch(() => undefined)
-    window.location.assign(path)
+    if (`${window.location.pathname}${window.location.search}${window.location.hash}` !== path) navigate(path)
   }
-
-  await App.addListener('appUrlOpen', ({ url }) => {
-    void continueInApp(url)
-  })
-
-  const launchUrl = await App.getLaunchUrl()
-  if (launchUrl?.url) await continueInApp(launchUrl.url)
+  const enqueue = (url: string, isLaunchReplay: boolean) => { nativeCallbackQueue = nativeCallbackQueue.catch(() => undefined).then(() => continueInApp(url, isLaunchReplay)); return nativeCallbackQueue }
+  try {
+    await App.addListener('appUrlOpen', ({ url }) => { void enqueue(url, false).catch(() => console.warn('The account link could not be opened. Please open the link again.')) })
+    const launchUrl = await App.getLaunchUrl()
+    if (launchUrl?.url) await enqueue(launchUrl.url, true)
+  } catch (error) { nativeCallbackInstalled = false; throw error }
 }
 
 /**

@@ -30,11 +30,8 @@
       <section v-if="profile.role === 'teacher' || profile.role === 'student'" class="notification-settings">
         <h3>Class reminders</h3>
         <p>{{ profile.role === 'teacher' ? 'Teacher reminders are sent 5 minutes before class and at the start.' : 'Choose your reminder times on each course’s weekly schedule. Your choices apply to its upcoming meetings.' }}</p>
-        <template v-if="native">
-          <ion-button fill="outline" :disabled="registering" @click="enableReminders">{{ registering ? 'Connecting…' : 'Enable notifications on this device' }}</ion-button>
-          <p v-if="notificationMessage" role="status">{{ notificationMessage }}</p>
-        </template>
-        <p v-else class="availability-note">Class push reminders are delivered through the installed Android app. Your weekly schedules are available here in the browser.</p>
+        <p class="notification-status" :class="{ enabled: remindersEnabled }" role="status">{{ remindersEnabled ? 'Enabled' : 'Disabled' }}</p>
+        <p v-if="!native" class="availability-note">Class push reminders are delivered through the installed Android app. Your weekly schedules are available here in the browser.</p>
       </section>
       <p v-if="message" class="settings-message" :class="{ error: failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     </div>
@@ -45,13 +42,13 @@
 import { IonButton, IonInput } from '@ionic/vue'
 import { Capacitor } from '@capacitor/core'
 import { onBeforeUnmount, ref, watch } from 'vue'
-import { Camera, CameraResultType, CameraSource } from '@capacitor/camera'
+import { captureSelfie, releaseSelfiePreview } from '@/services/selfie'
 import AppModal from '@/components/AppModal.vue'
 import { useSession } from '@/composables/useSession'
 import { useProfileAvatar } from '@/composables/useProfileAvatar'
 import { removeAvatar, uploadAvatar, validateAvatar } from '@/services/account'
 import { supabase } from '@/lib/supabase'
-import { registerForClassNotifications } from '@/services/notifications'
+import { getDeviceNotificationStatus } from '@/services/notifications'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 const props = defineProps<{ open: boolean }>()
@@ -63,10 +60,9 @@ const nativeCamera = Capacitor.isNativePlatform()
 const firstName = ref('')
 const lastName = ref('')
 const saving = ref(false)
-const registering = ref(false)
+const remindersEnabled = ref(false)
 const message = ref('')
 const failed = ref(false)
-const notificationMessage = ref('')
 const pictureInput = ref<HTMLInputElement>()
 const selectedPicture = ref<Blob | null>(null)
 const picturePreview = ref('')
@@ -84,7 +80,8 @@ watch(() => props.open, open => {
     const legacy = (profile.value?.full_name ?? '').trim().split(/\s+/).filter(Boolean)
     firstName.value = (profile.value?.first_name || legacy.slice(0, -1).join(' ') || (legacy.length === 1 ? legacy[0] : '')).toUpperCase()
     lastName.value = (profile.value?.last_name || (legacy.length > 1 ? legacy.at(-1) : '') || '').toUpperCase()
-    message.value = ''; notificationMessage.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined)
+    message.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined)
+    if (native) void getDeviceNotificationStatus().then(enabled => { if (props.open) remindersEnabled.value = enabled }).catch(() => { remindersEnabled.value = false })
   }
   else clearPicture()
 })
@@ -107,16 +104,14 @@ function choosePicture(event: Event) {
 }
 async function takePicture() {
   pictureBusy.value = true
+  let photo: Awaited<ReturnType<typeof captureSelfie>> | null = null
   try {
-    const photo = await Camera.getPhoto({ source: CameraSource.Camera, resultType: CameraResultType.Uri, quality: 85, width: 1600, height: 1600, correctOrientation: true })
-    if (!photo.webPath) throw new Error('The camera did not return a picture.')
-    const response = await fetch(photo.webPath)
-    const blob = await response.blob()
-    setPicture(blob.type && blob.type !== 'application/octet-stream' ? blob : new Blob([blob], { type: `image/${photo.format === 'png' ? 'png' : 'jpeg'}` }))
+    photo = await captureSelfie()
+    if (props.open) setPicture(photo.blob)
   } catch (error) {
     const text = toUserFacingErrorMessage(error)
     if (!/cancel/i.test(text)) { failed.value = true; message.value = text }
-  } finally { pictureBusy.value = false }
+  } finally { releaseSelfiePreview(photo); pictureBusy.value = false }
 }
 async function savePicture() {
   if (!profile.value || !selectedPicture.value || pictureBusy.value) return
@@ -155,17 +150,6 @@ async function saveName() {
   } finally { saving.value = false }
 }
 
-async function enableReminders() {
-  registering.value = true
-  notificationMessage.value = ''
-  try {
-    const result = await registerForClassNotifications()
-    notificationMessage.value = result.tokenRegistered
-      ? 'Class reminders are enabled on this device.'
-      : 'Notifications are disabled. Allow them in your device settings, then try again.'
-  } catch (error) { notificationMessage.value = toUserFacingErrorMessage(error) }
-  finally { registering.value = false }
-}
 </script>
 
 <style scoped>
@@ -186,6 +170,8 @@ p { color: var(--campus-muted); font-size: 13px; line-height: 1.6; }
 .preference-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; border-top: 1px solid var(--campus-border); padding-top: 24px; }
 .preference-row p { margin: 0; }
 .notification-settings { border-top: 1px solid var(--campus-border); padding-top: 24px; }
+.notification-status { display:inline-block; margin:0; padding:6px 10px; border:1px solid var(--campus-border); border-radius:8px; font-weight:600; }
+.notification-status.enabled { color:var(--campus-green); background:var(--campus-green-soft); }
 .availability-note { background: var(--campus-surface-soft); border-radius: 10px; padding: 12px; }
 .settings-message { margin: 0; padding: 12px; background: var(--campus-green-soft); color: var(--campus-green); border-radius: 10px; }
 .settings-message.error { background: var(--campus-danger-soft); color: var(--campus-danger); }

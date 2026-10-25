@@ -92,6 +92,58 @@ The checked-in `verify_jwt = false` setting only bypasses the platform JWT
 check for this server-to-server cron endpoint. The function still rejects every
 request that does not contain the matching `x-reminder-secret` value.
 
+## Attendance and approval alerts
+
+The same authenticated one-minute Cron dispatcher also drains the private
+activity-alert outbox. It sends:
+
+- Present/absent attendance updates to the student's Android app.
+- The same updates to each currently approved linked parent's Android app and
+  current verified email address.
+- New completed teacher-registration requests to verified administrator emails.
+- Approval/rejection decisions to the teacher's current verified email.
+
+There are no student attendance emails. Push lock-screen text omits names,
+photos, precise location and biometric data. The email identifies the child,
+subject and meeting time, with a link to the authenticated portal. Auth email
+templates and invitation emails remain managed by Supabase Authentication.
+
+Explicit marks/self-checks enqueue on write. Missing attendance is inferred only
+after a counted meeting and its self-check window close, for an eligible enrolled
+student. The migration records an activation cutoff so installation does not
+send historical absence emails or replay existing teacher requests. Corrections
+and voided self-checks supersede pending earlier status alerts. Canceled/deleted
+meetings, archived classes, revoked parent consent and transferred/disabled device
+tokens are rechecked before sending. Parent identity is the approved parent UUID;
+delivery resolves the current verified Auth email and never uses an old mailbox
+saved in an outbox payload.
+
+Configure these additional server secrets through the Supabase CLI or dashboard:
+
+```text
+ALERT_SMTP_HOST=smtp.gmail.com
+ALERT_SMTP_PORT=465
+ALERT_SMTP_USER=<existing SMTP username>
+ALERT_SMTP_PASSWORD=<existing SMTP app password>
+ALERT_SMTP_FROM=MinSU Attendance <verified-sender@example.com>
+ALERT_SITE_URL=https://ionic-school-attendance.vercel.app
+```
+
+Use implicit TLS on 465 for Gmail. TLS certificate verification remains enabled.
+Credentials stay in server secrets, never in the frontend, SQL or repository.
+SMTP is loaded lazily through pinned `npm:nodemailer@10.2.1`; an email transport
+failure retries its own delivery and does not prevent Android pushes or class
+reminders. Processing is bounded, leases are reclaimed after interruption, and
+transient failures use backoff. Delivery is at least once: a provider accepting a
+message immediately before a process interruption can cause a retry. Stable email
+message IDs and Android notification tags reduce duplicate presentation.
+
+Alerts are normally picked up by the next one-minute Cron run; provider delivery
+and Android permissions/connectivity can add delay. This is not an exact-time or
+guaranteed-delivery channel. No test email is sent by deployment. Verify actual
+mailbox delivery and physical-device notification delivery with explicitly
+authorized test recipients.
+
 At present the dispatcher sends Android FCM tokens. The schema can retain APNs
 tokens for a future iOS sender, but an APNs provider must be added before iOS
 remote notifications are enabled.

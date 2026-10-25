@@ -36,6 +36,7 @@ describe('branded authentication emails', () => {
     const config = await readFile('supabase/config.toml', 'utf8')
     const patch = await buildAuthEmailPatch()
     expect(patch.security_manual_linking_enabled).toBe(true)
+    expect(patch.security_update_password_require_current_password).toBe(true)
     expect(patch.mailer_otp_exp).toBe(1800)
     expect(patch.mailer_secure_email_change_enabled).toBe(false)
     expect(config).toContain('otp_expiry = 1800')

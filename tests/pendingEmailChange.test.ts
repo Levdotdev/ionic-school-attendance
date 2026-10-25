@@ -9,6 +9,7 @@ vi.mock('@ionic/vue', async () => {
   const { defineComponent, h } = await import('vue')
   return {
     IonSpinner: defineComponent({ render: () => null }),
+    IonIcon: defineComponent({ render: () => null }),
     IonButton: defineComponent({ props: ['disabled', 'type'], setup: (props, { slots }) => () => h('button', { type: props.type || 'button', disabled: props.disabled }, slots.default?.()) }),
     IonInput: defineComponent({ props: ['modelValue', 'label'], emits: ['update:modelValue'], setup: (props, { emit }) => () => h('input', { 'aria-label': props.label, value: props.modelValue, onInput: (event: Event) => emit('update:modelValue', (event.target as HTMLInputElement).value) }) }),
   }
@@ -18,7 +19,7 @@ vi.mock('@/components/AppModal.vue', async () => {
   return { default: defineComponent({ props: ['open'], setup: (props, { slots }) => () => props.open ? h('section', slots.default?.()) : null }) }
 })
 vi.mock('@/composables/useSession', () => ({ useSession: () => ({ user, refreshAuthUser: mocks.refreshAuth, refreshProfile: mocks.refreshProfile }) }))
-vi.mock('@/services/account', () => ({ authActionError: (error: Error) => error.message, changeAccountEmail: mocks.changeEmail, changeAccountPassword: vi.fn() }))
+vi.mock('@/services/account', () => ({ authActionError: (error: Error) => error.message, changeAccountEmail: mocks.changeEmail, changeAccountPassword: vi.fn(), readAccountSecurity: async () => ({hasPassword:true}) }))
 vi.mock('@/lib/supabase', () => ({ supabase: { auth: { reauthenticate: vi.fn() } } }))
 import AccountChangeModal from '@/components/AccountChangeModal.vue'
 
@@ -68,9 +69,11 @@ describe('30-minute email-change state', () => {
     user.value = { ...user.value, new_email: 'old-request@example.com', email_change_sent_at: '2026-10-24T01:00:00Z' }
     mocks.changeEmail.mockImplementation(async email => { user.value = { ...user.value, new_email: email, email_change_sent_at: new Date().toISOString() }; return user.value })
     const wrapper = mount(AccountChangeModal, { props: { open: false, kind: 'email' } })
-    await wrapper.setProps({ open: true }); await wrapper.get('input[aria-label="New email address"]').setValue('fresh@example.com')
+    await wrapper.setProps({ open: true }); await flushPromises()
+    await wrapper.get('input[aria-label="Current password"]').setValue('Current-password!')
+    await wrapper.get('input[aria-label="New email address"]').setValue('fresh@example.com')
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(mocks.changeEmail).toHaveBeenCalledWith('fresh@example.com')
+    expect(mocks.changeEmail).toHaveBeenCalledWith('fresh@example.com','Current-password!','user-1')
     expect(wrapper.text()).toContain('within 30 minutes')
     expect(wrapper.text()).toContain('Check your new inbox')
     expect(wrapper.text()).not.toContain('both your current and new')

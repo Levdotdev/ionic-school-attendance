@@ -5,6 +5,7 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { cleanupAttendancePhotos } from '../supabase/functions/dispatch-class-reminders/attendancePhotoCleanup'
+import { dispatchActivityAlerts, activityPushContent } from '../supabase/functions/dispatch-class-reminders/activityAlerts'
 
 const uuid = (value: number) => `00000000-0000-0000-0000-${String(value).padStart(12, '0')}`
 const token = uuid(999)
@@ -116,6 +117,8 @@ function dispatcher(client: ReturnType<typeof clientFor>['client'], firebase = f
     exports: {}, require: (name: string) => {
       if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient }
       if (name === './attendancePhotoCleanup.ts') return { cleanupAttendancePhotos }
+      if (name === './activityAlerts.ts') return { dispatchActivityAlerts, activityPushContent }
+      if (name === './smtpAlerts.ts') return { createSmtpAlertSender: () => async () => { throw new Error('Unexpected email in reminder fixture') } }
       throw new Error('Unexpected Edge dependency')
     },
     Deno: { env: { get: env }, serve: (callback: typeof handler) => { handler = callback } },
@@ -133,8 +136,8 @@ describe('photo cleanup in the protected reminder dispatcher', () => {
     const worker = dispatcher(fixture.client)
     const response = await worker.handler(request())
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ claimed: 0, sent: 0, failed: 0, photo_cleanup: { claimed: 1, deleted: 1, failed: 0, error: false } })
-    expect(fixture.rpc.mock.calls.map(([name]) => name)).toEqual(['claim_attendance_photo_deletions', 'complete_attendance_photo_deletions', 'claim_due_class_notification_deliveries'])
+    expect(await response.json()).toEqual({ claimed: 0, sent: 0, failed: 0, photo_cleanup: { claimed: 1, deleted: 1, failed: 0, error: false }, activity_alerts: { claimed: 0, sent: 0, failed: 0, cancelled: 0, error: false } })
+    expect(fixture.rpc.mock.calls.map(([name]) => name)).toEqual(['claim_attendance_photo_deletions', 'complete_attendance_photo_deletions', 'claim_activity_alert_deliveries', 'claim_due_class_notification_deliveries'])
     expect(worker.env).not.toHaveBeenCalledWith('FIREBASE_SERVICE_ACCOUNT_JSON')
   })
 
@@ -148,7 +151,7 @@ describe('photo cleanup in the protected reminder dispatcher', () => {
     const worker = dispatcher(fixture.client, true)
     const response = await worker.handler(request())
     expect(response.status).toBe(200)
-    expect(await response.json()).toEqual({ claimed: 1, sent: 1, failed: 0, photo_cleanup: { claimed: 0, deleted: 0, failed: 0, error: true } })
+    expect(await response.json()).toEqual({ claimed: 1, sent: 1, failed: 0, photo_cleanup: { claimed: 0, deleted: 0, failed: 0, error: true }, activity_alerts: { claimed: 0, sent: 0, failed: 0, cancelled: 0, error: false } })
     expect(worker.fetch).toHaveBeenCalledTimes(2)
     expect(fixture.rpc).toHaveBeenLastCalledWith('mark_class_notification_delivery', expect.objectContaining({ p_succeeded: true }))
     expect(worker.warn).toHaveBeenCalledExactlyOnceWith('Attendance photo cleanup will retry', { claimed: 0, failed: 0 })

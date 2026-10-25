@@ -92,7 +92,7 @@ let notificationAttempt = 0
 watch(
   () => [user.value?.id ?? null, profile.value?.role ?? null, profile.value?.onboarding_completed_at ?? null] as const,
   ([userId, role, completed]) => {
-    if (!userId || !completed || (role !== 'teacher' && role !== 'student')) {
+    if (!userId || !completed || (role !== 'teacher' && role !== 'student' && role !== 'parent')) {
       notificationUserId = null
       notificationAttempt++
       return

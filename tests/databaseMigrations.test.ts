@@ -28,7 +28,7 @@ const platformScaffold = `
   create schema auth;
   create table auth.users (
     id uuid primary key, aud text, role text, email text,
-    email_confirmed_at timestamptz,
+    email_confirmed_at timestamptz, encrypted_password text default '',
     raw_app_meta_data jsonb default '{}'::jsonb,
     raw_user_meta_data jsonb default '{}'::jsonb,
     created_at timestamptz default now(), updated_at timestamptz default now()
@@ -1111,27 +1111,122 @@ describe('actual database migrations', () => {
       .toEqual([{ student_id: unrelatedId }])
   })
 
-  it('revokes stale email consent and requires a fresh parent decision for the new confirmed address', async () => {
+  it('preserves approved consent on the same parent account after its confirmed email changes', async () => {
     await seedClass()
     await become(parentId)
     expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
     await database.exec(`reset role; update auth.users set email='changed-parent@example.invalid',email_confirmed_at=now() where id='${parentId}';`)
     await become(parentId)
-    expect((await database.query('select id from public.meetings')).rows).toHaveLength(0)
-    expect((await database.query('select * from public.my_parent_link_requests()')).rows).toHaveLength(0)
+    expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
+    expect((await database.query('select status,parent_email from public.my_parent_link_requests()')).rows)
+      .toEqual([{ status: 'approved', parent_email: 'changed-parent@example.invalid' }])
     await become(studentId)
-    expect((await database.query(`select status from public.student_guardian_summary('${studentId}')`)).rows).toEqual([{ status: 'rejected' }])
-    await database.exec('savepoint stale_parent_join;')
-    await expect(database.query("select public.join_class('DBTEST01')")).rejects.toThrow('parent must approve')
-    await database.exec('rollback to savepoint stale_parent_join;')
+    expect((await database.query(`select status from public.student_guardian_summary('${studentId}')`)).rows).toEqual([{ status: 'approved' }])
+    expect((await database.query(`select guardian_email from public.student_profiles where user_id='${studentId}'`)).rows)
+      .toEqual([{ guardian_email: 'changed-parent@example.invalid' }])
+    await database.query("select public.join_class('DBTEST01')")
     const requestId = (await database.query<{ id: string }>("select id from public.request_student_parent_link('changed-parent@example.invalid')")).rows[0].id
     await become(parentId)
-    expect((await database.query('select status from public.my_parent_link_requests()')).rows).toEqual([{ status: 'pending' }])
+    expect((await database.query('select status from public.my_parent_link_requests()')).rows).toEqual([{ status: 'approved' }])
     await database.exec(`select public.respond_to_parent_link_request('${requestId}',true,null);`)
     expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
     await database.exec(`reset role; update auth.users set email_confirmed_at=null where id='${parentId}';`)
     await become(parentId)
     expect((await database.query('select id from public.meetings')).rows).toHaveLength(0)
+  })
+
+  it('keeps pending and intentional parent decisions when the same verified parent changes email', async () => {
+    await seedClass()
+    await database.exec(`delete from public.guardian_links;
+      update public.guardian_link_requests set status='pending',responded_at=null;
+      update auth.users set email='pending-parent@example.invalid' where id='${parentId}';`)
+    await become(parentId)
+    expect((await database.query('select status,parent_email from public.my_parent_link_requests()')).rows)
+      .toEqual([{ status: 'pending', parent_email: 'pending-parent@example.invalid' }])
+    expect((await database.query('select id from public.meetings')).rows).toHaveLength(0)
+    const requestId=(await database.query<{id:string}>('select id from public.my_parent_link_requests()')).rows[0].id
+    await database.exec(`select public.respond_to_parent_link_request('${requestId}',false,'Not my child');
+      reset role; update auth.users set email='declined-parent@example.invalid' where id='${parentId}';`)
+    await become(parentId)
+    expect((await database.query('select status,parent_email,review_note from public.my_parent_link_requests()')).rows)
+      .toEqual([{ status: 'rejected', parent_email: 'declined-parent@example.invalid', review_note: 'NOT MY CHILD' }])
+    expect((await database.query('select id from public.meetings')).rows).toHaveLength(0)
+  })
+
+  it('never transfers parent consent to another account that acquires the former email address', async () => {
+    await seedClass()
+    await database.exec(`update auth.users set email='same-parent-new@example.invalid' where id='${parentId}';
+      insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','verified-parent@example.invalid',now());
+      update public.profiles set role='parent',onboarding_completed_at=now() where id='${unrelatedId}';`)
+    await become(unrelatedId)
+    expect((await database.query('select * from public.my_parent_link_requests()')).rows).toEqual([])
+    expect((await database.query('select id from public.meetings')).rows).toEqual([])
+    await become(parentId)
+    expect((await database.query('select id from public.meetings')).rows).toHaveLength(1)
+  })
+
+  it('repairs only legacy email-change auto-rejections as pending without inventing parental approval', async () => {
+    const legacySql=await readFile(`${migrationDirectory}/20261024121350_parent_consent_and_meeting_simplification.sql`,'utf8')
+    const legacyFunction=legacySql.match(/create or replace function private\.link_parent_by_verified_email\([\s\S]*?end; \$\$;/)?.[0]
+    expect(legacyFunction).toBeTruthy()
+    await database.exec(legacyFunction!)
+    await seedClass()
+    await database.exec(`insert into auth.users(id,email,email_confirmed_at) values('${unrelatedId}','declined-child@example.invalid',now());
+      insert into public.guardian_link_requests(student_id,parent_id,parent_email,status,responded_at,review_note)
+        values('${unrelatedId}','${parentId}','verified-parent@example.invalid','rejected',now(),'Not my child');
+      update auth.users set email='repaired-parent@example.invalid' where id='${parentId}';`)
+    expect((await database.query('select count(*)::integer as count from public.guardian_links')).rows).toEqual([{count:0}])
+    const repairSql=await readFile(`${migrationDirectory}/20261025233507_preserve_parent_consent_on_verified_email_change.sql`,'utf8')
+    await database.exec(repairSql)
+    expect((await database.query(`select status,parent_email,responded_at,review_note from public.guardian_link_requests where student_id='${studentId}'`)).rows)
+      .toEqual([{status:'pending',parent_email:'repaired-parent@example.invalid',responded_at:null,review_note:null}])
+    expect((await database.query(`select status,review_note from public.guardian_link_requests where student_id='${unrelatedId}'`)).rows)
+      .toEqual([{status:'rejected',review_note:'NOT MY CHILD'}])
+    expect((await database.query('select count(*)::integer as count from public.guardian_links')).rows).toEqual([{count:0}])
+    expect((await database.query(`select guardian_email from public.student_profiles where user_id='${studentId}'`)).rows)
+      .toEqual([{guardian_email:'repaired-parent@example.invalid'}])
+  })
+
+  it('shares only a linked child’s current avatar and provider picture with its approved parent', async () => {
+    await seedClass()
+    await database.exec(`update public.profiles set avatar_path='${studentId}/current.jpg' where id='${studentId}';
+      insert into auth.identities(user_id,provider,identity_data) values('${studentId}','google','{"picture":"https://example.invalid/provider-picture.jpg"}');
+      insert into storage.objects(bucket_id,name) values('profile-avatars','${studentId}/current.jpg'),
+        ('profile-avatars','${studentId}/previous.jpg'),('profile-avatars','${teacherId}/private.jpg');`)
+    await become(parentId)
+    expect((await database.query(`select * from public.parent_student_avatar('${studentId}')`)).rows)
+      .toEqual([{student_id:studentId,avatar_path:`${studentId}/current.jpg`,provider_avatar_url:'https://example.invalid/provider-picture.jpg'}])
+    expect((await database.query("select name from storage.objects where bucket_id='profile-avatars'")).rows)
+      .toEqual([{name:`${studentId}/current.jpg`}])
+    await database.exec(`reset role; update public.profiles set avatar_path='${studentId}/previous.jpg' where id='${studentId}';`)
+    await become(parentId)
+    expect((await database.query("select name from storage.objects where bucket_id='profile-avatars'")).rows)
+      .toEqual([{name:`${studentId}/previous.jpg`}])
+  })
+
+  it('denies child avatar access to unrelated accounts and unapproved or unverified parents', async () => {
+    await seedClass()
+    for(const actor of [studentId,teacherId,pendingTeacherId]) {
+      await become(actor)
+      await database.exec('savepoint forbidden_child_avatar;')
+      await expect(database.query(`select * from public.parent_student_avatar('${studentId}')`)).rejects.toThrow('approved linked parent')
+      await database.exec('rollback to savepoint forbidden_child_avatar;')
+    }
+    await database.exec(`reset role; delete from public.guardian_links;
+      update public.guardian_link_requests set status='pending',responded_at=null;`)
+    await become(parentId)
+    await database.exec('savepoint pending_child_avatar;')
+    await expect(database.query(`select * from public.parent_student_avatar('${studentId}')`)).rejects.toThrow('approved linked parent')
+    await database.exec('rollback to savepoint pending_child_avatar; reset role;')
+    await database.exec(`update public.guardian_link_requests set status='approved',responded_at=now();
+      insert into public.guardian_links(parent_id,student_id,verified_guardian_email) values('${parentId}','${studentId}','verified-parent@example.invalid');
+      update auth.users set email_confirmed_at=null where id='${parentId}';`)
+    await become(parentId)
+    await database.exec('savepoint unverified_child_avatar;')
+    await expect(database.query(`select * from public.parent_student_avatar('${studentId}')`)).rejects.toThrow('approved linked parent')
+    await database.exec('rollback to savepoint unverified_child_avatar;')
+    expect((await database.query("select has_function_privilege('anon','public.parent_student_avatar(uuid)','EXECUTE') as public_access")).rows)
+      .toEqual([{public_access:false}])
   })
 
   it('recovers stale invitation leases and safely resends only trusted unconfirmed parent invitations', async () => {

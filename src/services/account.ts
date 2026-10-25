@@ -1,15 +1,19 @@
-import type { User } from '@supabase/supabase-js'
+import { createClient, type User } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
-import { oauthRedirectUrl } from '@/services/oauth'
+import { emailRedirectUrl } from '@/services/oauth'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 
 export const AVATAR_BUCKET = 'profile-avatars'
 export const MAX_AVATAR_BYTES = 5 * 1024 * 1024
 
 /** Display only identities confirmed by Auth, never infer them from a role. */
-export function linkedAuthMethods(account: { readonly identities?: readonly { readonly provider: string }[] } | null | undefined): string[] {
+export function linkedAuthMethods(account: { readonly identities?: readonly { readonly provider: string }[]; readonly app_metadata?: Readonly<Record<string, unknown>> } | null | undefined): string[] {
   const labels: Record<string, string> = { email: 'Email', google: 'Google', facebook: 'Facebook', phone: 'Phone' }
-  return [...new Set((account?.identities ?? []).map(identity => identity.provider))]
+  const providers = (account?.identities ?? []).map(identity => identity.provider)
+  // Social-first users can set a password without Auth adding an email identity.
+  // This flag is stamped by a protected Auth trigger, never user metadata.
+  if (account?.app_metadata?.has_email_password === true) providers.unshift('email')
+  return [...new Set(providers)]
     .map(provider => labels[provider] ?? provider.charAt(0).toUpperCase() + provider.slice(1))
 }
 
@@ -50,21 +54,70 @@ export async function unlinkAccountIdentity(provider: 'google' | 'facebook', exp
 export async function requestPasswordReset(email: string): Promise<void> {
   const normalized = email.trim().toLowerCase()
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.')
-  const { error } = await supabase.auth.resetPasswordForEmail(normalized, { redirectTo: oauthRedirectUrl() })
+  const { error } = await supabase.auth.resetPasswordForEmail(normalized, { redirectTo: emailRedirectUrl() })
   if (error) throw error
 }
 
-export async function changeAccountEmail(email: string): Promise<User> {
+export async function readAccountSecurity(): Promise<{ hasPassword: boolean }> {
+  const { data, error } = await supabase.rpc('my_account_security')
+  if (error) throw error
+  if (!Array.isArray(data) || typeof data[0]?.has_password !== 'boolean') throw new Error('Your security settings could not be verified. Please reopen Security.')
+  return { hasPassword: data[0].has_password }
+}
+
+async function verifiedAccount(expectedUserId?: string): Promise<User> {
+  const current = await supabase.auth.getUser()
+  if (current.error) throw current.error
+  if (!current.data.user || (expectedUserId && current.data.user.id !== expectedUserId)) throw new Error('Your account changed. Reopen Security and try again.')
+  return current.data.user
+}
+
+async function verifyCurrentPassword(current: User, password?: string): Promise<void> {
+  if (!password) throw new Error('Enter your current password.')
+  if (!current.email) throw new Error('Your current email address could not be verified.')
+  const url = import.meta.env.VITE_SUPABASE_URL?.trim()
+  const key = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY?.trim()
+  if (!url || !key) throw new Error('Account verification is not configured.')
+  // A separate memory-only session prevents a password check from replacing
+  // this app's actor or broadcasting a sign-in to its other open tabs.
+  const verifier = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false, storageKey: `minsu-password-check-${crypto.randomUUID()}` } })
+  try {
+    const result = await verifier.auth.signInWithPassword({ email: current.email, password })
+    if (result.error) throw result.error
+    if (result.data.user?.id !== current.id) throw new Error('Your password did not verify this account.')
+    await verifiedAccount(current.id)
+  } finally {
+    await verifier.auth.signOut({ scope: 'local' }).catch(() => undefined)
+  }
+}
+
+export async function changeAccountEmail(email: string, currentPassword?: string, expectedUserId?: string): Promise<User> {
   const normalized = email.trim().toLowerCase()
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized)) throw new Error('Enter a valid email address.')
-  const { data, error } = await supabase.auth.updateUser({ email: normalized }, { emailRedirectTo: oauthRedirectUrl() })
+  const current = await verifiedAccount(expectedUserId)
+  const security = await readAccountSecurity()
+  if (!security.hasPassword) throw new Error('Set an email sign-in password in Security before changing your email address.')
+  await verifyCurrentPassword(current, currentPassword)
+  const { data, error } = await supabase.auth.updateUser({ email: normalized }, { emailRedirectTo: emailRedirectUrl() })
   if (error) throw error
   return data.user
 }
 
-export async function changeAccountPassword(password: string, nonce?: string): Promise<void> {
+export async function changeAccountPassword(password: string, nonce?: string, currentPassword?: string, expectedUserId?: string): Promise<void> {
   if (password.length < 8) throw new Error('Use at least 8 characters for your new password.')
-  const { error } = await supabase.auth.updateUser({ password, ...(nonce?.trim() ? { nonce: nonce.trim() } : {}) })
+  const current = await verifiedAccount(expectedUserId)
+  const security = await readAccountSecurity()
+  if (security.hasPassword) await verifyCurrentPassword(current, currentPassword)
+  else if (!nonce?.trim()) throw new Error('Request a verification code and enter it before setting your first password.')
+  await verifiedAccount(current.id)
+  const { error } = await supabase.auth.updateUser({ password, ...(security.hasPassword ? { current_password: currentPassword } : {}), ...(nonce?.trim() ? { nonce: nonce.trim() } : {}) })
+  if (error) throw error
+}
+
+/** Only called after the recovery callback has verified the single-use link. */
+export async function resetAccountPassword(password: string): Promise<void> {
+  if (password.length < 8) throw new Error('Use at least 8 characters for your new password.')
+  const { error } = await supabase.auth.updateUser({ password })
   if (error) throw error
 }
 

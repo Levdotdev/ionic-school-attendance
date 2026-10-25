@@ -1,4 +1,6 @@
 import { Camera, CameraDirection, EncodingType } from '@capacitor/camera'
+import { Capacitor } from '@capacitor/core'
+import { captureFrontCameraPhoto } from '@/services/frontCamera'
 
 import { supabase } from '@/lib/supabase'
 
@@ -149,6 +151,10 @@ export async function watermarkAttendanceSelfie(
 
 /** Take a new photo only. Gallery selection is deliberately not offered. */
 export async function captureSelfie(): Promise<CapturedSelfie> {
+  if (Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android') {
+    const photo = await captureFrontCameraPhoto()
+    return { blob: photo.blob, previewUrl: URL.createObjectURL(photo.blob), extension: 'jpg', contentType: 'image/jpeg', capturedAt: photo.capturedAt, watermarkApplied: false }
+  }
   const photo = await Camera.takePhoto({
     cameraDirection: CameraDirection.Front,
     correctOrientation: true,

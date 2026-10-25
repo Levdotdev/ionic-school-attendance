@@ -1,25 +1,28 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-const mocks = vi.hoisted(() => ({ getSession: vi.fn(), initialize: vi.fn(), exchange: vi.fn(), signIn: vi.fn(), native: vi.fn(), open: vi.fn(), getUser: vi.fn(), linkIdentity: vi.fn(), verifyOtp: vi.fn() }))
+const mocks = vi.hoisted(() => ({ getSession: vi.fn(), initialize: vi.fn(), exchange: vi.fn(), signIn: vi.fn(), native: vi.fn(), open: vi.fn(), close: vi.fn(), addListener: vi.fn(), getLaunchUrl: vi.fn(), getUser: vi.fn(), linkIdentity: vi.fn(), verifyOtp: vi.fn() }))
 vi.mock('@/lib/supabase', () => ({ supabase: { auth: {
   getSession: mocks.getSession, exchangeCodeForSession: mocks.exchange, signInWithOAuth: mocks.signIn,
   getUser: mocks.getUser, linkIdentity: mocks.linkIdentity, verifyOtp: mocks.verifyOtp,
   initialize: mocks.initialize,
 } } }))
 vi.mock('@capacitor/core', () => ({ Capacitor: { isNativePlatform: mocks.native } }))
-vi.mock('@capacitor/browser', () => ({ Browser: { open: mocks.open } }))
-vi.mock('@capacitor/app', () => ({ App: { addListener: vi.fn(), getLaunchUrl: vi.fn() } }))
+vi.mock('@capacitor/browser', () => ({ Browser: { open: mocks.open, close: mocks.close } }))
+vi.mock('@capacitor/app', () => ({ App: { addListener: mocks.addListener, getLaunchUrl: mocks.getLaunchUrl } }))
 
-import { beginIdentityLink, beginSocialSignIn, completeIdentityLink, completeSocialSignIn, oauthRedirectUrl, pendingIdentityLink } from '@/services/oauth'
+import { beginIdentityLink, beginSocialSignIn, completeIdentityLink, completeSocialSignIn, emailRedirectUrl, nativeCallbackPath, nativeEmailActionLink, oauthRedirectUrl, pendingIdentityLink } from '@/services/oauth'
 
 beforeEach(() => {
   vi.clearAllMocks()
   window.localStorage.clear()
+  window.sessionStorage.clear()
   window.history.replaceState({}, '', '/auth/callback')
   mocks.native.mockReturnValue(false)
   mocks.getSession.mockResolvedValue({ data: { session: null }, error: null })
   mocks.initialize.mockResolvedValue({ error: null })
+  mocks.close.mockResolvedValue(undefined)
 })
+afterEach(() => { vi.unstubAllGlobals() })
 
 describe('auth callback grants', () => {
   it('shows expired email-link errors in the URL fragment even with an existing session', async () => {
@@ -40,6 +43,51 @@ describe('auth callback grants', () => {
   it('uses the existing custom-scheme callback for native authentication', () => {
     mocks.native.mockReturnValue(true)
     expect(oauthRedirectUrl()).toBe('edu.minsu.attendance://auth/callback')
+  })
+  it('uses clickable HTTPS email links for Android while leaving provider OAuth callbacks unchanged', () => {
+    mocks.native.mockReturnValue(true)
+    expect(emailRedirectUrl()).toBe('https://ionic-school-attendance.vercel.app/auth/mobile')
+    expect(oauthRedirectUrl()).toBe('edu.minsu.attendance://auth/callback')
+    mocks.native.mockReturnValue(false)
+    expect(emailRedirectUrl()).toBe(`${window.location.origin}/auth/callback`)
+  })
+  it.each(['email','email_change','recovery','invite'])('preserves a %s hash for the explicit native handoff without consuming it', type => {
+    const link = nativeEmailActionLink(`https://ionic-school-attendance.vercel.app/auth/mobile?token_hash=test%2Bhash&type=${type}&next=https://attacker.invalid`)
+    expect(link).toBe(`edu.minsu.attendance://auth/callback?token_hash=test%2Bhash&type=${type}`)
+    expect(nativeCallbackPath(link!)).toBe(`/auth/callback?token_hash=test%2Bhash&type=${type}`)
+    expect(mocks.verifyOtp).not.toHaveBeenCalled()
+  })
+  it.each(['https://attacker.invalid/auth/callback?code=x','edu.minsu.attendance://evil/callback?code=x','edu.minsu.attendance://auth/callback/evil?code=x'])('rejects untrusted native callback %s', url => {
+    expect(nativeCallbackPath(url)).toBeNull()
+  })
+  it('handles cold and warm Android links once, including a repeated launch URL after webview reload', async () => {
+    const { webcrypto } = await import('node:crypto')
+    vi.stubGlobal('crypto',webcrypto)
+    mocks.native.mockReturnValue(true)
+    const cold='edu.minsu.attendance://auth/callback?token_hash=cold-test-hash&type=recovery'
+    const warm='edu.minsu.attendance://auth/callback?token_hash=warm-test-hash&type=email_change'
+    mocks.getLaunchUrl.mockResolvedValue({url:cold})
+    const navigate=vi.fn()
+    vi.resetModules()
+    const first=await import('@/services/oauth')
+    await first.initializeNativeOAuthCallback(navigate)
+    expect(navigate).toHaveBeenCalledExactlyOnceWith('/auth/callback?token_hash=cold-test-hash&type=recovery')
+    const listener=mocks.addListener.mock.calls.at(-1)![1] as (event:{url:string})=>void
+    listener({url:warm})
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledTimes(2))
+    expect(navigate).toHaveBeenLastCalledWith('/auth/callback?token_hash=warm-test-hash&type=email_change')
+    const stored=window.sessionStorage.getItem('minsu-native-callback-digests')!
+    expect(stored).not.toContain('cold-test-hash'); expect(stored).not.toContain('warm-test-hash')
+    vi.resetModules()
+    const reloaded=await import('@/services/oauth')
+    await reloaded.initializeNativeOAuthCallback(navigate)
+    expect(navigate).toHaveBeenCalledTimes(2)
+    // A deliberate new tap may retry a token that failed before verification;
+    // it is different from getLaunchUrl replaying the old launch automatically.
+    const retryListener=mocks.addListener.mock.calls.at(-1)![1] as (event:{url:string})=>void
+    retryListener({url:warm})
+    await vi.waitFor(() => expect(navigate).toHaveBeenCalledTimes(3))
+    expect(mocks.verifyOtp).not.toHaveBeenCalled()
   })
 
   it('opens native social authentication outside the app webview', async () => {

@@ -41,7 +41,7 @@
           >
             <header class="student-heading">
               <div class="student-identity">
-                <span class="student-avatar" aria-hidden="true">{{ initials(dashboard.student.full_name) }}</span>
+                <child-profile-avatar :student-id="dashboard.student.id" :name="dashboard.student.full_name" :avatar-path="dashboard.student.avatar_path" :provider-avatar-url="dashboard.student.provider_avatar_url" />
                 <div>
                   <p class="eyebrow">Linked student</p>
                   <h2>{{ dashboard.student.full_name }}</h2>
@@ -179,6 +179,7 @@ import { loadAttendanceHistory, loadParentOnlineLocations } from '@/services/att
 import PortalHeader from '@/components/PortalHeader.vue'
 import EvidenceDetailModal from '@/components/EvidenceDetailModal.vue'
 import AttendancePhoto from '@/components/AttendancePhoto.vue'
+import ChildProfileAvatar from '@/components/ChildProfileAvatar.vue'
 import ParentCalendarPanel from '@/components/ParentCalendarPanel.vue'
 import AppModal from '@/components/AppModal.vue'
 import type { ScheduleCourse } from '@/utils/studentScheduleCalendar'
@@ -188,6 +189,8 @@ interface StudentRow {
   id: string
   full_name: string
   email: string
+  avatar_path?: string | null
+  provider_avatar_url?: string | null
 }
 
 interface AttendanceDisplayRow {
@@ -274,25 +277,30 @@ async function loadDashboard() {
     if (profilesError) throw profilesError
     if (!isCurrent()) return
     const results = await Promise.all(studentIds.map(async studentId => {
-      const [history, locations, enrollments] = await Promise.all([
+      const [history, locations, enrollments, avatar] = await Promise.all([
         loadAttendanceHistory<AttendanceDisplayRow>(studentId, isCurrent),
         loadParentOnlineLocations<{ attendance_id: string; latitude: number; longitude: number }>(studentId, isCurrent),
         supabase.from('class_enrollments').select('class_id,class:classes(id,name,archived_at)').eq('student_id', studentId).eq('is_active', true),
+        supabase.rpc('parent_student_avatar', { p_student_id: studentId }),
       ])
-      if (!isCurrent()) return { studentId, records: [], courses: [] }
+      if (!isCurrent()) return { studentId, records: [], courses: [], picture: null }
       if (enrollments.error) throw enrollments.error
       const locationById = new Map<string, { latitude: number; longitude: number }>(locations.map(location => [location.attendance_id, location]))
       const records = history.map(record => {
         const location = record.attendance_id ? locationById.get(record.attendance_id) : null
         return { ...record, latitude: location?.latitude ?? record.latitude, longitude: location?.longitude ?? record.longitude, selfie_url: null as string | null }
       })
-      if (!isCurrent()) return { studentId, records: [], courses: [] }
+      if (!isCurrent()) return { studentId, records: [], courses: [], picture: null }
       const classRows = (enrollments.data ?? []) as unknown as Array<{ class_id: string; class: { id: string; name: string; archived_at?: string | null } | Array<{ id: string; name: string; archived_at?: string | null }> | null }>
       const courses = classRows.flatMap(row => Array.isArray(row.class) ? row.class : row.class ? [row.class] : []).filter(course => !course.archived_at)
-      return { studentId, records, courses }
+      const picture = !avatar.error && Array.isArray(avatar.data) ? avatar.data.find(row => row.student_id === studentId) : null
+      return { studentId, records, courses, picture }
     }))
     if (!isCurrent()) return
-    students.value = (profiles ?? []) as StudentRow[]
+    students.value = (profiles ?? []).map(student => {
+      const picture = results.find(result => result.studentId === student.id)?.picture
+      return { ...student, avatar_path: picture?.avatar_path ?? null, provider_avatar_url: picture?.provider_avatar_url ?? null }
+    }) as StudentRow[]
     attendance.value = results.flatMap(result => result.records).sort((a, b) => b.meeting_starts_at.localeCompare(a.meeting_starts_at))
     studentCourses.value = Object.fromEntries(results.map(result => [result.studentId, result.courses]))
     if (selectedEvidence.value) selectedEvidence.value = attendance.value.find(record => record.id === selectedEvidence.value?.id) ?? null
@@ -327,15 +335,6 @@ async function respondToLink() {
 function openEvidence(record: AttendanceDisplayRow, name: string) {
   selectedStudentName.value = name
   selectedEvidence.value = record
-}
-
-function initials(name: string) {
-  return name
-    .trim()
-    .split(/\s+/)
-    .slice(0, 2)
-    .map((part) => part[0]?.toUpperCase() ?? '')
-    .join('') || 'ST'
 }
 
 function attendanceLabel(record: AttendanceDisplayRow) {
@@ -668,19 +667,6 @@ onBeforeUnmount(() => { dashboardRequest++; clearTimeout(successTimeout) })
   align-items: center;
   gap: 13px;
   min-width: 0;
-}
-
-.student-avatar {
-  display: grid;
-  width: 48px;
-  height: 48px;
-  flex: 0 0 auto;
-  place-items: center;
-  border-radius: 15px;
-  background: var(--campus-accent-soft-local);
-  color: var(--campus-accent-local);
-  font-size: 13px;
-  font-weight: 700;
 }
 
 .student-heading h2 {

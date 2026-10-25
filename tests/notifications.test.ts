@@ -6,7 +6,7 @@ const native = vi.hoisted(() => ({
   pushPermission: vi.fn(), pushRequest: vi.fn(), pushRegister: vi.fn(), pushUnregister: vi.fn(),
   pushChannel: vi.fn(), pushListener: vi.fn(),
   localPermission: vi.fn(), localRequest: vi.fn(), localSchedule: vi.fn(), localCancel: vi.fn(), localListener: vi.fn(),
-  getUser: vi.fn(), rpc: vi.fn(),
+  getUser: vi.fn(), rpc: vi.fn(), from: vi.fn(),
   pushHandlers: new Map<string, (payload: any) => void>(),
   localHandlers: new Map<string, (payload: any) => void>(),
   removals: [] as ReturnType<typeof vi.fn>[],
@@ -28,7 +28,7 @@ vi.mock('@capacitor/local-notifications', () => ({ LocalNotifications: {
   cancel: native.localCancel,
   addListener: native.localListener,
 } }))
-vi.mock('@/lib/supabase', () => ({ supabase: { auth: { getUser: native.getUser }, rpc: native.rpc } }))
+vi.mock('@/lib/supabase', () => ({ supabase: { auth: { getUser: native.getUser }, rpc: native.rpc, from: native.from } }))
 
 let service: typeof import('@/services/notifications')
 const baseClass = {
@@ -148,6 +148,17 @@ describe('weekly class reminder schedule', () => {
 })
 
 describe('class notification navigation', () => {
+  it('routes attendance alerts only to the verified audience’s history, ignoring arbitrary payload routes', async () => {
+    const navigate = vi.fn()
+    const remove = await service.listenForClassNotificationActions(navigate)
+    const push = native.pushHandlers.get('pushNotificationActionPerformed')!
+    push({ notification: { data: { kind: 'attendance-status', audience: 'parent', status: 'present', route: '/admin' } } })
+    push({ notification: { data: { kind: 'attendance-status', audience: 'student', status: 'absent', route: 'https://untrusted.example/' } } })
+    push({ notification: { data: { kind: 'attendance-status', audience: 'admin', status: 'present' } } })
+    push({ notification: { data: { kind: 'attendance-status', audience: 'parent', status: 'unknown' } } })
+    expect(navigate.mock.calls).toEqual([['/parent?section=history'], ['/student?section=history']])
+    await remove()
+  })
   it('routes push and local taps to the audience’s schedule and ignores untrusted routes', async () => {
     const navigate = vi.fn()
     const remove = await service.listenForClassNotificationActions(navigate)
@@ -161,6 +172,32 @@ describe('class notification navigation', () => {
     expect(navigate.mock.calls).toEqual([['/teacher?section=schedules'], ['/student?section=schedule']])
     await remove()
     expect(native.removals.every(listener => listener.mock.calls.length === 1)).toBe(true)
+  })
+})
+
+describe('read-only device notification status', () => {
+  it('reports enabled only for a permitted installation with an active token owned by the signed-in account', async () => {
+    window.localStorage.setItem('minsu-notification-installation-id', 'installation-1')
+    const filters: Record<string, unknown> = {}
+    const query = { select: () => query, eq: (key: string, value: unknown) => { filters[key] = value; return query }, limit: vi.fn(async () => ({ data: [{ id: 'token-1' }], error: null })) }
+    native.from.mockReturnValue(query)
+    expect(await service.getDeviceNotificationStatus()).toBe(true)
+    expect(filters).toEqual({ user_id: 'user-1', installation_id: 'installation-1', is_active: true })
+    query.limit.mockResolvedValueOnce({ data: [], error: null })
+    expect(await service.getDeviceNotificationStatus()).toBe(false)
+    expect(native.pushRequest).not.toHaveBeenCalled()
+    expect(native.pushRegister).not.toHaveBeenCalled()
+  })
+  it('does not prompt or read private devices on the web or with denied OS permission', async () => {
+    native.isNativePlatform.mockReturnValue(false)
+    expect(await service.getDeviceNotificationStatus()).toBe(false)
+    native.isNativePlatform.mockReturnValue(true)
+    window.localStorage.setItem('minsu-notification-installation-id', 'installation-1')
+    native.pushPermission.mockResolvedValue({ receive: 'denied' })
+    expect(await service.getDeviceNotificationStatus()).toBe(false)
+    expect(native.getUser).not.toHaveBeenCalled()
+    expect(native.from).not.toHaveBeenCalled()
+    expect(native.pushRequest).not.toHaveBeenCalled()
   })
 })
 

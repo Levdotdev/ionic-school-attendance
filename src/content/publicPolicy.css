@@ -1,7 +1,9 @@
 /* Shared by Vue and generated public pages. */
 .policy-page { margin:0; background:var(--campus-bg,var(--policy-bg,#f4f6f2)); color:var(--campus-text,var(--policy-text,#1e3027)); font-family:Arial,Helvetica,sans-serif; }
 .policy-page * { box-sizing:border-box; }
-@media(prefers-color-scheme:dark) { :root { --policy-bg:#17201b; --policy-surface:#202c25; --policy-surface-soft:#27352c; --policy-text:#e1e9e1; --policy-muted:#b5c6b8; --policy-border:#3b4e40; --policy-accent:#a0d5ac; --policy-accent-soft:#293f31; --policy-on-accent:#17271b; } }
+:root { color-scheme:light; --policy-bg:#f4f6f2; --policy-surface:#fff; --policy-surface-soft:#edf3eb; --policy-text:#1e3027; --policy-muted:#4b6255; --policy-border:#d7e1d8; --policy-accent:#145f3d; --policy-accent-soft:#e5f1e7; --policy-on-accent:#fff; }
+:root[data-theme='dark'] { color-scheme:dark; --policy-bg:#252729; --policy-surface:#2e3133; --policy-surface-soft:#373b3d; --policy-text:#d4d8d5; --policy-muted:#afb8b2; --policy-border:#505653; --policy-accent:#a0c6ad; --policy-accent-soft:#344a3d; --policy-on-accent:#1c2921; }
+@media(prefers-color-scheme:dark) { :root:not([data-theme]) { color-scheme:dark; --policy-bg:#252729; --policy-surface:#2e3133; --policy-surface-soft:#373b3d; --policy-text:#d4d8d5; --policy-muted:#afb8b2; --policy-border:#505653; --policy-accent:#a0c6ad; --policy-accent-soft:#344a3d; --policy-on-accent:#1c2921; } }
 .policy-page ion-content { --background:var(--campus-bg,var(--policy-bg,#f4f6f2)); }
 .policy-shell { max-width:1000px; margin:0 auto; padding:28px 24px 40px; }
 .policy-header { display:flex; align-items:center; justify-content:space-between; gap:20px; margin-bottom:26px; }

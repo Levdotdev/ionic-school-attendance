@@ -17,6 +17,9 @@ An Ionic Vue school attendance system backed by Supabase Auth, PostgreSQL, Row L
 - Responsive sign-in and registration layout with a fixed information panel on wide screens.
 - Content-sized dialogs for forms, account actions, attendance photos, and confirmations.
 - Password-reset requests with clear provider errors and a dedicated recovery flow. Actual email delivery depends on Supabase's email configuration; see the SMTP section below.
+- Android authentication emails use a clickable HTTPS handoff page with explicit app and browser choices. Native cold-launch links cannot replay indefinitely, and deliberate retries are supported.
+- Permanent password Show/Hide controls are available in sign-in, registration, recovery, and Security. Changing an existing password or email asks for the current password; social-first accounts verify their email before setting their first password. Email appears as a linked method once a password exists.
+- Verified parent email changes preserve consent for the same account ID and update saved contact details. Requests automatically rejected by the earlier email-change behavior are reopened for parent confirmation; intentional rejections are preserved.
 
 Email, Google, and Facebook use the same one-time student, teacher, or parent setup. Teacher accounts always require administrator approval. Administrators are provisioned separately and cannot be selected during signup. The provider-neutral database setup is applied to the connected project.
 
@@ -34,6 +37,9 @@ Email, Google, and Facebook use the same one-time student, teacher, or parent se
 - Evidence photos are stored privately and are available only to the student, approved class teacher, and verified linked parent as authorized by database policies.
 - Teachers open photos and void/restore controls directly from each student's Attendance row. There is no separate Evidence workspace.
 - Submitted check-ins disappear from the available-check-in list and cannot be submitted a second time.
+- Parents receive Android push and email when a linked child's attendance becomes present or absent; students receive Android push only. Corrections and voids produce the updated status. Closed, counted meetings can generate missing-check-in absence alerts; historic absences before feature activation are not replayed.
+- Administrators receive emails for new teacher approval requests, and teachers receive approval or rejection emails. A private service-only delivery queue retries transient failures and rechecks current roles, verified email addresses, device ownership, and parent consent before sending.
+- Notification messages contain no attendance photos, precise coordinates, or facial templates. Detailed evidence remains behind the portal's access controls. Android notification permission and an active registered device are required for push delivery.
 - The school geofence is fixed at `13.387419, 121.162494` with a `180` meter radius.
 
 ### Face verification
@@ -42,6 +48,7 @@ Email, Google, and Facebook use the same one-time student, teacher, or parent se
 - An administrator can authorize one retake. A successful validated replacement consumes that authorization; failed attempts leave the existing template and authorization intact.
 - Enrollment uses three live camera samples and stores the derived template, not the enrollment photos.
 - Self-check performs on-device face analysis and submits an actor-bound verification request to Supabase.
+- Android face samples, self-check selfies, and profile-camera photos use an in-app front-camera preview. The rear camera remains available for student ID scanning.
 - The teacher can record a missing check-in manually when a student cannot enroll or the device cannot complete face analysis. Existing self-check submissions remain available for photo review, voiding, or restoration.
 
 Face matching is an attendance aid, not a guarantee of identity. Teachers should still review questionable evidence and the school should define consent, retention, and access rules before production use with minors.

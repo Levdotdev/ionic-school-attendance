@@ -28,7 +28,8 @@
         <ion-button v-else size="small" fill="outline" :disabled="loading || Boolean(busyProvider) || identities.length < 2" @click="confirmProvider = provider">Remove</ion-button>
       </section>
       <section v-for="identity in otherIdentities" :key="identity.id" class="other-method"><strong>{{ providerName(identity.provider) }}</strong><span>Linked sign-in method</span></section>
-      <p v-if="identities.length < 2" class="last-method">Your only sign-in method cannot be removed. Link another account first.</p>
+      <section v-if="methods.includes('Email') && !otherIdentities.some(identity => identity.provider === 'email')" class="other-method"><strong>Email</strong><span>Linked · password enabled</span></section>
+      <p v-if="identities.length < 2" class="last-method">This provider connection cannot be removed until another identity is linked.</p>
       <p v-if="message" class="security-feedback" :class="{ error: failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     </div>
     <template #actions><ion-button fill="outline" :disabled="Boolean(busyProvider)" @click="closeChild">Back to security</ion-button></template>

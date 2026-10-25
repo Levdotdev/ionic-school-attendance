@@ -1,7 +1,7 @@
 <template>
   <ion-page class="auth-page">
     <ion-content :fullscreen="true" class="auth-content">
-      <main class="auth-shell">
+      <main class="auth-shell" :class="{ 'native-auth': nativeApp }">
         <section class="auth-story" aria-labelledby="product-name">
           <div class="story-top">
             <div class="brand-lockup">
@@ -147,10 +147,9 @@
                 required
               />
 
-              <ion-input
+              <password-input
                 v-model="password"
                 class="form-control"
-                type="password"
                 label="Password"
                 label-placement="stacked"
                 fill="outline"
@@ -159,11 +158,10 @@
                 required
               />
 
-              <ion-input
+              <password-input
                 v-if="mode === 'signup'"
                 v-model="passwordConfirmation"
                 class="form-control"
-                type="password"
                 label="Confirm password"
                 label-placement="stacked"
                 fill="outline"
@@ -247,6 +245,7 @@ import {
 } from 'ionicons/icons'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import type { Session } from '@supabase/supabase-js'
+import { Capacitor } from '@capacitor/core'
 import { useRouter } from 'vue-router'
 
 import { accountPathForProfile, useSession } from '@/composables/useSession'
@@ -255,16 +254,18 @@ import { supabase } from '@/lib/supabase'
 import {
   beginSocialSignIn,
   initializeNativeOAuthCallback,
-  oauthRedirectUrl,
+  emailRedirectUrl,
   type SocialProvider,
 } from '@/services/oauth'
 import { toUserFacingErrorMessage } from '@/utils/errors'
 import AppModal from '@/components/AppModal.vue'
+import PasswordInput from '@/components/PasswordInput.vue'
 import { authActionError, requestPasswordReset } from '@/services/account'
 
 type AuthMode = 'signin' | 'signup'
 
 const router = useRouter()
+const nativeApp = Capacitor.isNativePlatform()
 const { initializeSession, completeAuthentication, profile, signOutNotice } = useSession()
 const { isDark, toggleTheme } = useTheme()
 
@@ -362,7 +363,7 @@ async function submit() {
       email: email.value.trim().toLowerCase(),
       password: password.value,
       options: {
-        emailRedirectTo: oauthRedirectUrl(),
+        emailRedirectTo: emailRedirectUrl(),
       },
     })
     if (error) throw error
@@ -452,6 +453,8 @@ onMounted(async () => {
   overflow: hidden;
   grid-template-columns: minmax(340px, 0.88fr) minmax(500px, 1.12fr);
 }
+
+.auth-shell.native-auth { padding-top: max(24px, var(--ion-safe-area-top, 0px), env(safe-area-inset-top, 0px)); padding-bottom: env(safe-area-inset-bottom, 0px); }
 
 .auth-story {
   position: relative;

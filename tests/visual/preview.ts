@@ -123,6 +123,11 @@ client.rpc = (name: string, args?: Row) => {
   if (name === 'student_guardian_summary') return { data: [{ request_id: 'approved-link', parent_id: 'parent-1', parent_name: 'Patricia Brito', parent_email: 'parent@example.test', status: params.has('pending') ? 'pending' : 'approved', requested_at: created, responded_at: created, review_note: null }], error: null }
   if (name === 'my_parent_link_requests') return { data: [{ id: 'pending-link', parent_id: 'parent-1', parent_email: 'parent@example.test', student_id: 'student-2', student_name: 'Alex Reyes', student_email: 'student2@example.test', status: 'pending', requested_at: created, responded_at: null, review_note: null }], error: null }
   if (name === 'my_face_enrollment_access') return { data: [{ is_enrolled: true, can_retake: false, granted_at: null }], error: null }
+  if (name === 'my_account_security') return { data: [{ has_password: true }], error: null }
+  if (name === 'parent_student_avatar') {
+    const child = students.find(student => student.id === args?.p_student_id)
+    return { data: child ? [{ student_id: child.id, avatar_path: child.avatar_path, provider_avatar_url: null }] : [], error: null }
+  }
   if (name === 'my_face_enrollment_status') return { data: { enrolled: true }, error: null }
   if (name === 'student_attendance_history') { tables.fixture_attendance_history = history; return query('fixture_attendance_history') }
   if (name === 'parent_online_attendance_locations') { tables.fixture_online_locations = []; return query('fixture_online_locations') }

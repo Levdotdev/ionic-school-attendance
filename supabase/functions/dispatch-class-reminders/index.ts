@@ -1,5 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
 import { cleanupAttendancePhotos } from './attendancePhotoCleanup.ts'
+import { activityPushContent, dispatchActivityAlerts, type ActivityAlert } from './activityAlerts.ts'
+import { createSmtpAlertSender } from './smtpAlerts.ts'
 
 interface FirebaseServiceAccount {
   project_id: string
@@ -234,11 +236,30 @@ function isUnregisteredToken(error: unknown): boolean {
   return JSON.stringify(error.payload).includes('UNREGISTERED')
 }
 
+async function sendActivityPush(alert: ActivityAlert): Promise<string> {
+  const account = firebaseServiceAccount()
+  const accessToken = await firebaseAccessToken(account)
+  const response = await fetch(`https://fcm.googleapis.com/v1/projects/${encodeURIComponent(account.project_id)}/messages:send`, {
+    method: 'POST', headers: { authorization: `Bearer ${accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify({ message: {
+      token: alert.push_token, notification: activityPushContent(alert),
+      data: { kind: 'attendance-status', audience: alert.audience, alertId: alert.id, status: alert.status },
+      android: { priority: 'HIGH', notification: { channel_id: 'attendance-updates', color: '#087443', default_sound: true, tag: `attendance-${alert.id}` } },
+    } }),
+  })
+  const payload = await response.json() as FcmErrorPayload & { name?: string }
+  if (!response.ok || !payload.name) throw new FcmRequestError(response.status, payload)
+  return payload.name
+}
+
+const sendActivityEmail = createSmtpAlertSender(name => Deno.env.get(name))
+
 Deno.serve(async (request) => {
   if (request.method !== 'POST') {
     return Response.json({ error: 'Method not allowed' }, { status: 405 })
   }
 
+  let activityWork: ReturnType<typeof dispatchActivityAlerts> | undefined
   try {
     const expectedSecret = requiredEnv('REMINDER_DISPATCH_SECRET')
     const receivedSecret = request.headers.get('x-reminder-secret') || ''
@@ -257,6 +278,10 @@ Deno.serve(async (request) => {
     // Cleanup failures are contained and must never interrupt class reminders.
     const photoCleanup = await cleanupAttendancePhotos(supabaseAdmin)
     if (photoCleanup.error) console.warn('Attendance photo cleanup will retry', { claimed: photoCleanup.claimed, failed: photoCleanup.failed })
+    activityWork = dispatchActivityAlerts(supabaseAdmin, { sendPush: sendActivityPush, sendEmail: sendActivityEmail, isUnregisteredToken }).then(result => {
+      if (result.error || result.failed) console.warn('Activity alerts will retry', { failed: result.failed, error: result.error })
+      return result
+    })
     const workerId = crypto.randomUUID()
     const { data, error: claimError } = await supabaseAdmin.rpc(
       'claim_due_class_notification_deliveries',
@@ -267,7 +292,7 @@ Deno.serve(async (request) => {
 
     const deliveries = (data || []) as ClaimedDelivery[]
     if (deliveries.length === 0) {
-      return Response.json({ claimed: 0, sent: 0, failed: 0, photo_cleanup: photoCleanup })
+      return Response.json({ claimed: 0, sent: 0, failed: 0, photo_cleanup: photoCleanup, activity_alerts: await activityWork })
     }
 
     const account = firebaseServiceAccount()
@@ -311,8 +336,11 @@ Deno.serve(async (request) => {
       }
     }
 
-    return Response.json({ claimed: deliveries.length, sent, failed, photo_cleanup: photoCleanup })
+    return Response.json({ claimed: deliveries.length, sent, failed, photo_cleanup: photoCleanup, activity_alerts: await activityWork })
   } catch (error) {
+    // A class-reminder configuration/claim failure must not abort an otherwise
+    // authorized parent email that is already in progress.
+    await activityWork
     console.error('Class reminder dispatch failed', error)
     return Response.json(
       { error: error instanceof Error ? error.message : 'Reminder dispatch failed' },
