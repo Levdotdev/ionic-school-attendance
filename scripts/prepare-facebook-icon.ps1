@@ -1,15 +1,16 @@
-# Deterministic resize only. Never redraw or replace the university seal.
+# Deterministic resize preserving the source alpha. Never redraw the university seal.
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
 $iconRepoRoot = Split-Path -Parent $PSScriptRoot
 $iconSourcePath = Join-Path $iconRepoRoot 'public/minsu-logo.png'
-$iconOutputPath = Join-Path $iconRepoRoot 'public/facebook-app-icon-1024.png'
+$iconOutputPath = Join-Path $iconRepoRoot 'public/facebook-app-icon-transparent-1024.png'
 if (Test-Path -LiteralPath $iconOutputPath) { throw 'The Facebook icon already exists; the original and exported image were left unchanged.' }
 $iconSource = [System.Drawing.Image]::FromFile($iconSourcePath)
-$iconTarget = New-Object System.Drawing.Bitmap(1024, 1024, [System.Drawing.Imaging.PixelFormat]::Format24bppRgb)
+$iconTarget = New-Object System.Drawing.Bitmap(1024, 1024, [System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
 $iconGraphics = [System.Drawing.Graphics]::FromImage($iconTarget)
 try {
-  $iconGraphics.Clear([System.Drawing.Color]::White)
+  $iconGraphics.Clear([System.Drawing.Color]::Transparent)
+  $iconGraphics.CompositingMode = [System.Drawing.Drawing2D.CompositingMode]::SourceCopy
   $iconGraphics.CompositingQuality = [System.Drawing.Drawing2D.CompositingQuality]::HighQuality
   $iconGraphics.InterpolationMode = [System.Drawing.Drawing2D.InterpolationMode]::HighQualityBicubic
   $iconGraphics.PixelOffsetMode = [System.Drawing.Drawing2D.PixelOffsetMode]::HighQuality

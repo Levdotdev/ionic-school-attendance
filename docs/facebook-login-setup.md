@@ -13,7 +13,7 @@ These are the values prepared for the current Vercel deployment. Deploy the chan
 | Privacy policy URL | `https://ionic-school-attendance.vercel.app/privacy-policy.html` |
 | User data deletion | Choose **Data deletion instructions URL**, if that option is offered, and use `https://ionic-school-attendance.vercel.app/data-deletion.html` |
 | Category | Choose **Education** if the dashboard offers it. This is a recommendation based on the app's attendance and student-planning purpose; available choices depend on the current dashboard. |
-| App icon | Upload `public/facebook-app-icon-1024.png` from this repository. It is a verified 1024 × 1024 PNG based on the supplied MinSU seal. |
+| App icon | Upload `public/facebook-app-icon-transparent-1024.png` from this repository. It is a 1024 × 1024 PNG resized directly from the supplied MinSU seal, preserving its original transparency and artwork without AI redrawing. |
 
 The contact email belongs to the student project administrator. It is not an official university email. The public pages explicitly identify the deployment as a student project and do not claim university operation, endorsement, or legal certification.
 
