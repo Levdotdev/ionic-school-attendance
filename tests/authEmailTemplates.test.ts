@@ -6,9 +6,9 @@ import { applyAuthEmailConfiguration, authEmailTemplates, buildAuthEmailPatch } 
 afterEach(() => vi.unstubAllGlobals())
 
 describe('branded authentication emails', () => {
-  it('builds all eight inline-HTML templates with university identity and supported variables', async () => {
+  it('builds all ten inline-HTML templates including verification codes with university identity and supported variables', async () => {
     const patch = await buildAuthEmailPatch()
-    expect(authEmailTemplates).toHaveLength(8)
+    expect(authEmailTemplates).toHaveLength(10)
     for (const template of authEmailTemplates) {
       const html = patch[`mailer_templates_${template.name}_content`]
       expect(html).toContain('MinSU Attendance')
@@ -17,11 +17,11 @@ describe('branded authentication emails', () => {
       expect(html).toContain('role="presentation"')
       expect(html).not.toContain('MathVerse')
       const variables = [...String(html).matchAll(/{{\s*\.([A-Za-z]+)\s*}}/g)].map(match => match[1])
-      expect(variables.every(variable => ['SiteURL', 'ConfirmationURL', 'Email', 'NewEmail', 'OldEmail', 'Provider', 'RedirectTo', 'TokenHash'].includes(variable!))).toBe(true)
+      expect(variables.every(variable => ['SiteURL', 'ConfirmationURL', 'Email', 'NewEmail', 'OldEmail', 'Provider', 'RedirectTo', 'TokenHash', 'Token'].includes(variable!))).toBe(true)
       if (template.name !== 'email_change') expect(html).not.toContain('.NewEmail')
       if (template.name !== 'email_changed_notification') expect(html).not.toContain('.OldEmail')
       if (!template.name.startsWith('identity_')) expect(html).not.toContain('.Provider')
-      if (['confirmation', 'email_change', 'recovery', 'invite'].includes(template.name)) expect(html).toContain('30 minutes')
+      if (['confirmation', 'email_change', 'recovery', 'invite', 'magic_link'].includes(template.name)) expect(html).toContain('30 minutes')
       else expect(html).not.toContain('30 minutes')
     }
     expect(patch.mailer_templates_recovery_content).toContain('?token_hash={{ .TokenHash }}&amp;type=recovery')
@@ -31,6 +31,7 @@ describe('branded authentication emails', () => {
     expect(patch.mailer_templates_email_change_content).toContain('?token_hash={{ .TokenHash }}&amp;type=email_change')
     expect(patch.mailer_templates_email_change_content).toContain('Confirm your new email address within 30 minutes')
     expect(patch.mailer_templates_email_change_content).not.toContain('Both email-change confirmations')
+    expect(patch.mailer_templates_reauthentication_content).toContain('{{ .Token }}')
   })
   it('configures local Auth paths and every hosted security notification without touching SMTP or rate limits', async () => {
     const config = await readFile('supabase/config.toml', 'utf8')

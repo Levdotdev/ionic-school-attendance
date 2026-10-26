@@ -131,6 +131,14 @@ ALERT_SITE_URL=https://ionic-school-attendance.vercel.app
 
 Use implicit TLS on 465 for Gmail. TLS certificate verification remains enabled.
 Credentials stay in server secrets, never in the frontend, SQL or repository.
+Enter the actual Gmail app password directly in `ALERT_SMTP_PASSWORD`. The Auth
+configuration API can return a SHA-256 fingerprint for `smtp_pass`; that is not a
+usable SMTP password and must never be copied into the notification secret.
+The protected `verify-email-transport` action checks connection/authentication
+without sending a message or claiming delivery work. It requires the existing
+dispatcher secret and returns only fixed failure categories and SMTP status
+codes. Delivery failures also retain a fixed private diagnostic category; raw
+provider responses and credentials are not stored.
 SMTP is loaded lazily through pinned `npm:nodemailer@10.2.1`; an email transport
 failure retries its own delivery and does not prevent Android pushes or class
 reminders. Processing is bounded, leases are reclaimed after interruption, and

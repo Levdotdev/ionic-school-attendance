@@ -8,7 +8,7 @@ Hosted Supabase does **not** read local template files automatically. To preview
 node scripts/configure-auth-emails.mjs --project-ref fgfmhpqjokmpplpdaqtn
 ```
 
-An administrator with an existing `SUPABASE_ACCESS_TOKEN` in their shell can append `--apply`, then `--check`. Never paste or commit that token. The script updates these eight subjects/bodies, enables their four security notifications and manual identity linking, applies the user-approved 1800-second email-action lifetime, and requires email-change confirmation only at the new address. It does not replace SMTP credentials, OAuth provider credentials, redirect URLs, signup-confirmation settings, or sending limits. It never prints complete Auth configuration responses.
+An administrator with an existing `SUPABASE_ACCESS_TOKEN` in their shell can append `--apply`, then `--check`. Never paste or commit that token. The script updates ten subjects/bodies, including the verification-code and passwordless sign-in templates, enables four security notifications and manual identity linking, applies the user-approved 1800-second email-action lifetime, and requires email-change confirmation only at the new address. It does not replace SMTP credentials, OAuth provider credentials, redirect URLs, signup-confirmation settings, or sending limits. It never prints complete Auth configuration responses.
 
 Alternatively, use an already authenticated Supabase CLI without reading or exporting its credentials. From the repository root:
 

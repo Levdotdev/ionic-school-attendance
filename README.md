@@ -47,11 +47,24 @@ Email, Google, and Facebook use the same one-time student, teacher, or parent se
 - Students enroll a private facial template once. They cannot remove or replace it themselves afterward.
 - An administrator can authorize one retake. A successful validated replacement consumes that authorization; failed attempts leave the existing template and authorization intact.
 - Enrollment uses three live camera samples and stores the derived template, not the enrollment photos.
+- Capture policy `human-faceres-3.3.6-fresh-v2` disables still-image inference caching and uses the same normalized FaceRes distance in enrollment and PostgreSQL verification. Existing valid 1024-value templates remain compatible, while older cached-capture apps must be updated. A later failed match invalidates earlier unused verification grants for that meeting.
 - Self-check performs on-device face analysis and submits an actor-bound verification request to Supabase.
 - Android face samples, self-check selfies, and profile-camera photos use an in-app front-camera preview. The rear camera remains available for student ID scanning.
 - The teacher can record a missing check-in manually when a student cannot enroll or the device cannot complete face analysis. Existing self-check submissions remain available for photo review, voiding, or restoration.
 
 Face matching is an attendance aid, not a guarantee of identity. Teachers should still review questionable evidence and the school should define consent, retention, and access rules before production use with minors.
+
+Descriptor and liveness extraction still runs on the client. Server comparison
+protects the stored template and fixes the mismatched metric, but does not attest
+that an unmodified camera client produced the submitted descriptor. Server image
+inference or device attestation would be a separate security integration.
+
+### Mobile app downloads
+
+- Administrators publish Android APK/iOS archives or approved Apple App Store/TestFlight links from **Mobile apps**. Teachers, students and parents use **Get mobile app**.
+- Package bytes use a private Cloudflare R2 bucket, temporary upload/download URLs, streamed SHA-256 verification, immutable published objects, and server-verified administrator permissions. The UI reports setup pending until the R2 bucket and credentials are configured. See [R2 setup](docs/r2-setup.md).
+- The native Android launcher/splash and iPhone Home Screen icons use the exact MinSU seal. The native iOS project is prepared with permissions and callback forwarding; it still needs a Mac, Apple signing and appropriate distribution before an installable IPA exists. See [iOS setup](docs/ios.md).
+- The online website can be saved to the iPhone Home Screen. It does not provide web push, offline attendance, or native iOS push delivery.
 
 ### Classes and schedules
 

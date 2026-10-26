@@ -16,6 +16,21 @@ export interface AlertTransports {
   now?: () => number
 }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
+/** Persist only fixed categories, never SMTP responses, addresses or secrets. */
+export function activityFailureCode(error: unknown): string {
+  const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : ''
+  if (code === 'EAUTH') return 'auth_failed'
+  if (code === 'ETIMEDOUT') return 'timeout'
+  if (['ESOCKET','ECONNECTION','ECONNREFUSED','ECONNRESET','ENOTFOUND','EDNS'].includes(code)) return 'connect_failed'
+  if (code === 'EENVELOPE') return 'recipient_rejected'
+  if (['ERR_MODULE_NOT_FOUND','ERR_NOT_IMPLEMENTED','ERR_UNKNOWN_BUILTIN_MODULE'].includes(code)) return 'runtime_unavailable'
+  const message = error instanceof Error ? error.message : ''
+  if (/not configured|Invalid alert sender|SMTP port/i.test(message)) return 'configuration_missing'
+  if (/not implemented|not supported|module not found|Cannot find module/i.test(message)) return 'runtime_unavailable'
+  if (/completion unavailable/i.test(message)) return 'completion_unavailable'
+  if (/authorization unavailable/i.test(message)) return 'authorization_unavailable'
+  return 'delivery_failed'
+}
 function validAlert(value: unknown, id: string): value is ActivityAlert {
   if (!value || typeof value !== 'object') return false
   const item = value as ActivityAlert
@@ -58,6 +73,9 @@ export async function dispatchActivityAlerts(client: AlertClient, transports: Al
         result.sent++
       } catch (error) {
         result.failed++
+        try {
+          await client.rpc('record_activity_alert_failure', { p_id: lease.id, p_lease_token: lease.lease_token, p_code: activityFailureCode(error) })
+        } catch { /* Diagnostics must not interrupt retry completion. */ }
         try {
           await client.rpc('complete_activity_alert_delivery', {
             p_id: lease.id, p_lease_token: lease.lease_token, p_succeeded: false,

@@ -7,6 +7,15 @@ android/.gradle/
 android/app/build/
 android/app/google-services.json
 ios/App/Pods/
+ios/App/App/public/
+ios/App/App/capacitor.config.json
+ios/App/App/config.xml
+ios/App/build/
+ios/App/output/
+ios/DerivedData/
+ios/**/xcuserdata/
+ios/**/*.xcuserstate
+ios/capacitor-cordova-ios-plugins/
 coverage/
 tmp/
 **/supabase/.temp/

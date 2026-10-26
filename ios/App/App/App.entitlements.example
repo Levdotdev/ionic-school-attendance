@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Example only. Enable Push Notifications in Xcode for your real Apple
+       team so the signing profile and entitlement are generated together. -->
+  <key>aps-environment</key>
+  <string>development</string>
+</dict>
+</plist>

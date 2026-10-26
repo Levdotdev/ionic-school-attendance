@@ -7,10 +7,12 @@ vi.mock('@ionic/vue', () => ({
 }))
 import PasswordInput from '@/components/PasswordInput.vue'
 describe('persistent password visibility control',()=>{
-  it('keeps a labelled Show/Hide button present and preserves the value across visibility changes',async()=>{
+  it('keeps an icon-only eye button on the input and preserves the value across visibility changes',async()=>{
     const wrapper=mount(PasswordInput,{props:{modelValue:'Secret-password!'},attrs:{label:'Current password'}})
     expect(wrapper.get('input').attributes('type')).toBe('password')
     expect(wrapper.get('button').attributes('aria-label')).toBe('Show current password')
+    expect(wrapper.get('button').text()).toBe('')
+    expect(wrapper.get('button').attributes('slot')).toBe('end')
     await wrapper.get('button').trigger('click')
     expect(wrapper.get('input').attributes('type')).toBe('text')
     expect((wrapper.get('input').element as HTMLInputElement).value).toBe('Secret-password!')
@@ -20,7 +22,8 @@ describe('persistent password visibility control',()=>{
     expect(wrapper.emitted('update:modelValue')?.at(-1)).toEqual(['Changed-password!'])
     await wrapper.setProps({modelValue:''})
     expect(wrapper.get('input').attributes('type')).toBe('password')
-    expect(wrapper.get('button').text()).toBe('Show')
+    expect(wrapper.get('button').text()).toBe('')
+    expect(wrapper.get('button').attributes('aria-label')).toBe('Show current password')
     wrapper.unmount()
   })
 })

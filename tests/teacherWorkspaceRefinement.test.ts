@@ -4,7 +4,7 @@ import { defineComponent, h, reactive } from 'vue'
 import TeacherPage from '@/views/TeacherPage.vue'
 
 const mocks = vi.hoisted(() => ({ from: vi.fn(), rpc: vi.fn(), route: { query: { section: 'overview' } },
-  profile: { value: { id: 'teacher-1', role: 'teacher', full_name: 'TEACHER ONE', teacher_approval_status: 'approved' } }, push: vi.fn(), refresh: vi.fn(), alertCreate: vi.fn() }))
+  profile: { value: { id: 'teacher-1', role: 'teacher', full_name: 'TEACHER ONE', teacher_approval_status: 'approved' } }, push: vi.fn(), refresh: vi.fn(), alertCreate: vi.fn(), copy: vi.fn() }))
 vi.mock('@ionic/vue', async original => ({ ...await original<typeof import('@ionic/vue')>(), onIonViewWillEnter: vi.fn(), alertController: { create: mocks.alertCreate } }))
 vi.mock('@/lib/supabase', () => ({ supabase: { from: mocks.from, rpc: mocks.rpc, auth: { getUser: async () => ({ data: { user: { id: 'teacher-1' } }, error: null }) } } }))
 vi.mock('@/composables/useSession', () => ({ useSession: () => ({ initializeSession: async () => {}, refreshProfile: mocks.refresh, profile: mocks.profile, signOut: vi.fn() }) }))
@@ -14,6 +14,7 @@ vi.mock('@/components/PortalHeader.vue', () => ({ default: { template: '<header 
 vi.mock('vue-router', () => ({ useRoute: () => mocks.route, useRouter: () => ({ push: mocks.push, replace: vi.fn() }) }))
 const slot = defineComponent({ setup: (_, { slots }) => () => h('div', slots.default?.()) })
 const dialog = defineComponent({ props: ['open'], setup: (props, { slots }) => () => props.open ? h('section', slots.default?.()) : null })
+const originalClipboard = Object.getOwnPropertyDescriptor(navigator, 'clipboard')
 const classes = [{ id: 'class-1', teacher_id: 'teacher-1', name: 'INTEGRATION', join_code: 'SYS412', archived_at: null }, { id: 'class-2', teacher_id: 'teacher-1', name: 'DATABASES', join_code: 'DBA204', archived_at: null }]
 const schedules = classes.map((course, index) => ({ id: `schedule-${index}`, class_id: course.id, day_of_week: 1, starts_at: index ? '10:00:00' : '08:00:00', ends_at: index ? '11:00:00' : '09:00:00', is_active: true, room: 'ROOM 1', attendance_mode: 'teacher_manual', check_in_minutes_after_start: null }))
 const meeting = { id: 'meeting-1', class_id: 'class-1', schedule_id: 'schedule-0', starts_at: '2026-10-26T00:00:00Z', ends_at: '2026-10-26T01:00:00Z', attendance_opens_at: '2026-10-26T00:00:00Z', attendance_closes_at: '2026-10-26T01:00:00Z', attendance_enabled: true, attendance_mode: 'teacher_manual' }
@@ -53,19 +54,65 @@ function render(section: string) {
     IonSelect: { props: ['label'], template: '<label>{{ label }}<slot /></label>' }, IonSelectOption: slot, IonNote: slot, IonBadge: slot,
     IonButton: { props: ['fill', 'color'], template: '<button :data-fill="fill" :data-color="color"><slot /></button>' },
     AppModal: dialog, PortalHeader: { template: '<header />' }, ScheduleCalendar: { name: 'ScheduleCalendar', template: '<div data-calendar>CLASS CALENDAR</div>' },
-    EvidenceDetailModal: { template: '<aside />' }, StudentGuardianModal: { template: '<aside />' }, InviteParentModal: { template: '<aside />' }, ClassAttendanceReportModal: { template: '<aside />' } } } })
+    EvidenceDetailModal: { name: 'EvidenceDetailModal', props: ['record', 'studentName'], template: '<aside />' }, StudentGuardianModal: { template: '<aside />' }, InviteParentModal: { template: '<aside />' }, ClassAttendanceReportModal: { template: '<aside />' } } } })
 }
 beforeEach(() => {
   vi.clearAllMocks(); vi.useFakeTimers({ toFake: ['Date'] }); vi.setSystemTime(new Date('2026-10-26T00:30:00Z'))
   mocks.route = reactive({ query: { section: 'overview' } })
+  mocks.profile = reactive({ value: { id: 'teacher-1', role: 'teacher', full_name: 'TEACHER ONE', teacher_approval_status: 'approved' } })
+  Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText: mocks.copy } })
+  mocks.copy.mockResolvedValue(undefined)
   fixtureClasses = [...classes]; fixtureSchedules = [...schedules]; fixtureMeetings = [meeting]
   fixtureEnrollments = classes.flatMap(course => students.map(student => ({ class_id: course.id, student_id: student.id, is_active: true })))
   fixtureAttendance = []
   mocks.from.mockImplementation(query); mocks.rpc.mockResolvedValue({ data: [], error: null }); mocks.refresh.mockResolvedValue(mocks.profile.value)
   mocks.alertCreate.mockResolvedValue({ present: async () => {}, onDidDismiss: async () => ({ role: 'confirm' }) })
 })
-afterEach(() => vi.useRealTimers())
+afterEach(() => {
+  vi.useRealTimers()
+  if (originalClipboard) Object.defineProperty(navigator, 'clipboard', originalClipboard)
+  else Reflect.deleteProperty(navigator, 'clipboard')
+})
 describe('teacher workspace refinements', () => {
+  it('keeps overview attendance when opening the profile menu refreshes the same account object', async () => {
+    fixtureAttendance = [{ id: 'present', meeting_id: 'meeting-1', student_id: 'student-1', status: 'present', source: 'teacher', verification_status: null }]
+    const wrapper = render('overview'); await flushPromises()
+    expect(wrapper.get('[data-overview-present]').text()).toBe('1')
+    expect(wrapper.get('[data-overview-plan] .overview-meeting-count').text()).toBe('1')
+    // ProfileMenu refreshes Auth and replaces this profile object with the
+    // same actor when it opens, even though the teacher/approval did not change.
+    mocks.profile.value = { ...mocks.profile.value }
+    await flushPromises()
+    expect(wrapper.get('[data-overview-present]').text()).toBe('1')
+    expect(wrapper.get('[data-overview-unchecked]').text()).toBe('1')
+    expect(wrapper.get('[data-overview-class]').text()).toContain('2 enrolled students')
+    expect(wrapper.get('[data-overview-plan] .overview-meeting-count').text()).toBe('1')
+    wrapper.unmount()
+  })
+  it.each(['overview', 'classes'])('copies the student join code from %s', async section => {
+    const wrapper = render(section); await flushPromises()
+    await wrapper.get('[aria-label="Copy student join code"]').trigger('click'); await flushPromises()
+    expect(mocks.copy).toHaveBeenCalledExactlyOnceWith('SYS412')
+    expect(wrapper.get('.status-message').text()).toContain('Join code copied')
+    wrapper.unmount()
+  })
+  it('shows a useful error when the device refuses to copy the join code', async () => {
+    mocks.copy.mockRejectedValue(new Error('Clipboard access denied'))
+    const wrapper = render('overview'); await flushPromises()
+    await wrapper.get('[aria-label="Copy student join code"]').trigger('click'); await flushPromises()
+    expect(wrapper.get('[role="alert"]').text()).toContain('The join code could not be copied')
+    expect(wrapper.get('[data-overview-class]').text()).toContain('SYS412')
+    wrapper.unmount()
+  })
+  it('keeps the online mode in teacher evidence while withholding submitted private coordinates', async () => {
+    fixtureMeetings = [{ ...meeting, attendance_mode: 'self_online' }]
+    fixtureAttendance = [Object.assign({ id: 'online', meeting_id: 'meeting-1', student_id: 'student-1', status: 'present', source: 'self_check', verification_status: 'approved' }, { latitude: 14.1, longitude: 121.2, distance_m: 15 })]
+    const wrapper = render('attendance'); await flushPromises()
+    const vm = (wrapper.vm as unknown as { $: { setupState: { openEvidence: (record: unknown) => void } } }).$.setupState
+    vm.openEvidence(fixtureAttendance[0]); await flushPromises()
+    expect(wrapper.findComponent({ name: 'EvidenceDetailModal' }).props('record')).toMatchObject({ attendance_mode: 'self_online', latitude: null, longitude: null, distance_m: null })
+    wrapper.unmount()
+  })
   it('restores overview context for the current class even when a different workspace is selected', async () => {
     fixtureClasses.reverse()
     fixtureMeetings.push({ ...meeting, id: 'disabled', schedule_id: 'schedule-extra', starts_at: '2026-10-28T00:00:00Z', ends_at: '2026-10-28T01:00:00Z', attendance_enabled: false })

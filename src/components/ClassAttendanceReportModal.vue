@@ -1,11 +1,10 @@
 <template>
   <app-modal :open="open" title="Cumulative class attendance" :busy="exporting" wide @close="$emit('close')">
-    <p class="report-intro">Download the class's total counted attendance, sorted by last name. Cancelled meetings and future meetings do not count. Missing check-ins become absent after the meeting and check-in window close.</p>
+    <p class="report-intro">Download cumulative class attendance, sorted by last name.</p>
     <div v-if="loading" class="report-loading" role="status"><ion-spinner /><span>Preparing the class report…</span></div>
     <p v-if="error" class="report-error" role="alert">{{ error }}</p>
     <template v-if="report">
       <div class="report-heading"><h2>{{ report.class_name }}</h2><p>As of {{ asOf }} · Asia/Manila</p></div>
-      <p v-if="report.accounting_note" class="report-intro">{{ report.accounting_note }}</p>
       <dl class="report-totals"><div><dt>Students</dt><dd>{{ report.totals.student_count }}</dd></div><div><dt>Counted meetings</dt><dd>{{ report.meeting_count }}</dd></div><div><dt>Present</dt><dd>{{ report.totals.present_count }}</dd></div><div><dt>Absent</dt><dd>{{ report.totals.absent_count }}</dd></div></dl>
       <div class="report-table-scroll"><table><caption class="sr-only">Cumulative attendance by student</caption><thead><tr><th scope="col">Student</th><th scope="col">Present</th><th scope="col">Absent</th><th scope="col">Counted</th><th scope="col">Rate</th></tr></thead><tbody><tr v-for="row in report.students" :key="row.student_id"><th scope="row">{{ attendanceReportName(row) }}<small v-if="!row.is_active">Historical enrollment</small></th><td>{{ row.present_count }}</td><td>{{ row.absent_count }}</td><td>{{ row.total_count }}</td><td>{{ attendanceRateLabel(row.attendance_rate) }}</td></tr><tr v-if="!report.students.length"><td colspan="5">No students in this class report.</td></tr></tbody><tfoot><tr><th scope="row">Class total</th><td>{{ report.totals.present_count }}</td><td>{{ report.totals.absent_count }}</td><td>{{ report.totals.total_count }}</td><td>{{ attendanceRateLabel(report.totals.attendance_rate) }}</td></tr></tfoot></table></div>
     </template>

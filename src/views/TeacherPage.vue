@@ -93,7 +93,7 @@
                 <article class="surface-card overview-card" data-overview-class>
                   <p class="eyebrow">Class details</p><h2>Your class</h2><h3>{{ overviewClass.name }}</h3>
                   <p>{{ overviewReady ? overviewState!.studentIds.length : '—' }} enrolled students</p>
-                  <div class="join-code-block"><span>Student join code</span><strong>{{ overviewClass.join_code }}</strong></div>
+                  <div class="join-code-block"><span>Student join code</span><div class="join-code-value"><strong>{{ overviewClass.join_code }}</strong><ion-button type="button" size="small" fill="outline" aria-label="Copy student join code" @click="copyJoinCode(overviewClass.join_code)">Copy</ion-button></div></div>
                 </article>
                 <article class="surface-card overview-card" data-overview-plan>
                   <p class="eyebrow">This school week</p><h2>Weekly plan</h2>
@@ -150,7 +150,7 @@
                   </div>
                   <div class="join-code-block">
                     <span>Student join code</span>
-                    <strong>{{ activeClass.join_code }}</strong>
+                    <div class="join-code-value"><strong>{{ activeClass.join_code }}</strong><ion-button type="button" size="small" fill="outline" aria-label="Copy student join code" @click="copyJoinCode(activeClass.join_code)">Copy</ion-button></div>
                   </div>
                 </div>
 
@@ -648,7 +648,7 @@ const savingMeeting = ref(false)
 const updatingMeeting = ref(false)
 const markingStudentId = ref('')
 const reviewingRecordId = ref('')
-const selectedEvidence = ref<(AttendanceRow & { meeting_starts_at?: string; class_name?: string; attendance_enabled?: boolean; location_status?: string }) | null>(null)
+const selectedEvidence = ref<(AttendanceRow & { meeting_starts_at?: string; class_name?: string; attendance_enabled?: boolean; attendance_mode?: MeetingMode; location_status?: string }) | null>(null)
 const guardianStudent = ref<StudentRow | null>(null), inviteParentOpen = ref(false)
 const reportOpen = ref(false)
 const evidenceError = ref('')
@@ -765,7 +765,7 @@ watch(activeSection, section => {
   if (section === 'overview' && teacherApproved.value) void loadCalendar()
   else { overviewRequest++; loadingOverview.value = false }
 })
-watch(() => [profile.value?.id, teacherApproved.value], () => {
+watch([() => profile.value?.id, teacherApproved], () => {
   overviewRequest++
   overviewState.value = null
   overviewError.value = ''
@@ -841,6 +841,27 @@ async function refreshTeacherWorkspace() {
   const previousClassId = selectedClassId.value
   await loadClasses(true)
   if (previousClassId && selectedClassId.value === previousClassId) await loadClassDetails(previousClassId, { generate: false, silent: true })
+}
+
+async function copyJoinCode(code: string) {
+  if (!code) return
+  try {
+    let copied = false
+    if (navigator.clipboard?.writeText) {
+      try { await navigator.clipboard.writeText(code); copied = true } catch { /* Older mobile WebViews can use the selection fallback. */ }
+    }
+    if (!copied) {
+      const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null
+      const field = document.createElement('textarea')
+      field.value = code; field.readOnly = true
+      field.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0'
+      document.body.append(field)
+      try { field.select(); copied = document.execCommand?.('copy') === true }
+      finally { field.remove(); previousFocus?.focus() }
+    }
+    if (!copied) throw new Error('The join code could not be copied. Select the code and copy it manually.')
+    showSuccess('Join code copied.')
+  } catch (error) { showError(error) }
 }
 
 function dateKeyInManila(date: Date) {
@@ -1517,7 +1538,7 @@ async function loadAttendance(meetingId: string, silent = false) {
         if (current) {
           const { review_note: _note, ...updates } = current
           const onlineLocation = selectedMeeting.value?.attendance_mode === 'self_online' ? { latitude: null, longitude: null, distance_m: null } : {}
-          Object.assign(selectedEvidence.value, updates, onlineLocation)
+          Object.assign(selectedEvidence.value, updates, onlineLocation, { attendance_mode: selectedMeeting.value?.attendance_mode })
         }
         else closeEvidence()
       }
@@ -1576,7 +1597,7 @@ async function reviewEvidence(record: AttendanceRow, decision: 'approved' | 'rej
 function openEvidence(record: AttendanceRow) {
   evidenceError.value = ''
   const onlineLocation = selectedMeeting.value?.attendance_mode === 'self_online' ? { latitude: null, longitude: null, distance_m: null } : {}
-  selectedEvidence.value = { ...record, ...onlineLocation, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled, location_status: record.source === 'teacher' && record.status === 'present' ? 'teacher_confirmed_on_campus' : undefined }
+  selectedEvidence.value = { ...record, ...onlineLocation, meeting_starts_at: selectedMeeting.value?.starts_at, class_name: activeClass.value?.name, attendance_enabled: selectedMeeting.value?.attendance_enabled, attendance_mode: selectedMeeting.value?.attendance_mode, location_status: record.source === 'teacher' && record.status === 'present' ? 'teacher_confirmed_on_campus' : undefined }
 }
 
 function closeEvidence() {
@@ -2099,6 +2120,9 @@ async function logout() {
 .join-code-block span { color: var(--page-muted); font-size: 0.76rem; }
 .join-code-block { display: grid; gap: 3px; margin-left: auto; padding-left: 16px; text-align: right; }
 .join-code-block strong { color: var(--page-blue); font-size: 1.06rem; letter-spacing: 0.12em; }
+.join-code-value { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.join-code-value ion-button { margin: 0; min-height: 36px; text-transform: none; }
+.overview-card .join-code-value { justify-content: flex-start; }
 .class-actions { justify-content: flex-start; }
 .class-filters { display: flex; flex-wrap: wrap; gap: 8px; }
 .class-filters button { display: inline-flex; align-items: center; justify-content: center; gap: 9px; min-height: 42px; padding: 9px 16px; border: 1px solid var(--page-border); border-radius: 11px; background: var(--page-surface); color: var(--page-muted); font: inherit; font-size: 13px; font-weight: 650; cursor: pointer; }
@@ -2461,6 +2485,7 @@ ion-badge { --padding-start: 8px; --padding-end: 8px; border-radius: 999px; font
   .sign-out-button { font-size: 0.78rem; }
   .active-class-summary { display: grid; grid-template-columns: auto 1fr; }
   .join-code-block { grid-column: 1 / -1; margin-left: 0; padding: 11px 0 0; border-top: 1px solid var(--page-border); text-align: left; }
+  .join-code-value { justify-content: flex-start; }
   .attendance-heading { align-items: flex-start; flex-direction: column; }
   .evidence-main { display: grid; }
   .selfie { width: 100%; height: 210px; }

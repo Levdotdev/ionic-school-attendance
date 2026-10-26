@@ -67,6 +67,23 @@ describe('actual activity-alert database', () => {
     expect((await db.query('select status from private.activity_alert_deliveries where cancelled_at is null')).rows).toEqual([{ status: 'absent' }, { status: 'absent' }, { status: 'absent' }])
     expect((await db.query('select id from private.activity_alert_deliveries where cancelled_at is not null')).rows).toHaveLength(3)
   })
+  it('queues a new event after an open-meeting record is deleted and entered again', async () => {
+    await seed()
+    await db.exec(`update public.meetings set ends_at=now()+interval '1 hour',attendance_closes_at=now()+interval '1 hour' where id='${meeting}'`)
+    await mark()
+    const original = (await db.query<{ event_key: string }>('select distinct event_key from private.activity_alert_deliveries')).rows[0].event_key
+    await db.exec(`delete from public.attendance_records where meeting_id='${meeting}'`)
+    expect((await db.query('select meeting_id from private.attendance_alert_state')).rows).toEqual([])
+    await mark()
+    await mark()
+    const events = (await db.query<{ event_key: string; revision: number; cancelled: boolean }>(
+      'select event_key,revision,cancelled_at is not null as cancelled from private.activity_alert_deliveries',
+    )).rows
+    expect(events).toHaveLength(6)
+    expect(events.filter(row => row.event_key === original).every(row => row.cancelled)).toBe(true)
+    expect(events.filter(row => !row.cancelled)).toHaveLength(3)
+    expect(events.filter(row => !row.cancelled).every(row => row.event_key !== original && row.revision === 1)).toBe(true)
+  })
   it('never replays old absences and only infers after an eligible counted meeting closes', async () => {
     await seed()
     await db.exec('select private.enqueue_closed_attendance_alerts()')

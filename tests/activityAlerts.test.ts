@@ -109,11 +109,19 @@ describe('private attendance push and branded email content', () => {
 
 function smtpSender() {
   const output = ts.transpileModule(readFileSync(new URL('../supabase/functions/dispatch-class-reminders/smtpAlerts.ts', import.meta.url), 'utf8'), { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
-  const result: { createSmtpAlertSender?: (env: (name: string) => string | undefined, load: () => Promise<unknown>) => (item: ActivityAlert) => Promise<string> } = {}
+  const result: { createSmtpAlertSender?: (env: (name: string) => string | undefined, load: () => Promise<unknown>) => ((item: ActivityAlert) => Promise<string>) & {verify:()=>Promise<void>} } = {}
   runInNewContext(output, { exports: result, require: () => ({ activityEmailContent }) })
   return result.createSmtpAlertSender!
 }
 describe('SMTP alert transport', () => {
+  it('verifies SMTP authentication without sending any email', async () => {
+    const verify=vi.fn().mockResolvedValue(true),sendMail=vi.fn()
+    const values:Record<string,string>={ALERT_SMTP_HOST:'smtp.gmail.com',ALERT_SMTP_PORT:'465',ALERT_SMTP_USER:'sender@example.test',ALERT_SMTP_PASSWORD:'PRIVATE',ALERT_SMTP_FROM:'sender@example.test'}
+    const sender=smtpSender()(name=>values[name],async()=>({createTransport:()=>({verify,sendMail})}))
+    await sender.verify()
+    expect(verify).toHaveBeenCalledOnce()
+    expect(sendMail).not.toHaveBeenCalled()
+  })
   it('requires TLS, uses stable message ID and verified destination, and disables file/URL access', async () => {
     const sendMail = vi.fn(async () => ({ messageId: 'accepted-message', accepted: ['parent@example.test'], rejected: [] }))
     const createTransport = vi.fn(() => ({ sendMail }))

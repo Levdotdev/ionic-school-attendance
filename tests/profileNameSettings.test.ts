@@ -70,4 +70,17 @@ describe('structured uppercase profile names', () => {
     expect(mocks.notificationStatus).toHaveBeenCalledOnce()
     wrapper.unmount()
   })
+  it.each([true, false])('shows parent attendance push notifications as a read-only %s status', async enabled => {
+    mocks.native = true
+    profile.value = { ...profile.value, role: 'parent' }
+    mocks.notificationStatus.mockResolvedValue(enabled)
+    const wrapper = mount(AccountSettingsModal, { props: { open: false } })
+    await wrapper.setProps({ open: true }); await flushPromises()
+    expect(wrapper.get('.notification-settings h3').text()).toBe('Push notifications')
+    expect(wrapper.get('.notification-status').text()).toBe(enabled ? 'Enabled' : 'Disabled')
+    expect(wrapper.get('.notification-settings').text()).toContain('children whose links you have approved')
+    expect(wrapper.findAll('.notification-settings button')).toHaveLength(0)
+    expect(mocks.notificationStatus).toHaveBeenCalledOnce()
+    wrapper.unmount()
+  })
 })

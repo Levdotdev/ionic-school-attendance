@@ -58,6 +58,11 @@ const routes = [
     component: () => import('@/views/StudentTasksPage.vue'),
     meta: { roles: ['student'] satisfies AppRole[] },
   },
+  ...(['student','teacher','parent','admin'] as AppRole[]).map(role => ({
+    path: `/${role}/downloads`,
+    component: () => import('@/views/AppDownloadsPage.vue'),
+    meta: { roles: [role] },
+  })),
   {
     path: '/teacher',
     component: () => import('@/views/TeacherPage.vue'),

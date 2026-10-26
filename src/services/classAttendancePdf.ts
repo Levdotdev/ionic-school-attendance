@@ -63,9 +63,6 @@ export async function buildClassAttendancePdf(report: ClassAttendanceReport, ass
     bodyStyles: { fontStyle: 'bold', fontSize: 10 },
   })
   y = (doc as typeof doc & { lastAutoTable: { finalY: number } }).lastAutoTable.finalY + 5
-  doc.setFont('NotoSans', 'normal'); doc.setFontSize(7.5); doc.setTextColor(...muted)
-  const rules = doc.splitTextToSize('Future and not-counted meetings are excluded. Missing check-ins count as absent only after the meeting and check-in window close. Each student\'s rate uses their own counted opportunities.' + (report.accounting_note ? ` ${clean(report.accounting_note)}` : ''), width)
-  doc.text(rules, margin, y); y += rules.length * 3.5 + 5
   doc.setFontSize(8)
   const indexWidth = Math.max(13, doc.getTextWidth(String(Math.max(report.students.length, 1))) + 5)
   autoTable(doc, {

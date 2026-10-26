@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm'
 import ts from 'typescript'
 import { describe, expect, it, vi } from 'vitest'
 import { cleanupAttendancePhotos } from '../supabase/functions/dispatch-class-reminders/attendancePhotoCleanup'
-import { dispatchActivityAlerts, activityPushContent } from '../supabase/functions/dispatch-class-reminders/activityAlerts'
+import { activityFailureCode, dispatchActivityAlerts, activityPushContent } from '../supabase/functions/dispatch-class-reminders/activityAlerts'
 
 const uuid = (value: number) => `00000000-0000-0000-0000-${String(value).padStart(12, '0')}`
 const token = uuid(999)
@@ -109,7 +109,7 @@ function dispatcher(client: ReturnType<typeof clientFor>['client'], firebase = f
   if (firebase) values.FIREBASE_SERVICE_ACCOUNT_JSON = JSON.stringify({ project_id: 'test-project', client_email: 'local@example.test', private_key: '-----BEGIN PRIVATE KEY-----AA==-----END PRIVATE KEY-----' })
   const env = vi.fn((name: string) => values[name])
   const createClient = vi.fn(() => client)
-  const warn = vi.fn(), error = vi.fn()
+  const warn = vi.fn(), error = vi.fn(), verifyEmail = vi.fn().mockResolvedValue(true)
   const fetch = vi.fn(async (url: string) => Response.json(url.includes('oauth2') ? { access_token: 'local-test-access-token', expires_in: 3600 } : { name: 'projects/test/messages/one' }))
   const source = readFileSync(resolve(process.cwd(), 'supabase/functions/dispatch-class-reminders/index.ts'), 'utf8')
   const output = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
@@ -117,19 +117,35 @@ function dispatcher(client: ReturnType<typeof clientFor>['client'], firebase = f
     exports: {}, require: (name: string) => {
       if (name === 'npm:@supabase/supabase-js@2.117.2') return { createClient }
       if (name === './attendancePhotoCleanup.ts') return { cleanupAttendancePhotos }
-      if (name === './activityAlerts.ts') return { dispatchActivityAlerts, activityPushContent }
-      if (name === './smtpAlerts.ts') return { createSmtpAlertSender: () => async () => { throw new Error('Unexpected email in reminder fixture') } }
+      if (name === './activityAlerts.ts') return { activityFailureCode, dispatchActivityAlerts, activityPushContent }
+      if (name === './smtpAlerts.ts') return { createSmtpAlertSender: () => Object.assign(async () => { throw new Error('Unexpected email in reminder fixture') }, { verify: verifyEmail }) }
       throw new Error('Unexpected Edge dependency')
     },
     Deno: { env: { get: env }, serve: (callback: typeof handler) => { handler = callback } },
     Response, TextEncoder, URLSearchParams, btoa, atob, fetch, console: { warn, error },
     crypto: { randomUUID: () => uuid(500), subtle: { importKey: async () => ({}), sign: async () => new Uint8Array([1, 2]).buffer } },
   })
-  return { handler, env, createClient, warn, error, fetch }
+  return { handler, env, createClient, warn, error, fetch, verifyEmail }
 }
 const request = (secret = 'local-test-dispatch-secret') => new Request('https://worker.example.test', { method: 'POST', headers: { 'x-reminder-secret': secret } })
 
 describe('photo cleanup in the protected reminder dispatcher', () => {
+  it('checks SMTP credentials only behind the existing secret without claiming work or sending mail', async () => {
+    const fixture = clientFor()
+    const worker = dispatcher(fixture.client)
+    const response = await worker.handler(new Request('https://worker.example.test', { method:'POST', headers:{'x-reminder-secret':'local-test-dispatch-secret','content-type':'application/json'}, body:JSON.stringify({action:'verify-email-transport'}) }))
+    expect(await response.json()).toEqual({ready:true})
+    expect(worker.verifyEmail).toHaveBeenCalledOnce()
+    expect(worker.createClient).not.toHaveBeenCalled()
+    expect(fixture.rpc).not.toHaveBeenCalled()
+  })
+  it('returns a fixed SMTP failure category without leaking provider response contents', async () => {
+    const worker = dispatcher(clientFor().client)
+    worker.verifyEmail.mockRejectedValue(Object.assign(new Error('PRIVATE password and email response'),{code:'EAUTH',responseCode:535}))
+    const response = await worker.handler(new Request('https://worker.example.test', {method:'POST',headers:{'x-reminder-secret':'local-test-dispatch-secret'},body:JSON.stringify({action:'verify-email-transport'})}))
+    expect(response.status).toBe(503)
+    expect(await response.json()).toEqual({ready:false,failure:'auth_failed',code:'EAUTH',response_code:535})
+  })
   it('runs cleanup before claiming reminders even without Firebase or due deliveries', async () => {
     const fixture = clientFor([photo(1)])
     fixture.rpc.mockImplementation(async (name: string) => ({ data: name === 'claim_attendance_photo_deletions' ? [photo(1)] : name === 'complete_attendance_photo_deletions' ? 1 : [], error: null }))

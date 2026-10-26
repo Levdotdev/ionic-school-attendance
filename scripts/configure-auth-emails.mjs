@@ -7,6 +7,8 @@ export const authEmailTemplates = Object.freeze([
   { name: 'email_change', subject: 'MinSU Attendance — Confirm your new email address' },
   { name: 'recovery', subject: 'MinSU Attendance — Reset your password' },
   { name: 'invite', subject: 'MinSU Attendance — You are invited to the parent portal' },
+  { name: 'reauthentication', subject: 'MinSU Attendance — Your verification code' },
+  { name: 'magic_link', subject: 'MinSU Attendance — Your secure sign-in link' },
   { name: 'password_changed_notification', subject: 'MinSU Attendance — Your password was changed', notification: 'password_changed' },
   { name: 'email_changed_notification', subject: 'MinSU Attendance — Your email address was changed', notification: 'email_changed' },
   { name: 'identity_linked_notification', subject: 'MinSU Attendance — A sign-in method was linked', notification: 'identity_linked' },

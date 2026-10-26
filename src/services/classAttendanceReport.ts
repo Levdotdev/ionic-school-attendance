@@ -57,7 +57,6 @@ export function attendanceReportCsv(report: ClassAttendanceReport): string {
     ...report.students.map(row => [row.last_name, row.first_name || row.full_name, row.is_active ? 'ACTIVE' : 'HISTORICAL', row.present_count, row.absent_count, row.total_count, attendanceRateLabel(row.attendance_rate)]),
     [], ['CLASS TOTAL', `${report.totals.student_count} students`, '', report.totals.present_count, report.totals.absent_count, report.totals.total_count, attendanceRateLabel(report.totals.attendance_rate)],
     [], ['Cancelled/not-counted and future meetings are excluded. Missing attendance becomes absent only after the meeting and check-in window close. Rates use each student\'s counted opportunities.'],
-    ...(report.accounting_note ? [[report.accounting_note]] : []),
   ]
   return '\uFEFF' + rows.map(row => row.map(attendanceCsvCell).join(',')).join('\r\n') + '\r\n'
 }

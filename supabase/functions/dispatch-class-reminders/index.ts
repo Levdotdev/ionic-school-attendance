@@ -1,6 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
 import { cleanupAttendancePhotos } from './attendancePhotoCleanup.ts'
-import { activityPushContent, dispatchActivityAlerts, type ActivityAlert } from './activityAlerts.ts'
+import { activityFailureCode, activityPushContent, dispatchActivityAlerts, type ActivityAlert } from './activityAlerts.ts'
 import { createSmtpAlertSender } from './smtpAlerts.ts'
 
 interface FirebaseServiceAccount {
@@ -265,6 +265,21 @@ Deno.serve(async (request) => {
     const receivedSecret = request.headers.get('x-reminder-secret') || ''
     if (!safeEqual(receivedSecret, expectedSecret)) {
       return Response.json({ error: 'Unauthorized' }, { status: 401 })
+    }
+
+    const requestedAction: unknown = await request.json().catch(() => null)
+    if (requestedAction && typeof requestedAction === 'object' && 'action' in requestedAction && requestedAction.action === 'verify-email-transport') {
+      // Protected connection/authentication check: never sends a message or
+      // claims attendance/approval work, and never returns SMTP response text.
+      try {
+        await sendActivityEmail.verify()
+        return Response.json({ ready: true })
+      } catch (error) {
+        const code = error && typeof error === 'object' && 'code' in error && /^[A-Z0-9_]{1,48}$/.test(String(error.code)) ? String(error.code) : null
+        const responseCode = error && typeof error === 'object' && 'responseCode' in error ? Number(error.responseCode) : NaN
+        return Response.json({ ready: false, failure: activityFailureCode(error), code,
+          response_code: Number.isInteger(responseCode) && responseCode >= 100 && responseCode <= 599 ? responseCode : null }, { status: 503 })
+      }
     }
 
     const supabaseAdmin = createClient(

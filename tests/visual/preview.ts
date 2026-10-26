@@ -149,12 +149,15 @@ client.auth.resetPasswordForEmail = async () => ({ data: {}, error: null })
 client.auth.reauthenticate = async () => ({ data: {}, error: null })
 client.auth.getUserIdentities = async () => ({ data: { identities: fakeUser.identities }, error: null })
 client.auth.linkIdentity = async () => ({ data: {}, error: { message: 'External sign-in is disabled in this local preview.' } })
-client.functions.invoke = async () => ({ data: { accepted: true, message: 'Local sample only; no email was sent.' }, error: null })
+client.functions.invoke = async (name: string) => name === 'app-releases'
+  ? { data: { configured: false }, error: null }
+  : { data: { accepted: true, message: 'Local sample only; no email was sent.' }, error: null }
 client.auth.signOut = async () => { fixtureSignedOut = true; fixtureAuthListeners.forEach(callback => callback('SIGNED_OUT', null)); return { error: null } }
 
 const [{ default: App }, { initializeTheme }, { initializeSession }] = await Promise.all([import('@/App.vue'), import('@/composables/useTheme'), import('@/composables/useSession')])
 const routes = [
   { path: '/', redirect: `/${role}` },
+  ...['student', 'teacher', 'parent', 'admin'].map(role => ({ path: `/${role}/downloads`, component: () => import('@/views/AppDownloadsPage.vue') })),
   { path: '/student', component: () => import('@/views/StudentPage.vue') },
   { path: '/student/tasks', component: () => import('@/views/StudentTasksPage.vue') },
   { path: '/teacher', component: () => import('@/views/TeacherPage.vue') },
@@ -167,7 +170,7 @@ const router = createRouter({ history: createMemoryHistory(), routes })
 initializeTheme()
 await initializeSession()
 const app = createApp(App).use(IonicVue).use(router)
-const destination = params.get('page') === 'login' ? '/login' : params.get('page') === 'setup' ? '/account/setup' : params.get('page') === 'tasks' && role === 'student' ? '/student/tasks' : `/${role}`
+const destination = params.get('page') === 'login' ? '/login' : params.get('page') === 'downloads' ? `/${role}/downloads` : params.get('page') === 'setup' ? '/account/setup' : params.get('page') === 'tasks' && role === 'student' ? '/student/tasks' : `/${role}`
 await router.replace({ path: destination, query: params.get('section') ? { section: params.get('section')! } : {} })
 await router.isReady()
 app.mount('#app')

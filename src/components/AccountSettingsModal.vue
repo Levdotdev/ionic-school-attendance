@@ -27,11 +27,11 @@
           {{ saving ? 'Saving…' : 'Save name' }}
         </ion-button>
       </form>
-      <section v-if="profile.role === 'teacher' || profile.role === 'student'" class="notification-settings">
-        <h3>Class reminders</h3>
-        <p>{{ profile.role === 'teacher' ? 'Teacher reminders are sent 5 minutes before class and at the start.' : 'Choose your reminder times on each course’s weekly schedule. Your choices apply to its upcoming meetings.' }}</p>
+      <section v-if="profile.role === 'teacher' || profile.role === 'student' || profile.role === 'parent'" class="notification-settings">
+        <h3>{{ profile.role === 'parent' ? 'Push notifications' : 'Class reminders' }}</h3>
+        <p>{{ profile.role === 'parent' ? 'Receive attendance updates for children whose links you have approved.' : profile.role === 'teacher' ? 'Teacher reminders are sent 5 minutes before class and at the start.' : 'Choose your reminder times on each course’s weekly schedule. Your choices apply to its upcoming meetings.' }}</p>
         <p class="notification-status" :class="{ enabled: remindersEnabled }" role="status">{{ remindersEnabled ? 'Enabled' : 'Disabled' }}</p>
-        <p v-if="!native" class="availability-note">Class push reminders are delivered through the installed Android app. Your weekly schedules are available here in the browser.</p>
+        <p v-if="!native" class="availability-note">{{ profile.role === 'parent' ? 'Attendance push notifications are delivered through the installed mobile app. Your child’s attendance remains available here in the browser.' : 'Class push reminders are delivered through the installed mobile app. Your weekly schedules are available here in the browser.' }}</p>
       </section>
       <p v-if="message" class="settings-message" :class="{ error: failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     </div>
@@ -55,7 +55,7 @@ const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 const { profile, refreshProfile, refreshAuthUser } = useSession()
 const { avatarUrl, initials, onAvatarError } = useProfileAvatar()
-const native = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
+const native = Capacitor.isNativePlatform()
 const nativeCamera = Capacitor.isNativePlatform()
 const firstName = ref('')
 const lastName = ref('')
@@ -69,6 +69,7 @@ const picturePreview = ref('')
 const pictureZoom = ref(1)
 const pictureBusy = ref(false)
 let feedbackTimer: ReturnType<typeof setTimeout> | undefined
+let notificationStatusRequest = 0
 
 watch(message, value => {
   clearTimeout(feedbackTimer)
@@ -76,16 +77,19 @@ watch(message, value => {
 })
 
 watch(() => props.open, open => {
+  const request = ++notificationStatusRequest
+  remindersEnabled.value = false
   if (open) {
     const legacy = (profile.value?.full_name ?? '').trim().split(/\s+/).filter(Boolean)
     firstName.value = (profile.value?.first_name || legacy.slice(0, -1).join(' ') || (legacy.length === 1 ? legacy[0] : '')).toUpperCase()
     lastName.value = (profile.value?.last_name || (legacy.length > 1 ? legacy.at(-1) : '') || '').toUpperCase()
     message.value = ''; clearPicture(); void refreshAuthUser().catch(() => undefined)
-    if (native) void getDeviceNotificationStatus().then(enabled => { if (props.open) remindersEnabled.value = enabled }).catch(() => { remindersEnabled.value = false })
+    const owner = profile.value?.id
+    if (native) void getDeviceNotificationStatus().then(enabled => { if (request === notificationStatusRequest && props.open && owner === profile.value?.id) remindersEnabled.value = enabled }).catch(() => { if (request === notificationStatusRequest) remindersEnabled.value = false })
   }
   else clearPicture()
 })
-onBeforeUnmount(() => { clearPicture(); clearTimeout(feedbackTimer) })
+onBeforeUnmount(() => { notificationStatusRequest++; clearPicture(); clearTimeout(feedbackTimer) })
 
 function clearPicture() {
   if (picturePreview.value) URL.revokeObjectURL(picturePreview.value)
