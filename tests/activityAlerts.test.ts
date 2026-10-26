@@ -129,8 +129,24 @@ describe('SMTP alert transport', () => {
     const sender = smtpSender()(name => values[name], async () => ({ createTransport }))
     expect(await sender(alert())).toBe('accepted-message')
     expect(createTransport).toHaveBeenCalledWith(expect.objectContaining({ secure: true, requireTLS: true, tls: { minVersion: 'TLSv1.2', rejectUnauthorized: true }, logger: false, debug: false, disableFileAccess: true, disableUrlAccess: true }))
-    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ to: 'parent@example.test', messageId: `<activity-${id(1)}@ionic-school-attendance.vercel.app>` }))
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ from: { name: 'MinSU Attendance', address: 'sender@example.test' }, to: 'parent@example.test', messageId: `<activity-${id(1)}@ionic-school-attendance.vercel.app>` }))
     expect(JSON.stringify(sendMail.mock.calls)).not.toContain('PRIVATE')
+  })
+  it.each([
+    { configured: 'sender@example.test', name: 'MinSU Attendance' },
+    { configured: '"Attendance Office" <sender@example.test>', name: 'Attendance Office' },
+  ])('sends the structured display name for $configured', async ({ configured, name }) => {
+    const sendMail = vi.fn(async () => ({ accepted: ['parent@example.test'], rejected: [] }))
+    const values: Record<string, string> = { ALERT_SMTP_HOST: 'smtp.gmail.com', ALERT_SMTP_PORT: '465', ALERT_SMTP_USER: 'sender@example.test', ALERT_SMTP_PASSWORD: 'PRIVATE', ALERT_SMTP_FROM: configured }
+    const sender = smtpSender()(key => values[key], async () => ({ createTransport: () => ({ sendMail }) }))
+    await sender(alert())
+    expect(sendMail).toHaveBeenCalledWith(expect.objectContaining({ from: { name, address: 'sender@example.test' } }))
+    expect(JSON.stringify(sendMail.mock.calls)).not.toContain('PRIVATE')
+  })
+  it.each(['sender@example.test\r\nBcc: other@example.test', 'sender@example.test, other@example.test'])('rejects unsafe sender headers before loading SMTP', async configured => {
+    const load = vi.fn()
+    await expect(smtpSender()(key => key === 'ALERT_SMTP_FROM' ? configured : undefined, load)(alert())).rejects.toThrow('Invalid alert sender')
+    expect(load).not.toHaveBeenCalled()
   })
   it('fails safely when SMTP configuration is missing without loading any transport', async () => {
     const load = vi.fn()

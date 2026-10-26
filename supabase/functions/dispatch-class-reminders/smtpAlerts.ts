@@ -2,13 +2,21 @@ import { activityEmailContent, type ActivityAlert } from './activityAlerts.ts'
 
 interface MailTransport { sendMail(message: Record<string, unknown>): Promise<{ messageId?: string; accepted?: unknown[]; rejected?: unknown[] }>; verify?(): Promise<unknown> }
 interface Mailer { createTransport(options: Record<string, unknown>): MailTransport }
+function senderIdentity(value: string): { name: string; address: string } {
+  if (/[\r\n]/.test(value) || value.length > 320) throw new Error('Invalid alert sender')
+  const formatted = value.match(/^(.+?)\s*<([^<>]+)>$/)
+  const address = (formatted?.[2] ?? value).trim()
+  let name = formatted?.[1]?.trim() ?? 'MinSU Attendance'
+  if (name.startsWith('"') && name.endsWith('"')) name = name.slice(1, -1).trim()
+  if (!name || /[<>\r\n]/.test(name) || !/^[^\s@<>",;]+@[^\s@<>",;]+\.[^\s@<>",;]+$/.test(address)) throw new Error('Invalid alert sender')
+  return { name, address }
+}
 /** Lazy loading means an SMTP outage/configuration error cannot block push. */
 export function createSmtpAlertSender(getSecret: (name: string) => string | undefined, loadMailer?: () => Promise<Mailer>) {
   let transport: MailTransport | undefined
   const required = (name: string) => { const value = getSecret(name)?.trim(); if (!value) throw new Error('Activity email transport is not configured'); return value }
   const getTransport = async () => {
-    const from = required('ALERT_SMTP_FROM')
-    if (/[\r\n]/.test(from) || from.length > 320) throw new Error('Invalid alert sender')
+    const from = senderIdentity(required('ALERT_SMTP_FROM'))
     if (!transport) {
       const port = Number(required('ALERT_SMTP_PORT'))
       // Hosted Supabase Edge Functions prohibit outgoing SMTP ports25/587.
