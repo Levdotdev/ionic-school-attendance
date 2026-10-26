@@ -42,14 +42,8 @@ try {
     # Android guarantees the centered 66dp area of its 108dp adaptive layer.
     Write-AppIcon "$folder/ic_launcher_foreground.png" $adaptiveSize $adaptiveSize (66.0/108.0) 'Transparent'
   }
-  Write-AppIcon 'ios/App/App/Assets.xcassets/AppIcon.appiconset/AppIcon-512@2x.png' 1024 1024 .88
-  Write-AppIcon 'public/icons/apple-touch-icon.png' 180 180 .88
-  Write-AppIcon 'public/icons/minsu-icon-192.png' 192 192 .88
-  Write-AppIcon 'public/icons/minsu-icon-512.png' 512 512 .88
-  Write-AppIcon 'public/icons/minsu-maskable-512.png' 512 512 .75
   # Replace the starter Capacitor splash artwork without changing its sizing.
   $splashFiles = @(Get-ChildItem -LiteralPath (Join-Path $appIconRoot 'android/app/src/main/res') -Filter 'splash.png' -File -Recurse)
-  $splashFiles += @(Get-ChildItem -LiteralPath (Join-Path $appIconRoot 'ios/App/App/Assets.xcassets/Splash.imageset') -Filter '*.png' -File)
   foreach ($splash in $splashFiles) {
     $existing = [System.Drawing.Image]::FromFile($splash.FullName)
     try { $splashWidth = $existing.Width; $splashHeight = $existing.Height } finally { $existing.Dispose() }

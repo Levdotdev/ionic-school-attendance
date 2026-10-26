@@ -31,7 +31,7 @@
         <h3>{{ profile.role === 'parent' ? 'Push notifications' : 'Class reminders' }}</h3>
         <p>{{ profile.role === 'parent' ? 'Receive attendance updates for children whose links you have approved.' : profile.role === 'teacher' ? 'Teacher reminders are sent 5 minutes before class and at the start.' : 'Choose your reminder times on each course’s weekly schedule. Your choices apply to its upcoming meetings.' }}</p>
         <p class="notification-status" :class="{ enabled: remindersEnabled }" role="status">{{ remindersEnabled ? 'Enabled' : 'Disabled' }}</p>
-        <p v-if="!native" class="availability-note">{{ profile.role === 'parent' ? 'Attendance push notifications are delivered through the installed mobile app. Your child’s attendance remains available here in the browser.' : 'Class push reminders are delivered through the installed mobile app. Your weekly schedules are available here in the browser.' }}</p>
+        <p v-if="!native" class="availability-note">{{ profile.role === 'parent' ? 'Attendance push notifications are delivered through the installed Android app. Your child’s attendance remains available here in the browser.' : 'Class push reminders are delivered through the installed Android app. Your weekly schedules are available here in the browser.' }}</p>
       </section>
       <p v-if="message" class="settings-message" :class="{ error: failed }" :role="failed ? 'alert' : 'status'">{{ message }}</p>
     </div>
@@ -55,7 +55,7 @@ const props = defineProps<{ open: boolean }>()
 defineEmits<{ close: [] }>()
 const { profile, refreshProfile, refreshAuthUser } = useSession()
 const { avatarUrl, initials, onAvatarError } = useProfileAvatar()
-const native = Capacitor.isNativePlatform()
+const native = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'android'
 const nativeCamera = Capacitor.isNativePlatform()
 const firstName = ref('')
 const lastName = ref('')

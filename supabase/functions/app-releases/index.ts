@@ -2,7 +2,7 @@ import { createClient } from 'npm:@supabase/supabase-js@2.117.2'
 import { S3Client,PutObjectCommand,HeadObjectCommand,GetObjectCommand,CopyObjectCommand,DeleteObjectCommand } from 'npm:@aws-sdk/client-s3@3.1156.0'
 import { getSignedUrl } from 'npm:@aws-sdk/s3-request-presigner@3.1156.0'
 import { createSHA256 } from 'npm:hash-wasm@4.12.0'
-import { createAppReleaseHandler,type UploadReservation } from './handler.ts'
+import { createAppReleaseHandler } from './handler.ts'
 import { validatePackageKeys,verifyAndSealPackage } from './packageVerification.ts'
 
 const admin=createClient(Deno.env.get('SUPABASE_URL')!,Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,{auth:{persistSession:false,autoRefreshToken:false}})
@@ -20,7 +20,7 @@ const rpc=async(name:string,args:Record<string,unknown>)=>{
   return result.data
 }
 Deno.serve(createAppReleaseHandler({
-  allowedOrigins:[new URL(site).origin,'http://localhost:5173','http://127.0.0.1:5173','http://localhost:4173','http://127.0.0.1:4173','https://localhost','capacitor://localhost'],
+  allowedOrigins:[new URL(site).origin,'http://localhost:5173','http://127.0.0.1:5173','http://localhost:4173','http://127.0.0.1:4173','https://localhost'],
   async identify(token) {
     const auth=await admin.auth.getUser(token)
     if(auth.error||!auth.data.user?.email_confirmed_at) return null
@@ -29,7 +29,7 @@ Deno.serve(createAppReleaseHandler({
     return result.error||!profile?.onboarding_completed_at||!['admin','teacher','student','parent'].includes(profile.role)?null:{id:profile.id,role:profile.role}
   },
   async reserve(actor,input) {
-    const rows=await rpc('reserve_app_release_upload',{p_actor:actor,p_platform:input.platform,p_version:input.version,p_minimum_os:input.minimum_os,p_notes:input.notes,p_file_name:input.file_name,p_file_size:input.file_size,p_content_type:input.platform==='android'?'application/vnd.android.package-archive':'application/octet-stream',p_sha256:input.sha256})
+    const rows=await rpc('reserve_app_release_upload',{p_actor:actor,p_platform:input.platform,p_version:input.version,p_minimum_os:input.minimum_os,p_notes:input.notes,p_file_name:input.file_name,p_file_size:input.file_size,p_content_type:'application/vnd.android.package-archive',p_sha256:input.sha256})
     if(!rows?.[0]) throw new Error('Upload reservation unavailable')
     return rows[0]
   },
@@ -50,13 +50,10 @@ Deno.serve(createAppReleaseHandler({
       async seal(source,destination,etag,value){await client.send(new CopyObjectCommand({Bucket:bucket,Key:destination,CopySource:`${bucket}/${source}`,CopySourceIfMatch:etag,MetadataDirective:'REPLACE',Metadata:{sha256:value.sha256},ContentType:value.content_type,ContentDisposition:`attachment; filename="${value.file_name}"`}))},
     },{update:bytes=>hasher.update(bytes),digest:()=>hasher.digest('hex')})
   },
-  async publish(actor,id,input) {
-    const result=await rpc('publish_app_release',{p_actor:actor,p_id:id,p_external_url:input?.external_url??null,p_version:input?.version??'',p_minimum_os:input?.minimum_os??'',p_notes:input?.notes??''})
-    if(id) {
-      const {client,bucket}=storage()
-      const upload=(await admin.from('app_releases').select('platform').eq('id',id).single()).data
-      if(upload) await client.send(new DeleteObjectCommand({Bucket:bucket,Key:`staging/${id}/app${upload.platform==='android'?'.apk':'.ipa'}`})).catch(()=>undefined)
-    }
+  async publish(actor,id) {
+    const result=await rpc('publish_app_release',{p_actor:actor,p_id:id})
+    const {client,bucket}=storage()
+    await client.send(new DeleteObjectCommand({Bucket:bucket,Key:`staging/${id}/app.apk`})).catch(()=>undefined)
     return result
   },
   async download(actor,id) {

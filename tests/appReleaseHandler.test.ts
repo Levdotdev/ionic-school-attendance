@@ -22,7 +22,7 @@ describe('app release endpoint',()=>{
     const handler=createAppReleaseHandler(deps)
     expect((await handler(request({action:'download',id}))).status).toBe(200)
     expect(deps.download).toHaveBeenCalledWith('student',id)
-    for(const action of ['init','publish','link','unpublish','status'])expect((await handler(request({action,id}))).status).toBe(403)
+    for(const action of ['init','publish','unpublish','status'])expect((await handler(request({action,id}))).status).toBe(403)
     expect(deps.publish).not.toHaveBeenCalled()
   })
   it('returns an honest setup-pending status without exposing credentials',async()=>{
@@ -34,7 +34,8 @@ describe('app release endpoint',()=>{
     expect((await handler(request(input))).status).toBe(200)
     expect(deps.reserve).toHaveBeenCalledTimes(1)
     expect((await handler(request({...input,file_size:201*1024*1024}))).status).toBe(400)
-    expect((await handler(request({...input,file_name:'app.ipa'}))).status).toBe(400)
+    expect((await handler(request({...input,file_name:'app.zip'}))).status).toBe(400)
+    expect((await handler(request({...input,platform:'other'}))).status).toBe(400)
     expect((await handler(request({...input,sha256:'forged'}))).status).toBe(400)
     expect(deps.reserve).toHaveBeenCalledTimes(1)
   })
@@ -58,11 +59,11 @@ describe('app release endpoint',()=>{
     expect(await response.text()).not.toContain('secret-r2-url')
     expect(deps.publish).not.toHaveBeenCalled()
   })
-  it('allows only real Apple invitation/store destinations and rejects foreign CORS origins',async()=>{
-    const handler=createAppReleaseHandler(deps),input={action:'link',version:'1.0',minimum_os:'iOS 15',notes:'',external_url:'https://testflight.apple.com/join/AbCd1234'}
-    expect((await handler(request(input))).status).toBe(200)
-    expect((await handler(request({...input,external_url:'https://testflight.apple.com.attacker.invalid/join/AbCd1234'}))).status).toBe(400)
-    expect((await handler(request(input,'token','https://attacker.invalid'))).status).toBe(403)
+  it('removes external app-link actions and rejects foreign CORS origins',async()=>{
+    const handler=createAppReleaseHandler(deps),input={action:'link',external_url:'https://external.example/app'}
+    expect((await handler(request(input))).status).toBe(400)
+    expect(deps.publish).not.toHaveBeenCalled()
+    expect((await handler(request({action:'status'},'token','https://attacker.invalid'))).status).toBe(403)
   })
 })
 describe('actual app package verification',()=>{

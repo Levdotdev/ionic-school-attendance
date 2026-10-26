@@ -61,10 +61,9 @@ inference or device attestation would be a separate security integration.
 
 ### Mobile app downloads
 
-- Administrators publish Android APK/iOS archives or approved Apple App Store/TestFlight links from **Mobile apps**. Teachers, students and parents use **Get mobile app**.
+- Administrators publish Android APKs from **Mobile apps**. Teachers, students and parents use **Get mobile app**.
 - Package bytes use a private Cloudflare R2 bucket, temporary upload/download URLs, streamed SHA-256 verification, immutable published objects, and server-verified administrator permissions. The UI reports setup pending until the R2 bucket and credentials are configured. See [R2 setup](docs/r2-setup.md).
-- The native Android launcher/splash and iPhone Home Screen icons use the exact MinSU seal. The native iOS project is prepared with permissions and callback forwarding; it still needs a Mac, Apple signing and appropriate distribution before an installable IPA exists. See [iOS setup](docs/ios.md).
-- The online website can be saved to the iPhone Home Screen. It does not provide web push, offline attendance, or native iOS push delivery.
+- The Android launcher and splash artwork use the exact MinSU seal. The website remains available through a browser; push notifications are delivered through the Android app.
 
 ### Classes and schedules
 
@@ -214,7 +213,7 @@ Sign out and back in after the update. The administrator dashboard will then sho
 3. Set the Edge Function secrets `FIREBASE_SERVICE_ACCOUNT_JSON` and `REMINDER_DISPATCH_SECRET`.
 4. Add the matching dispatch secret to Supabase Vault and schedule the protected Edge Function once per minute.
 
-See the Edge Function README linked above for the exact SQL and commands. The current sender supports Android FCM; APNs configuration is still required for native iOS delivery.
+See the Edge Function README linked above for the exact SQL and commands.
 
 ### Configure password-reset and account email delivery
 

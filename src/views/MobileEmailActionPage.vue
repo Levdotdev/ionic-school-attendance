@@ -7,7 +7,7 @@
           <h1>{{ title }}</h1>
           <template v-if="appLink">
             <p>Choose where to finish this account request. The link can be used once and expires 30 minutes after it was requested.</p>
-            <ion-button expand="block" :href="appLink" rel="noreferrer">Open app</ion-button>
+            <ion-button expand="block" :href="appLink" rel="noreferrer">Open Android app</ion-button>
             <ion-button expand="block" fill="outline" :href="browserLink" rel="noreferrer">Continue in browser</ion-button>
             <p class="email-action-help">If the app does not open, continue in your browser. Your account and school records stay the same.</p>
           </template>

@@ -19,28 +19,38 @@ describe('app download access and setup state',()=>{
   it('shows administrators an honest R2 setup notice and publication control',async()=>{
     const wrapper=await openPage()
     expect(wrapper.text()).toContain('Package uploads need Cloudflare R2 setup')
+    expect(wrapper.findAll('.platform-card')).toHaveLength(1)
+    expect(wrapper.find('.platform-card h2').text()).toBe('Android')
+    expect(wrapper.text()).not.toMatch(/iPhone|iPad|IPA|TestFlight|App Store|Home Screen/)
     expect(wrapper.findAll('button').some(button=>button.text().includes('Publish app version'))).toBe(true)
     wrapper.unmount()
   })
   it.each(['student','teacher','parent'])('lets a completed %s see downloads without admin controls or storage configuration details',async role=>{
     profile.value={id:role,role}
     const wrapper=await openPage()
-    expect(wrapper.text()).toContain('Get the mobile app')
+    expect(wrapper.text()).toContain('Get the Android app')
     expect(wrapper.text()).not.toContain('Package uploads need Cloudflare R2 setup')
     expect(wrapper.findAll('button').some(button=>button.text().includes('Publish app version'))).toBe(false)
     expect(mocks.configured).not.toHaveBeenCalled()
     wrapper.unmount()
   })
-  it('labels an IPA as an archive and updates published versions through the existing live refresh',async()=>{
+  it('downloads the Android APK and updates published versions through the existing live refresh',async()=>{
     profile.value={id:'parent',role:'parent'}
-    mocks.list.mockResolvedValue([{id:'release-ios',platform:'ios',version:'1.0',minimum_os:'iOS 15',notes:'',delivery:'ios_archive',file_size:55,file_name:'app.ipa',sha256:'a'.repeat(64)}])
+    const release={id:'release-android',platform:'android',version:'1.0',minimum_os:'Android 9',notes:'',delivery:'android_apk',file_size:55,file_name:'app.apk',sha256:'a'.repeat(64)}
+    mocks.list.mockResolvedValue([release])
+    mocks.download.mockResolvedValue('https://storage.example.test/app.apk')
     const wrapper=await openPage()
-    expect(wrapper.text()).toContain('Opening the file on an ordinary iPhone does not install the app')
-    expect(wrapper.text()).toContain('Download IPA archive')
+    expect(wrapper.text()).toContain('Download Android app')
+    expect(wrapper.text()).toContain('Requires Android 9')
+    expect(wrapper.text()).not.toMatch(/iPhone|iPad|IPA|TestFlight|App Store|Home Screen/)
+    const download=wrapper.findAll('button').find(button=>button.text()==='Download Android app')!
+    await download.trigger('click');await flushPromises()
+    expect(mocks.download).toHaveBeenCalledWith(release)
+    expect(mocks.open).toHaveBeenCalledWith({url:'https://storage.example.test/app.apk'})
     mocks.list.mockResolvedValue([])
     await mocks.realtime.mock.calls[0][0].onChange();await flushPromises()
-    expect(wrapper.text()).not.toContain('Download IPA archive')
-    expect(wrapper.text()).toContain('An iOS app invitation has not been published yet')
+    expect(wrapper.text()).not.toContain('Download Android app')
+    expect(wrapper.text()).toContain('An Android installer has not been published yet')
     wrapper.unmount()
   })
 })

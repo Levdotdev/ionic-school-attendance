@@ -151,7 +151,3 @@ and Android permissions/connectivity can add delay. This is not an exact-time or
 guaranteed-delivery channel. No test email is sent by deployment. Verify actual
 mailbox delivery and physical-device notification delivery with explicitly
 authorized test recipients.
-
-At present the dispatcher sends Android FCM tokens. The schema can retain APNs
-tokens for a future iOS sender, but an APNs provider must be added before iOS
-remote notifications are enabled.

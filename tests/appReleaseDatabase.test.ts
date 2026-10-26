@@ -18,12 +18,13 @@ beforeAll(async()=>{
     insert into public.profiles values('${admin}','admin',now()),('${student}','student',now()),('${otherAdmin}','admin',now());`)
   const sql=await readFile(new URL('../supabase/migrations/20261026105210_app_release_distribution.sql',import.meta.url),'utf8')
   try{await db.exec(sql)}catch(error){const detail=error as {position?:number;message?:string};throw new Error(`${detail.message}; near: ${sql.slice(Math.max(0,Number(detail.position)-100),Number(detail.position)+100)}`)}
+  await db.exec(await readFile(new URL('../supabase/migrations/20261026145724_android_only_app_distribution.sql',import.meta.url),'utf8'))
 },30000)
 beforeEach(async()=>{await db.exec('begin')})
 afterEach(async()=>{await db.exec('rollback')})
 afterAll(async()=>{await db?.close()})
 async function reserve(actor=admin,platform='android'){
-  return(await db.query<{id:string;staging_key:string;object_key:string}>(`select * from public.reserve_app_release_upload($1,$2,'1.0.0','Android 9','New version',$3,100,$4,$5)`,[actor,platform,platform==='android'?'attendance.apk':'attendance.ipa',platform==='android'?'application/vnd.android.package-archive':'application/octet-stream','a'.repeat(64)])).rows[0]
+  return(await db.query<{id:string;staging_key:string;object_key:string}>(`select * from public.reserve_app_release_upload($1,$2,'1.0.0','Android 9','New version','attendance.apk',100,'application/vnd.android.package-archive',$3)`,[actor,platform,'a'.repeat(64)])).rows[0]
 }
 describe('private app release distribution',()=>{
   it('reserves immutable per-upload keys and atomically replaces the active platform release',async()=>{
@@ -38,24 +39,40 @@ describe('private app release distribution',()=>{
     await db.exec(`set role authenticated;select set_config('request.jwt.claims','{"sub":"${student}"}',true)`)
     expect((await db.query('select id from public.app_releases')).rows).toEqual([{id:second.id}])
     expect((await db.query(`select has_table_privilege('authenticated','private.app_release_uploads','SELECT') as upload_access,
-      has_function_privilege('authenticated','public.publish_app_release(uuid,uuid,text,text,text,text)','EXECUTE') as publish_access`)).rows).toEqual([{upload_access:false,publish_access:false}])
+      has_function_privilege('authenticated','public.publish_app_release(uuid,uuid)','EXECUTE') as publish_access`)).rows).toEqual([{upload_access:false,publish_access:false}])
   })
   it('requires a verified admin and a valid matching package',async()=>{
     await db.exec('savepoint wrong_role')
     await expect(reserve(student)).rejects.toThrow('Administrator access required')
     await db.exec('rollback to savepoint wrong_role;savepoint mismatch')
-    await expect(db.query(`select * from public.reserve_app_release_upload($1,'android','1.0','','','app.ipa',100,'application/octet-stream',$2)`,[admin,'a'.repeat(64)])).rejects.toThrow('correct app package')
+    await expect(db.query(`select * from public.reserve_app_release_upload($1,'android','1.0','','','app.zip',100,'application/octet-stream',$2)`,[admin,'a'.repeat(64)])).rejects.toThrow('Android APK')
     await db.exec('rollback to savepoint mismatch')
     const upload=await reserve()
     expect((await db.query('select * from public.app_release_upload_for_publish($1,$2)',[otherAdmin,upload.id])).rows).toEqual([])
   })
-  it('accepts only Apple-owned iOS invitation links and keeps binary paths private',async()=>{
-    await db.exec('savepoint unsafe_ios')
-    await expect(db.query("select public.publish_app_release($1,null,'https://attacker.invalid/app','1.0','','')",[admin])).rejects.toThrow('Apple App Store')
-    await db.exec('rollback to savepoint unsafe_ios')
-    const published=(await db.query<{id:string}>("select public.publish_app_release($1,null,'https://testflight.apple.com/join/AbCd1234','1.0','iOS 15','Test version') as id",[admin])).rows[0]
-    expect((await db.query('select platform,delivery,file_name from public.app_releases where id=$1',[published.id])).rows).toEqual([{platform:'ios',delivery:'ios_store',file_name:null}])
-    expect((await db.query('select * from public.app_release_object($1,$2)',[student,published.id])).rows).toEqual([])
+  it('removes external app-link publication and rejects every non-Android upload',async()=>{
+    expect((await db.query("select to_regprocedure('public.publish_app_release(uuid,uuid,text,text,text,text)') is null as old_api_removed")).rows).toEqual([{old_api_removed:true}])
+    expect((await db.query("select column_name from information_schema.columns where table_schema='public' and table_name='app_releases' and column_name='external_url'")).rows).toEqual([])
+    await db.exec('savepoint unsupported_platform')
+    await expect(reserve(admin,'other')).rejects.toThrow('Android APK')
+    await db.exec('rollback to savepoint unsupported_platform')
+  })
+  it('preserves pre-existing Android releases and binary keys through the platform-removal migration',async()=>{
+    const legacy=new PGlite()
+    try{
+      await legacy.exec(`create role anon;create role authenticated;create role service_role bypassrls;create schema private;create schema auth;
+        create table auth.users(id uuid primary key,email_confirmed_at timestamptz);
+        create table public.profiles(id uuid primary key,role text,onboarding_completed_at timestamptz);
+        create function auth.uid() returns uuid language sql stable as $$select null::uuid$$;
+        create function private.notify_portal_user(uuid) returns void language sql as $$select$$;
+        insert into auth.users values('${admin}',now());insert into public.profiles values('${admin}','admin',now());`)
+      await legacy.exec(await readFile(new URL('../supabase/migrations/20261026105210_app_release_distribution.sql',import.meta.url),'utf8'))
+      const upload=(await legacy.query<{id:string}>(`select * from public.reserve_app_release_upload($1,'android','1.0','Android 9','','retained.apk',100,'application/vnd.android.package-archive',$2)`,[admin,'a'.repeat(64)])).rows[0]
+      await legacy.query('select public.publish_app_release($1,$2)',[admin,upload.id])
+      await legacy.exec(await readFile(new URL('../supabase/migrations/20261026145724_android_only_app_distribution.sql',import.meta.url),'utf8'))
+      expect((await legacy.query('select id,platform,delivery,file_name,is_active from public.app_releases')).rows).toEqual([{id:upload.id,platform:'android',delivery:'android_apk',file_name:'retained.apk',is_active:true}])
+      expect((await legacy.query('select object_key from public.app_release_object($1,$2)',[admin,upload.id])).rows).toEqual([{object_key:`releases/${upload.id}/app.apk`}])
+    }finally{await legacy.close()}
   })
   it('does not publish expired reservations and hides an unpublished download from normal users',async()=>{
     const upload=await reserve()

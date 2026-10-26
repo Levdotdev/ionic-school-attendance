@@ -48,7 +48,7 @@ const pendingTokenSaves = new Set<Promise<void>>()
 
 function isNativeNotificationPlatform(): boolean {
   return Capacitor.isNativePlatform()
-    && (Capacitor.getPlatform() === 'android' || Capacitor.getPlatform() === 'ios')
+    && Capacitor.getPlatform() === 'android'
 }
 
 function getOrCreateInstallationId(): string {
@@ -146,22 +146,22 @@ async function saveNativePushToken(token: string, expectedUserId: string, epoch:
   }
 
   const platform = Capacitor.getPlatform()
-  if (platform !== 'android' && platform !== 'ios') {
-    throw new Error('Push notifications are only available in the installed mobile app.')
+  if (platform !== 'android') {
+    throw new Error('Push notifications are only available in the installed Android app.')
   }
 
   const { error } = await supabase.rpc('register_device_push_token', {
     p_installation_id: getOrCreateInstallationId(),
     p_token: token,
     p_platform: platform,
-    p_provider: platform === 'android' ? 'fcm' : 'apns',
+    p_provider: 'fcm',
   })
 
   if (error) throw error
 }
 
 /**
- * Ask for native push permission, register with FCM/APNs, and bind the token
+ * Ask for Android push permission, register with FCM, and bind the token
  * to the signed-in Supabase user. The registration listeners are one-shot so
  * calling this safely on each authenticated app launch does not accumulate
  * duplicate handlers.

@@ -40,11 +40,6 @@ Cloudflare account is still required before an APK can be published there.
    Android APK with its version. Wait for upload and verification to finish.
    Other signed-in roles can then use **Get mobile app**.
 
-For iPhone installation, publish a real TestFlight/App Store link after Apple
-distribution is ready. Uploading an IPA archive does not make it installable on
-ordinary iPhones. The prepared iOS project requires Mac/Xcode and signing; the
-website's Safari Home Screen option is available meanwhile.
-
 See [Cloudflare R2 token permissions](https://developers.cloudflare.com/r2/api/tokens/),
 [CORS](https://developers.cloudflare.com/r2/buckets/cors/), and the
 [server implementation notes](../supabase/functions/app-releases/README.md).

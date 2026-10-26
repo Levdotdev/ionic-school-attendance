@@ -1,7 +1,6 @@
 import { Capacitor, registerPlugin } from '@capacitor/core'
-import { Browser } from '@capacitor/browser'
 import type { StudentTaskFile } from '@/types/studentTasks'
-import { createTaskFileDownloadUrl, downloadStudentTaskFile } from './studentTasks'
+import { downloadStudentTaskFile } from './studentTasks'
 
 interface TaskAttachmentsPlugin {
   save(options: { name: string; mimeType: string; data: string }): Promise<{ saved: boolean }>
@@ -29,10 +28,6 @@ export async function saveStudentTaskAttachment(file: StudentTaskFile): Promise<
   if (android && !Capacitor.isPluginAvailable('TaskAttachments')) throw new Error('Install the latest Android app to download attachments.')
   saveInProgress = true
   try {
-    if (Capacitor.isNativePlatform() && !android) {
-      await Browser.open({ url: await createTaskFileDownloadUrl(file.storage_path) })
-      return 'started'
-    }
     const blob = await downloadStudentTaskFile(file.storage_path)
     const name = file.file_name.replace(/[\\/\p{Cc}]/gu, '_').trim() || 'Attachment'
     if (android) {

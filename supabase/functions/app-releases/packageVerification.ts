@@ -8,8 +8,7 @@ export interface PackageStorage {
 }
 export function packageMismatch():never{throw Object.assign(new Error('Package mismatch'),{code:'PACKAGE_MISMATCH'})}
 export function validatePackageKeys(upload:UploadReservation){
-  const suffix=upload.platform==='android'?'.apk':'.ipa'
-  if(upload.staging_key!==`staging/${upload.id}/app${suffix}`||upload.object_key!==`releases/${upload.id}/app${suffix}`)packageMismatch()
+  if(upload.platform!=='android'||upload.staging_key!==`staging/${upload.id}/app.apk`||upload.object_key!==`releases/${upload.id}/app.apk`)packageMismatch()
 }
 export async function verifyAndSealPackage(upload:UploadReservation,storage:PackageStorage,hash:StreamingHash):Promise<void>{
   validatePackageKeys(upload)

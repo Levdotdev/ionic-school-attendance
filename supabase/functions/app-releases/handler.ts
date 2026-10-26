@@ -1,6 +1,6 @@
 export interface ReleaseActor { id: string; role: string }
 export interface UploadReservation {
-  id: string; uploaded_by: string; platform: 'android'|'ios'; version: string; minimum_os: string; notes: string
+  id: string; uploaded_by: string; platform: 'android'; version: string; minimum_os: string; notes: string
   file_name: string; file_size: number; content_type: string; sha256: string; staging_key: string; object_key: string
 }
 export interface AppReleaseDependencies {
@@ -10,13 +10,12 @@ export interface AppReleaseDependencies {
   uploadUrl: (upload: UploadReservation) => Promise<string>
   reservation: (actor: string, id: string) => Promise<UploadReservation|null>
   verifyAndSeal: (upload: UploadReservation) => Promise<void>
-  publish: (actor: string, id: string|null, input?: Record<string, unknown>) => Promise<string>
+  publish: (actor: string, id: string) => Promise<string>
   download: (actor: string, id: string) => Promise<string|null>
   unpublish: (actor: string, id: string) => Promise<void>
   configured: () => boolean
 }
 const UUID=/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i
-const APPLE_LINK=/^https:\/\/(apps\.apple\.com\/[^\s]+|testflight\.apple\.com\/join\/[A-Za-z0-9]+)$/
 export function createAppReleaseHandler(deps: AppReleaseDependencies) {
   return async (request: Request): Promise<Response> => {
     const origin=request.headers.get('origin')??''
@@ -48,14 +47,13 @@ export function createAppReleaseHandler(deps: AppReleaseDependencies) {
       if(input.action==='init') {
         const platform=input.platform
         const fileName=input.file_name
-        if((platform!=='android'&&platform!=='ios')||typeof fileName!=='string'
-          ||!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,110}\.(apk|ipa)$/.test(fileName)
-          ||!fileName.toLowerCase().endsWith(platform==='android'?'.apk':'.ipa')
+        if(platform!=='android'||typeof fileName!=='string'
+          ||!/^[A-Za-z0-9][A-Za-z0-9._ -]{0,110}\.apk$/.test(fileName)
           ||!Number.isInteger(input.file_size)||Number(input.file_size)<1||Number(input.file_size)>200*1024*1024
           ||typeof input.sha256!=='string'||!/^[a-f0-9]{64}$/.test(input.sha256)
           ||typeof input.version!=='string'||!input.version.trim()||input.version.length>40
           ||typeof input.minimum_os!=='string'||input.minimum_os.length>80||typeof input.notes!=='string'||input.notes.length>2000) {
-          return response({error:'Choose a matching APK or IPA package up to 200 MB and enter its version.'},400)
+          return response({error:'Choose an Android APK package up to 200 MB and enter its version.'},400)
         }
         const upload=await deps.reserve(actor.id,input)
         const url=await deps.uploadUrl(upload)
@@ -67,14 +65,6 @@ export function createAppReleaseHandler(deps: AppReleaseDependencies) {
         if(!upload) return response({error:'This upload expired or is already published. Start a new upload.'},409)
         await deps.verifyAndSeal(upload)
         return response({id:await deps.publish(actor.id,input.id)})
-      }
-      if(input.action==='link') {
-        if(typeof input.external_url!=='string'||!APPLE_LINK.test(input.external_url)||input.external_url.length>2048
-          ||typeof input.version!=='string'||!input.version.trim()||input.version.length>40
-          ||typeof input.minimum_os!=='string'||input.minimum_os.length>80||typeof input.notes!=='string'||input.notes.length>2000) {
-          return response({error:'Enter a valid Apple App Store or TestFlight invitation link and app version.'},400)
-        }
-        return response({id:await deps.publish(actor.id,null,input)})
       }
       if(input.action==='unpublish') {
         if(typeof input.id!=='string'||!UUID.test(input.id)) return response({error:'Choose a published app version.'},400)

@@ -4,11 +4,10 @@ import { MAX_TASK_FILE_BYTES, studentTaskFileType, validateStudentTaskFiles } fr
 
 const mocks = vi.hoisted(() => ({
   isNativePlatform: vi.fn(), getPlatform: vi.fn(), isPluginAvailable: vi.fn(), save: vi.fn(),
-  download: vi.fn(), signedUrl: vi.fn(), browserOpen: vi.fn(),
+  download: vi.fn(),
 }))
 vi.mock('@capacitor/core', () => ({ Capacitor: mocks, registerPlugin: () => ({ save: mocks.save }) }))
-vi.mock('@capacitor/browser', () => ({ Browser: { open: mocks.browserOpen } }))
-vi.mock('@/services/studentTasks', () => ({ downloadStudentTaskFile: mocks.download, createTaskFileDownloadUrl: mocks.signedUrl }))
+vi.mock('@/services/studentTasks', () => ({ downloadStudentTaskFile: mocks.download }))
 import { saveStudentTaskAttachment } from '@/services/studentTaskAttachments'
 
 function storedFile(overrides: Partial<StudentTaskFile> = {}): StudentTaskFile {
@@ -20,7 +19,6 @@ beforeEach(() => {
   vi.clearAllMocks()
   mocks.isNativePlatform.mockReturnValue(true); mocks.getPlatform.mockReturnValue('android'); mocks.isPluginAvailable.mockReturnValue(true)
   mocks.download.mockResolvedValue(new Blob(['pdf'], { type: 'application/pdf' })); mocks.save.mockResolvedValue({ saved: true })
-  mocks.signedUrl.mockResolvedValue('https://example.com/private-signed-file'); mocks.browserOpen.mockResolvedValue(undefined)
 })
 afterEach(() => { vi.restoreAllMocks() })
 
@@ -48,7 +46,6 @@ describe('private task attachment downloads', () => {
     expect(await saveStudentTaskAttachment(storedFile({ file_name: '../rubric.pdf' }))).toBe('saved')
     expect(mocks.download).toHaveBeenCalledWith('student/task/rubric.pdf')
     expect(mocks.save).toHaveBeenCalledWith({ name: '.._rubric.pdf', mimeType: 'application/pdf', data: 'cGRm' })
-    expect(mocks.signedUrl).not.toHaveBeenCalled()
   })
 
   it('treats canceled Android saves as cancellation and allows retry after failure', async () => {
@@ -70,10 +67,4 @@ describe('private task attachment downloads', () => {
     await expect(saveStudentTaskAttachment(storedFile())).rejects.toThrow(/latest Android app/)
   })
 
-  it('uses a short-lived private URL for native iOS previews', async () => {
-    mocks.getPlatform.mockReturnValue('ios')
-    expect(await saveStudentTaskAttachment(storedFile())).toBe('started')
-    expect(mocks.browserOpen).toHaveBeenCalledWith({ url: 'https://example.com/private-signed-file' })
-    expect(mocks.download).not.toHaveBeenCalled()
-  })
 })

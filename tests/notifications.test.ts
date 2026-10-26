@@ -82,8 +82,9 @@ afterEach(() => {
 })
 
 describe('native notification availability', () => {
-  it('returns unsupported in a browser without requesting permission or registering a device', async () => {
-    native.isNativePlatform.mockReturnValue(false)
+  it.each([{ platform: 'web', installed: false }, { platform: 'ios', installed: true }])('returns unsupported on $platform without requesting permission or registering a device', async ({ platform, installed }) => {
+    native.isNativePlatform.mockReturnValue(installed)
+    native.getPlatform.mockReturnValue(platform)
     expect(await service.registerForClassNotifications()).toEqual({ supported: false, permission: 'unsupported', tokenRegistered: false })
     expect(await service.scheduleLocalClassReminders({ ...baseClass, audience: 'student' })).toEqual({ supported: false, scheduledIds: [], skippedOffsets: [] })
     const remove = await service.listenForClassNotificationActions(vi.fn())

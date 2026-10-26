@@ -1,6 +1,6 @@
 # Mobile app releases through Cloudflare R2
 
-The admin's **Mobile apps** page uploads APK and signed IPA packages directly to a private R2 bucket, then verifies the actual bytes before publishing a download. Other completed, verified accounts use **Get mobile app**. iOS also supports an official TestFlight invitation or Apple App Store link. An IPA archive is explicitly not presented as a normal one-tap iPhone installer.
+The admin's **Mobile apps** page uploads Android APK packages directly to a private R2 bucket, then verifies the actual bytes before publishing a download. Other completed, verified accounts use **Get mobile app**. Only Android packages are supported.
 
 ## External setup
 
@@ -12,7 +12,7 @@ Create a private R2 bucket in the intended Cloudflare account. R2 activation can
 - `R2_SECRET_ACCESS_KEY`
 - Existing optional `SITE_URL` (defaults to the production attendance website)
 
-Never put these credentials in a `VITE_` variable or browser settings. The admin UI reports setup pending until all four R2 secrets exist. A TestFlight/App Store link can be published without R2.
+Never put these credentials in a `VITE_` variable or browser settings. The admin UI reports setup pending until all four R2 secrets exist.
 
 Configure bucket CORS for the actual website origins (no wildcard):
 
@@ -38,6 +38,6 @@ Packages are limited to 200 MB. A 15-minute presigned PUT is scoped to a server-
 
 The worker conditionally copies the checked staging ETag to a separate immutable release key. A reused upload URL cannot overwrite an already published package. Publishing atomically replaces the active version for that platform. Signed-in downloads receive a five-minute R2 GET URL; there is no public binary URL and browser code never receives R2 credentials. A short-lived URL is a bearer link and remains usable until it expires.
 
-This verifies package integrity, not an Apple/Android publisher signature or the safety of arbitrary app code. Upload only the project's trusted build outputs. Apple distribution still requires the correct signing identities and an eligible distribution method; uploading an IPA does not provide those.
+This verifies package integrity, not an Android publisher signature or the safety of arbitrary app code. Upload only the project's trusted build outputs.
 
-References: [R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/), [R2 S3/checksum compatibility](https://developers.cloudflare.com/r2/api/s3/api/), [R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/), [Apple app distribution](https://developer.apple.com/documentation/xcode/distributing-your-app-for-beta-testing-and-releases).
+References: [R2 presigned URLs](https://developers.cloudflare.com/r2/api/s3/presigned-urls/), [R2 S3/checksum compatibility](https://developers.cloudflare.com/r2/api/s3/api/), [R2 CORS](https://developers.cloudflare.com/r2/buckets/cors/).

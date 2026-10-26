@@ -15,7 +15,7 @@ describe('HTTPS native email handoff',()=>{
     window.history.replaceState({},'',`/auth/mobile?token_hash=sample-hash&type=${type}`)
     const wrapper=mount(MobileEmailActionPage)
     const links=wrapper.findAll('a')
-    expect(links.map(link=>link.text())).toEqual(['Open app','Continue in browser'])
+    expect(links.map(link=>link.text())).toEqual(['Open Android app','Continue in browser'])
     expect(links[0].attributes('href')).toBe(`edu.minsu.attendance://auth/callback?token_hash=sample-hash&type=${type}`)
     expect(links[1].attributes('href')).toBe(`${window.location.origin}/auth/callback?token_hash=sample-hash&type=${type}`)
     expect(mocks.verify).not.toHaveBeenCalled(); expect(mocks.exchange).not.toHaveBeenCalled()
