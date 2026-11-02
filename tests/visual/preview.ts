@@ -48,6 +48,8 @@ const students: Row[] = names.map((full_name, index) => ({ id: `student-${index 
 const roleNames: Record<string, string> = { student: names[0], teacher: 'Maria Villanueva', parent: 'Patricia Brito', admin: 'School Administrator' }
 const actorId = role === 'student' ? 'student-1' : `${role}-1`
 const actor: Row = { id: actorId, role, full_name: roleNames[role], email: `${role}@example.test`, onboarding_completed_at: created, created_at: created, teacher_approval_status: role === 'teacher' ? 'approved' : null, teacher_approval_note: null, teacher_approved_at: role === 'teacher' ? created : null, avatar_path: `${actorId}/avatar.jpg` }
+const fixtureBarcodeValues = new Map(students.map((student, index) => [student.id, index === 3 ? null : `DEMO-2026-AbC${String(index + 1).padStart(3, '0')}`]))
+const fixtureBarcodeGrants = new Set(params.has('barcodeRetake') ? ['student-1'] : ['student-3'])
 for (const profile of [...students, actor]) {
   const parts = profile.full_name.toUpperCase().split(' ')
   profile.last_name = parts.pop()
@@ -123,6 +125,14 @@ client.rpc = (name: string, args?: Row) => {
   if (name === 'student_guardian_summary') return { data: [{ request_id: 'approved-link', parent_id: 'parent-1', parent_name: 'Patricia Brito', parent_email: 'parent@example.test', status: params.has('pending') ? 'pending' : 'approved', requested_at: created, responded_at: created, review_note: null }], error: null }
   if (name === 'my_parent_link_requests') return { data: [{ id: 'pending-link', parent_id: 'parent-1', parent_email: 'parent@example.test', student_id: 'student-2', student_name: 'Alex Reyes', student_email: 'student2@example.test', status: 'pending', requested_at: created, responded_at: null, review_note: null }], error: null }
   if (name === 'my_face_enrollment_access') return { data: [{ is_enrolled: true, can_retake: false, granted_at: null }], error: null }
+  if (name === 'my_barcode_registration_access') return { data: [{ is_registered: true, can_retake: fixtureBarcodeGrants.has(actor.id), granted_at: fixtureBarcodeGrants.has(actor.id) ? created : null, registered_at: created }], error: null }
+  if (name === 'admin_student_barcode_registrations') return { data: students.map(student => ({ student_id: student.id, full_name: student.full_name, email: student.email, is_registered: true, can_retake: fixtureBarcodeGrants.has(student.id), granted_at: fixtureBarcodeGrants.has(student.id) ? created : null, registered_at: created, barcode_value: fixtureBarcodeValues.get(student.id) })), error: null }
+  if (name === 'admin_grant_barcode_retake') { fixtureBarcodeGrants.add(args?.p_student_id); return { data: null, error: null } }
+  if (name === 'class_student_barcode_values') return { data: enrollments.filter(enrollment => enrollment.class_id === args?.p_class_id).map(enrollment => ({ student_id: enrollment.student_id, barcode_value: fixtureBarcodeValues.get(enrollment.student_id) ?? null })), error: null }
+  if (name === 'replace_student_barcode') {
+    if (args?.p_expected_student_id !== actor.id || !fixtureBarcodeGrants.has(actor.id)) return { data: null, error: { message: 'This fixture student needs a retake approval.' } }
+    fixtureBarcodeValues.set(actor.id, String(args?.p_raw_barcode ?? '').trim()); fixtureBarcodeGrants.delete(actor.id); return { data: null, error: null }
+  }
   if (name === 'my_account_security') return { data: [{ has_password: true }], error: null }
   if (name === 'parent_student_avatar') {
     const child = students.find(student => student.id === args?.p_student_id)

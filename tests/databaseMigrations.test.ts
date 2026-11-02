@@ -1004,7 +1004,7 @@ describe('actual database migrations', () => {
     await expect(database.query("select public.request_student_parent_link('not-registered@example.invalid')")).rejects.toThrow('not a registered')
     await database.exec('rollback to savepoint unregistered_parent; savepoint registration_parent;')
     await expect(database.query("select public.complete_student_registration('Student Name','TEST-ID-1234','not-registered@example.invalid')"))
-      .rejects.toThrow('not a registered')
+      .rejects.toThrow('Student ID registration is complete')
     await database.exec('rollback to savepoint registration_parent;')
     const request = await database.query<{ id: string; status: string }>("select id,status from public.request_student_parent_link(' VERIFIED-PARENT@example.invalid ')")
     expect(request.rows[0].status).toBe('pending')

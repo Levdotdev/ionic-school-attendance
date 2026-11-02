@@ -26,7 +26,8 @@ Email, Google, and Facebook use the same one-time student, teacher, or parent se
 ### Attendance
 
 - Camera-only scanning for long 1D student ID barcodes: Code 128, Code 39, Code 93, Codabar, ITF, EAN, and UPC.
-- Raw barcode values are not stored in browser storage or public tables. PostgreSQL stores a one-way hash in a private schema.
+- Barcode values are not stored in browser storage or public tables. PostgreSQL keeps the exact scanned ID value and its verification hash in a private schema. Administrators can view saved IDs; approved teachers can view IDs only for their own class rosters.
+- Student ID registration is locked after setup. An administrator can approve one camera re-scan from **Student identity → School ID barcode**. The current ID stays active until the new scan is saved successfully, then the one-time approval is consumed. Attendance, enrollment, face verification, and parent links are preserved. Legacy hash-only IDs require an approved re-scan before their original value can be displayed.
 - Manual teacher attendance with present and absent controls, including a fallback for a student who cannot complete a self-check. A manual mark cannot overwrite a submitted self-check or its photo.
 - On-site self-check requires the physical ID barcode, a newly captured selfie, the school geofence, and face verification against the enrolled template.
 - Online self-check requires a newly captured selfie, face verification, and location permission; no ID barcode or school geofence is required. Coordinates are stored in a private schema and are visible only to a currently verified linked parent.

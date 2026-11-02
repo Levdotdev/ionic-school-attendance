@@ -32,7 +32,7 @@ const navigation = computed<NavigationItem[]>(() => {
   const downloads:NavigationItem={label:role==='admin'?'Mobile apps':'Get mobile app',icon:downloadOutline,to:`/${role}/downloads`}
   if (role === 'teacher') return [...common, entry(role, 'classes', 'Classes', schoolOutline), entry(role, 'attendance', 'Attendance', checkmarkDoneOutline), entry(role, 'schedules', 'Class calendar', calendarOutline), downloads]
   if (role === 'parent') return [...common, entry(role, 'history', 'Attendance history', checkmarkDoneOutline), entry(role, 'schedule', 'Weekly schedule', calendarOutline), downloads]
-  if (role === 'admin') return [...common, entry(role, 'teachers', 'Teacher approvals', peopleOutline), entry(role, 'verification', 'Face verification', shieldCheckmarkOutline), entry(role, 'parents', 'Parent connections', peopleOutline), downloads]
+  if (role === 'admin') return [...common, entry(role, 'teachers', 'Teacher approvals', peopleOutline), entry(role, 'verification', 'Student identity', shieldCheckmarkOutline), entry(role, 'parents', 'Parent connections', peopleOutline), downloads]
   return [...common, entry(role, 'courses', 'My courses', schoolOutline), { label: 'Tasks', icon: checkboxOutline, to: '/student/tasks' }, entry(role, 'schedule', 'My calendar', calendarOutline), entry(role, 'history', 'Attendance history', checkmarkDoneOutline), downloads]
 })
 function isActive(item: NavigationItem) {

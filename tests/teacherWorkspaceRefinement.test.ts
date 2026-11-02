@@ -74,6 +74,33 @@ afterEach(() => {
   else Reflect.deleteProperty(navigator, 'clipboard')
 })
 describe('teacher workspace refinements', () => {
+  it('shows saved ID values only beside the class roster and explains legacy values', async () => {
+    mocks.rpc.mockImplementation(async name => ({ data: name === 'class_student_barcode_values' ? [
+      { student_id: 'student-1', barcode_value: '20-AbC/01234' },
+      { student_id: 'student-2', barcode_value: null },
+      { student_id: 'other-class-student', barcode_value: 'OTHER-CLASS-ID' },
+    ] : [], error: null }))
+    const wrapper = render('attendance'); await flushPromises()
+    expect(mocks.rpc).toHaveBeenCalledWith('class_student_barcode_values', { p_class_id: 'class-1' })
+    expect(wrapper.get('[data-student-id="student-1"]').text()).toBe('Student ID: 20-AbC/01234')
+    expect(wrapper.get('[data-student-id="student-2"]').text()).toContain('approved re-scan needed')
+    expect(wrapper.text()).not.toContain('OTHER-CLASS-ID')
+    wrapper.unmount()
+  })
+  it('discards private ID values returned after the teacher account changes', async () => {
+    let finish!: (result: unknown) => void
+    mocks.rpc.mockImplementation(name => name === 'class_student_barcode_values'
+      ? new Promise(resolve => { finish = resolve }) : Promise.resolve({ data: [], error: null }))
+    const wrapper = render('attendance'); await flushPromises()
+    expect(finish).toBeTypeOf('function')
+    mocks.profile.value = { ...mocks.profile.value, id: 'another-teacher' }
+    await flushPromises()
+    finish({ data: [{ student_id: 'student-1', barcode_value: 'PRIVATE-OLD-ACCOUNT-ID' }], error: null })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('PRIVATE-OLD-ACCOUNT-ID')
+    expect(wrapper.findAll('[data-student-id]')).toHaveLength(0)
+    wrapper.unmount()
+  })
   it('keeps overview attendance when opening the profile menu refreshes the same account object', async () => {
     fixtureAttendance = [{ id: 'present', meeting_id: 'meeting-1', student_id: 'student-1', status: 'present', source: 'teacher', verification_status: null }]
     const wrapper = render('overview'); await flushPromises()

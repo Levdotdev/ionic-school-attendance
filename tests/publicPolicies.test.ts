@@ -20,6 +20,8 @@ describe('public privacy and deletion information', () => {
     expect(wrapper.text()).toContain('project-owned Gmail address')
     expect(wrapper.text()).toContain('face template')
     expect(wrapper.text()).toContain('stored as a hash')
+    expect(wrapper.text()).toContain('scanned ID value is also retained privately')
+    expect(wrapper.text()).toContain('saved school-ID barcode values of students in their own classes')
     expect(wrapper.text()).toContain('only to the verified, approved linked parent')
     expect(wrapper.text()).toContain('does not provide a general automatic deletion schedule')
     expect(wrapper.find('a[href="/data-deletion.html"]').exists()).toBe(true)

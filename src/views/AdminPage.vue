@@ -7,8 +7,8 @@
         <header class="page-heading">
           <div>
             <p class="eyebrow">School administration</p>
-            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : activeSection === 'verification' ? 'Student face verification' : activeSection === 'parents' ? 'Family connections' : 'Administration overview' }}</h1>
-            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : activeSection === 'verification' ? 'Face enrollment is completed once. Authorize a new enrollment only when a student needs to replace it.' : activeSection === 'parents' ? 'Review each student’s parent-approved links and invite parents to register.' : 'Manage teacher access, family connections, and student verification.' }}</p>
+            <h1>{{ activeSection === 'teachers' ? 'Teacher approvals' : activeSection === 'verification' ? 'Student identity verification' : activeSection === 'parents' ? 'Family connections' : 'Administration overview' }}</h1>
+            <p>{{ activeSection === 'teachers' ? 'Review teacher registrations before they can create classes or manage attendance.' : activeSection === 'verification' ? 'Review registered school IDs and face enrollment. Approve a one-time replacement when a student needs a retake.' : activeSection === 'parents' ? 'Review each student’s parent-approved links and invite parents to register.' : 'Manage teacher access, family connections, and student verification.' }}</p>
           </div>
         </header>
 
@@ -31,7 +31,7 @@
           <div><p class="eyebrow">Teacher access</p><h2>{{ pendingCount ? 'Registrations need your review' : 'Your approval queue is clear' }}</h2><p>Review teachers before they can create classes and record student attendance.</p></div>
           <ion-button @click="router.push({ path: '/admin', query: { section: 'teachers' } })">Open teacher approvals</ion-button>
         </section>
-        <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Student identity</p><h2>Face verification access</h2><p>Manage one-time face enrollment and authorize a retake when needed.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'verification' } })">Manage verification</ion-button></section>
+        <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Student identity</p><h2>School ID and face verification</h2><p>Review student ID barcodes and approve one-time ID or face retakes.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'verification' } })">Manage verification</ion-button></section>
         <section v-if="activeSection === 'overview'" class="queue-card overview-next verification-overview"><div><p class="eyebrow">Parent access</p><h2>Family connections</h2><p>Inspect student links. Only the parent can approve a new family connection.</p></div><ion-button fill="outline" @click="router.push({ path: '/admin', query: { section: 'parents' } })">View family connections</ion-button></section>
 
         <div
@@ -44,12 +44,35 @@
           <span>{{ message }}</span>
         </div>
 
-        <section v-if="activeSection === 'verification'" class="queue-card" aria-labelledby="verification-heading">
+        <div v-if="activeSection === 'verification'" class="status-tabs identity-tabs" role="group" aria-label="Identity verification type">
+          <button type="button" :aria-pressed="identityView === 'face'" :class="{ selected: identityView === 'face' }" @click="identityView = 'face'">Face enrollment</button>
+          <button type="button" :aria-pressed="identityView === 'barcode'" :class="{ selected: identityView === 'barcode' }" @click="identityView = 'barcode'">School ID barcode</button>
+        </div>
+
+        <section v-if="activeSection === 'verification' && identityView === 'face'" class="queue-card" aria-labelledby="verification-heading">
           <header class="queue-heading"><div><p class="eyebrow">Student identity</p><h2 id="verification-heading">Face enrollment</h2></div><label class="student-search"><span class="sr-only">Find a student</span><input v-model="studentSearch" type="search" placeholder="Search student name or email" /></label></header>
           <div class="status-tabs" role="group" aria-label="Face enrollment status"><button type="button" :aria-pressed="faceView === 'enrolled'" :class="{ selected: faceView === 'enrolled' }" @click="faceView = 'enrolled'">Enrolled <span>{{ enrolledCount }}</span></button><button type="button" :aria-pressed="faceView === 'not_enrolled'" :class="{ selected: faceView === 'not_enrolled' }" @click="faceView = 'not_enrolled'">Not enrolled <span>{{ faceStudents.length - enrolledCount }}</span></button></div>
           <div v-if="loadingFaces" class="loading-state" role="status"><ion-spinner name="crescent" /><p>Loading verification access…</p></div>
           <div v-else-if="!visibleStudents.length" class="queue-empty"><span class="empty-icon"><ion-icon :icon="peopleOutline" /></span><h3>{{ studentSearch ? 'No matching students' : faceView === 'enrolled' ? 'No enrolled students' : 'Every registered student is enrolled' }}</h3></div>
           <div v-else class="applicant-list"><article v-for="student in visibleStudents" :key="student.student_id" class="applicant-row verification-row"><div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><small>{{ student.enrolled ? `Enrolled ${formatDateTime(student.enrolled_at)}` : 'Face enrollment not completed' }}</small><small v-if="student.can_retake">A one-time retake is authorized.</small></div></div><div class="review-panel verification-actions"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.enrolled ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'Retake authorized' : student.enrolled ? 'Enrolled' : 'Not enrolled' }}</span><ion-button v-if="student.enrolled && !student.can_retake" fill="outline" class="approve-button" @click="openRetake(student)">Authorize retake</ion-button></div></article></div>
+        </section>
+
+        <section v-if="activeSection === 'verification' && identityView === 'barcode'" class="queue-card" aria-labelledby="barcode-verification-heading">
+          <header class="queue-heading"><div><p class="eyebrow">Student identity</p><h2 id="barcode-verification-heading">School ID barcode</h2></div><label class="student-search"><span class="sr-only">Find a student by name, email or ID</span><input v-model="barcodeSearch" type="search" placeholder="Search student name, email or ID" /></label></header>
+          <div class="status-tabs" role="group" aria-label="School ID registration status">
+            <button type="button" :aria-pressed="barcodeView === 'registered'" :class="{ selected: barcodeView === 'registered' }" @click="barcodeView = 'registered'">Registered <span>{{ registeredBarcodeCount }}</span></button>
+            <button type="button" :aria-pressed="barcodeView === 'not_registered'" :class="{ selected: barcodeView === 'not_registered' }" @click="barcodeView = 'not_registered'">Not registered <span>{{ barcodeStudents.length - registeredBarcodeCount }}</span></button>
+          </div>
+          <p class="family-help barcode-help">A retake approval permits one camera re-scan. The saved ID remains active until the student successfully saves its replacement.</p>
+          <div v-if="loadingBarcodes" class="loading-state" role="status"><ion-spinner name="crescent" /><p>Loading student ID registrations…</p></div>
+          <div v-else-if="barcodeListError" class="queue-empty" role="alert"><h3>Student IDs could not be loaded</h3><p>{{ barcodeListError }}</p></div>
+          <div v-else-if="!visibleBarcodeStudents.length" class="queue-empty"><h3>{{ barcodeSearch ? 'No matching students' : barcodeView === 'registered' ? 'No registered student IDs' : 'Every student has registered their ID' }}</h3></div>
+          <div v-else class="applicant-list">
+            <article v-for="student in visibleBarcodeStudents" :key="student.student_id" class="applicant-row verification-row barcode-registration-row">
+              <div class="applicant-summary"><span class="applicant-avatar">{{ initials(student.full_name || 'Student') }}</span><div class="applicant-copy"><h3>{{ student.full_name || 'Student' }}</h3><p>{{ student.email }}</p><div v-if="student.barcode_value != null" class="student-id-detail"><span>Student ID</span><code class="student-id-value">{{ student.barcode_value }}</code></div><small v-else-if="student.is_registered" class="missing-id-value">ID value unavailable. An approved camera re-scan is needed before it can be displayed.</small><small v-else>School ID registration not completed.</small><small v-if="student.registered_at">Registered {{ formatDateTime(student.registered_at) }}</small></div></div>
+              <div class="review-panel verification-actions"><span class="status-pill" :class="student.can_retake ? 'is-pending' : student.is_registered ? 'is-approved' : 'is-rejected'">{{ student.can_retake ? 'ID retake approved' : student.is_registered ? 'Registered' : 'Not registered' }}</span><ion-button v-if="student.is_registered && !student.can_retake" fill="outline" class="approve-button" @click="openBarcodeRetake(student)">Approve ID retake</ion-button></div>
+            </article>
+          </div>
         </section>
 
         <section v-if="activeSection === 'parents'" class="queue-card" aria-labelledby="family-connections-heading">
@@ -207,6 +230,10 @@
       <template v-if="selectedStudent"><p class="retake-description">{{ selectedStudent.full_name }} can replace their face enrollment once. Their existing enrollment remains active until they complete the new one.</p><ion-textarea v-model="retakeNote" label="Reason (optional)" label-placement="stacked" fill="outline" auto-grow :maxlength="500" :disabled="grantingRetake" /><p v-if="retakeError" class="retake-error" role="alert">{{ retakeError }}</p></template>
       <template #actions><ion-button fill="outline" :disabled="grantingRetake" @click="selectedStudent = null">Cancel</ion-button><ion-button :disabled="grantingRetake" @click="grantRetake">{{ grantingRetake ? 'Authorizing…' : 'Authorize retake' }}</ion-button></template>
     </app-modal>
+    <app-modal :open="Boolean(selectedBarcodeStudent)" title="Approve one ID barcode retake?" :busy="grantingBarcodeRetake" @close="closeBarcodeRetake">
+      <template v-if="selectedBarcodeStudent"><p class="retake-description">{{ selectedBarcodeStudent.full_name }} can replace their school ID barcode once using the camera. Their current ID remains active until they successfully save the replacement.</p><ion-textarea v-model="barcodeRetakeNote" label="Reason (optional)" label-placement="stacked" fill="outline" auto-grow :maxlength="500" :disabled="grantingBarcodeRetake" /><p v-if="barcodeRetakeError" class="retake-error" role="alert">{{ barcodeRetakeError }}</p></template>
+      <template #actions><ion-button fill="outline" :disabled="grantingBarcodeRetake" @click="closeBarcodeRetake">Cancel</ion-button><ion-button :disabled="grantingBarcodeRetake" @click="grantBarcodeRetake">{{ grantingBarcodeRetake ? 'Approving…' : 'Approve ID retake' }}</ion-button></template>
+    </app-modal>
   </ion-page>
 </template>
 
@@ -258,6 +285,7 @@ interface TeacherApplicant {
   created_at: string
 }
 interface FaceEnrollment { student_id: string; full_name: string; email: string; enrolled: boolean; can_retake: boolean; granted_at: string | null; enrolled_at: string | null }
+interface BarcodeRegistration { student_id: string; full_name: string; email: string; is_registered: boolean; can_retake: boolean; granted_at: string | null; registered_at: string | null; barcode_value: string | null }
 interface ParentStatus { student_id: string; has_approved_parent: boolean; approved_parent_count: number }
 
 type QueueView = 'pending' | 'approved' | 'rejected'
@@ -281,6 +309,15 @@ const selectedStudent = ref<FaceEnrollment | null>(null)
 const studentSearch = ref(''), retakeNote = ref(''), retakeError = ref('')
 const loadingFaces = ref(false), grantingRetake = ref(false)
 const faceView = ref<'enrolled' | 'not_enrolled'>('enrolled')
+const identityView = ref<'face' | 'barcode'>('face')
+const barcodeStudents = ref<BarcodeRegistration[]>([]), selectedBarcodeStudent = ref<BarcodeRegistration | null>(null)
+const barcodeView = ref<'registered' | 'not_registered'>('registered')
+const barcodeSearch = ref(''), barcodeRetakeNote = ref(''), barcodeRetakeError = ref(''), barcodeListError = ref('')
+const loadingBarcodes = ref(false), grantingBarcodeRetake = ref(false)
+const barcodePanelActive = computed(() => profile.value?.role === 'admin' && activeSection.value === 'verification' && identityView.value === 'barcode')
+const registeredBarcodeCount = computed(() => barcodeStudents.value.filter(student => student.is_registered).length)
+const visibleBarcodeStudents = computed(() => barcodeStudents.value.filter(student => student.is_registered === (barcodeView.value === 'registered') && `${student.full_name} ${student.email} ${student.barcode_value ?? ''}`.toLowerCase().includes(barcodeSearch.value.trim().toLowerCase())))
+let barcodeRequest = 0, barcodeGrantRequest = 0, adminDisposed = false
 const teacherSearch = ref(''), familySearch = ref(''), inviteParentOpen = ref(false)
 const familyView = ref<'linked' | 'unlinked'>('linked')
 const parentStatuses = ref<ParentStatus[]>([]), loadingParentStatuses = ref(false), parentStatusesLoaded = ref(false), parentStatusesError = ref('')
@@ -298,8 +335,16 @@ const visibleApplicants = computed(() => applicants.value.filter(applicant => (a
 let feedbackTimeout: ReturnType<typeof setTimeout> | undefined
 watch(message, value => { clearTimeout(feedbackTimeout); if (value) feedbackTimeout = setTimeout(clearMessage, 5000) })
 watch(activeSection, () => { clearMessage(); selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null })
-watch(() => profile.value?.id, () => { clearMessage(); applicants.value = []; faceStudents.value = []; parentStatuses.value = []; parentStatusesLoaded.value = false; selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null; inviteParentOpen.value = false })
-onBeforeUnmount(() => { clearTimeout(feedbackTimeout) })
+watch([() => profile.value?.id, () => profile.value?.role], () => { clearMessage(); applicants.value = []; faceStudents.value = []; parentStatuses.value = []; parentStatusesLoaded.value = false; selectedApplicant.value = null; selectedStudent.value = null; guardianStudent.value = null; inviteParentOpen.value = false })
+watch([() => profile.value?.id, () => profile.value?.role, activeSection, identityView], (current, previous) => {
+  barcodeRequest++; barcodeGrantRequest++
+  barcodeStudents.value = []; selectedBarcodeStudent.value = null
+  barcodeListError.value = ''; barcodeRetakeError.value = ''; barcodeRetakeNote.value = ''
+  loadingBarcodes.value = false; grantingBarcodeRetake.value = false
+  if (!previous || current[0] !== previous[0] || current[1] !== previous[1]) { barcodeSearch.value = ''; barcodeView.value = 'registered' }
+  if (barcodePanelActive.value) void loadBarcodeStudents()
+}, { immediate: true })
+onBeforeUnmount(() => { adminDisposed = true; barcodeRequest++; barcodeGrantRequest++; barcodeStudents.value = []; selectedBarcodeStudent.value = null; clearTimeout(feedbackTimeout) })
 
 async function loadApplicants(background = false) {
   if (!background) { loading.value = true; clearMessage() }
@@ -337,6 +382,50 @@ async function loadFaceStudents() {
     faceStudents.value = (data ?? []) as FaceEnrollment[]
   } catch (error) { showError(error) }
   finally { loadingFaces.value = false }
+}
+async function loadBarcodeStudents() {
+  if (!barcodePanelActive.value || adminDisposed) return
+  const actor = profile.value!.id, request = ++barcodeRequest
+  const current = () => !adminDisposed && request === barcodeRequest && profile.value?.id === actor && barcodePanelActive.value
+  loadingBarcodes.value = barcodeStudents.value.length === 0
+  try {
+    const { data, error } = await supabase.rpc('admin_student_barcode_registrations')
+    if (!current()) return
+    if (error) throw error
+    barcodeStudents.value = Array.isArray(data) ? data : []
+    barcodeListError.value = ''
+    if (selectedBarcodeStudent.value) {
+      const saved = barcodeStudents.value.find(student => student.student_id === selectedBarcodeStudent.value?.student_id)
+      if (!saved?.is_registered || saved.can_retake) selectedBarcodeStudent.value = null
+      else selectedBarcodeStudent.value = saved
+    }
+  } catch (error) {
+    if (current()) { barcodeStudents.value = []; barcodeListError.value = toUserFacingErrorMessage(error, 'Unable to load student ID registrations.') }
+  } finally { if (current()) loadingBarcodes.value = false }
+}
+function openBarcodeRetake(student: BarcodeRegistration) {
+  if (!barcodePanelActive.value || !student.is_registered || student.can_retake || grantingBarcodeRetake.value) return
+  selectedBarcodeStudent.value = student; barcodeRetakeNote.value = ''; barcodeRetakeError.value = ''
+}
+function closeBarcodeRetake() {
+  if (grantingBarcodeRetake.value) return
+  selectedBarcodeStudent.value = null; barcodeRetakeNote.value = ''; barcodeRetakeError.value = ''
+}
+async function grantBarcodeRetake() {
+  const student = selectedBarcodeStudent.value
+  if (!student?.is_registered || student.can_retake || !barcodePanelActive.value || grantingBarcodeRetake.value) return
+  const actor = profile.value!.id, request = ++barcodeGrantRequest
+  const current = () => !adminDisposed && request === barcodeGrantRequest && actor === profile.value?.id && barcodePanelActive.value
+  grantingBarcodeRetake.value = true; barcodeRetakeError.value = ''
+  try {
+    const { error } = await supabase.rpc('admin_grant_barcode_retake', { p_student_id: student.student_id, p_note: barcodeRetakeNote.value.trim() || null })
+    if (!current()) return
+    if (error) throw error
+    selectedBarcodeStudent.value = null
+    await loadBarcodeStudents()
+    if (current()) showSuccess(`A one-time ID barcode retake is now approved for ${student.full_name}.`)
+  } catch (error) { if (current()) barcodeRetakeError.value = toUserFacingErrorMessage(error, 'Unable to approve an ID barcode retake.') }
+  finally { if (current()) grantingBarcodeRetake.value = false }
 }
 let parentStatusRequest = 0
 async function loadParentStatuses() {
@@ -467,13 +556,18 @@ onMounted(async () => {
 
 onIonViewWillEnter(async () => {
   if (loading.value || signingOut.value || reviewingTeacherId.value || selectedApplicant.value || profile.value?.role !== 'admin') return
-  await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses()])
+  await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses(), loadBarcodeStudents()])
 })
-useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.role === 'admin', onChange: async () => { await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses()]) } })
+useRealtimeRefresh({ channel: 'administration', enabled: () => profile.value?.role === 'admin', onChange: async () => { await Promise.all([loadApplicants(true), loadFaceStudents(), loadParentStatuses(), loadBarcodeStudents()]) } })
 </script>
 
 <style scoped>
 .family-help { margin:0 22px 20px; color:var(--campus-muted); font-size:12px; line-height:1.6; }
+.identity-tabs { padding:0 0 18px !important; border-bottom:0 !important; }
+.barcode-help { margin-top:18px; }
+.student-id-detail { display:grid; gap:4px; margin:10px 0; color:var(--campus-muted); font-size:12px; }
+.student-id-value { display:block; color:var(--campus-text); font-size:14px; line-height:1.5; overflow-wrap:anywhere; white-space:pre-wrap; }
+.missing-id-value { line-height:1.6; }
 .admin-page {
   --campus-accent-local: var(--campus-accent, #087443);
   --campus-navy-local: var(--campus-navy, #063f2a);

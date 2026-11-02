@@ -216,6 +216,7 @@
                     <div class="student-copy">
                       <strong>{{ studentListName(student) }}</strong>
                       <span>{{ student.email || 'No email recorded' }}</span>
+                      <small class="student-id-value" :data-student-id="student.id"><template v-if="student.barcode_value">Student ID: <code>{{ student.barcode_value }}</code></template><template v-else>Student ID value unavailable · approved re-scan needed</template></small>
                       <button type="button" class="guardian-link-button" @click="guardianStudent = student">View linked parents</button>
                       <ion-badge
                         v-if="attendanceByStudent[student.id]"
@@ -564,6 +565,7 @@ interface StudentRow {
   last_name?: string
   full_name: string
   email: string | null
+  barcode_value?: string | null
 }
 
 interface AttendanceRow {
@@ -769,6 +771,11 @@ watch([() => profile.value?.id, teacherApproved], () => {
   overviewRequest++
   overviewState.value = null
   overviewError.value = ''
+  ++classDetailsRequest
+  clearClassDetails()
+  guardianStudent.value = null
+  reportOpen.value = false
+  closeEvidence()
 })
 
 useRealtimeRefresh({
@@ -1167,7 +1174,8 @@ async function deleteClass(item: ClassRow) {
 
 async function loadClassDetails(classId: string, options: { generate?: boolean; silent?: boolean } = {}) {
   const request = ++classDetailsRequest
-  const isCurrent = () => request === classDetailsRequest && classId === selectedClassId.value
+  const actorId = profile.value?.id
+  const isCurrent = () => request === classDetailsRequest && classId === selectedClassId.value && actorId === profile.value?.id && teacherApproved.value
   if (!options.silent) loadingDetails.value = true
   try {
     if (options.generate !== false && isCurrentSchoolWeek.value && !activeClass.value?.archived_at) {
@@ -1176,7 +1184,7 @@ async function loadClassDetails(classId: string, options: { generate?: boolean; 
       if (ensureError) throw ensureError
     }
 
-    const [scheduleResult, meetingResult, enrollmentResult] = await Promise.all([
+    const [scheduleResult, meetingResult, enrollmentResult, barcodeResult] = await Promise.all([
       supabase
         .from('class_schedules')
         .select('*')
@@ -1189,18 +1197,21 @@ async function loadClassDetails(classId: string, options: { generate?: boolean; 
         .lt('starts_at', week.endIso)
         .order('starts_at'),
       supabase.from('class_enrollments').select('student_id').eq('class_id', classId).eq('is_active', true),
+      supabase.rpc('class_student_barcode_values', { p_class_id: classId }),
     ])
     if (scheduleResult.error) throw scheduleResult.error
     if (meetingResult.error) throw meetingResult.error
     if (enrollmentResult.error) throw enrollmentResult.error
+    if (barcodeResult.error) throw barcodeResult.error
     const enrolledStudents = await loadStudents((enrollmentResult.data ?? []).map((row) => row.student_id))
     if (!isCurrent()) return
+    const barcodeByStudent = new Map<string, string | null>((barcodeResult.data ?? []).map((row: { student_id: string; barcode_value: string | null }) => [row.student_id, row.barcode_value]))
 
     schedules.value = ((scheduleResult.data ?? []) as ScheduleRow[])
       .map(schedule => ({ ...schedule, attendance_mode: schedule.attendance_mode ?? 'teacher_manual', check_in_minutes_after_start: schedule.check_in_minutes_after_start ?? null }))
       .sort((a, b) => scheduleSortValue(a) - scheduleSortValue(b) || a.starts_at.localeCompare(b.starts_at))
     meetings.value = (meetingResult.data ?? []) as MeetingRow[]
-    students.value = enrolledStudents
+    students.value = enrolledStudents.map(student => ({ ...student, barcode_value: barcodeByStudent.get(student.id) ?? null }))
 
     const previousMeetingId = selectedMeetingId.value
     const selectionStillExists = meetings.value.some((item) => item.id === previousMeetingId)
@@ -2241,6 +2252,8 @@ async function logout() {
 .student-copy > span { overflow: hidden; max-width: 100%; text-overflow: ellipsis; white-space: nowrap; }
 .student-copy strong { color: var(--page-text); font-size: 0.9rem; }
 .student-copy > span { color: var(--page-muted); font-size: 0.76rem; }
+.student-id-value { max-width: 100%; overflow-wrap: anywhere; color: var(--page-muted); font-size: 0.74rem; line-height: 1.5; }
+.student-id-value code { color: var(--page-text); white-space: pre-wrap; font-size: inherit; }
 .attendance-badge { margin-top: 2px; font-size: 0.64rem; text-transform: capitalize; }
 .attendance-buttons,
 .form-actions,

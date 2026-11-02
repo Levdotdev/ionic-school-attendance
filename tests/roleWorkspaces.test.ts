@@ -433,6 +433,7 @@ describe('teacher class workspace', () => {
       return { data: [], error: null }
     }
     mocks.rpc.mockImplementation(async (name, payload) => {
+      if (name === 'class_student_barcode_values') return { data: [], error: null }
       if (name === 'set_class_archived') current = { ...current, archived_at: payload.p_archived ? '2026-10-24T00:00:00Z' : null }
       return { data: current, error: null }
     })

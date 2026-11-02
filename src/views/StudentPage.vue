@@ -24,7 +24,7 @@
             <h1>Complete your student profile</h1>
             <p>
               Register your physical school ID, then ask your registered parent or guardian to approve your link before joining classes.
-              Your barcode number is protected and never shown on screen.
+              Your scanned ID stays hidden here. Authorized administrators and teachers of your classes can view the saved value.
             </p>
 
             <ol class="setup-steps" aria-label="Registration steps">
@@ -250,6 +250,18 @@
                 </div>
               </section>
 
+              <section class="barcode-setup-card" data-school-id-access>
+                <ion-icon :icon="barcodeOutline" />
+                <div>
+                  <strong>School ID barcode</strong>
+                  <p v-if="barcodeAccessMessage" role="alert">{{ barcodeAccessMessage }}</p>
+                  <p v-else-if="!barcodeAccessReady">Checking your school ID access…</p>
+                  <p v-else>{{ barcodeRetakeAllowed ? 'An administrator approved one ID barcode retake. Your current ID stays active until you save the replacement.' : barcodeRegistered ? 'Your school ID is registered and locked. Contact an administrator to approve a retake.' : 'Your school ID scan is unavailable. Contact an administrator for help.' }}</p>
+                  <ion-button v-if="barcodeAccessReady && barcodeRetakeAllowed" size="small" fill="outline" :disabled="barcodeAccessLoading" @click="barcodeRetakeOpen = true">Retake ID barcode</ion-button>
+                  <p v-if="barcodeRetakeFeedback" class="guardian-success" role="status">{{ barcodeRetakeFeedback }}</p>
+                </div>
+              </section>
+
               <section v-if="activeSection === 'overview'" class="privacy-card">
                 <ion-icon :icon="shieldCheckmarkOutline" />
                 <div>
@@ -325,6 +337,7 @@
       @close="faceEnrollmentOpen = false"
       @enrolled="handleFaceEnrolled"
     />
+    <barcode-retake-modal :open="barcodeRetakeOpen" @close="barcodeRetakeOpen = false" @saved="handleBarcodeRetaken" />
   </ion-page>
 </template>
 
@@ -356,6 +369,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import FaceEnrollmentModal from '@/components/FaceEnrollmentModal.vue'
+import BarcodeRetakeModal from '@/components/BarcodeRetakeModal.vue'
 import PortalHeader from '@/components/PortalHeader.vue'
 import AppModal from '@/components/AppModal.vue'
 import StudentHistoryPanel from '@/components/StudentHistoryPanel.vue'
@@ -428,6 +442,9 @@ const pageMessage = ref('')
 const faceEnrolled = ref(false)
 const faceRetakeAllowed = ref(false)
 const faceEnrollmentOpen = ref(false)
+const barcodeRetakeOpen = ref(false), barcodeRegistered = ref(false), barcodeRetakeAllowed = ref(false)
+const barcodeAccessReady = ref(false), barcodeAccessLoading = ref(false), barcodeAccessMessage = ref(''), barcodeRetakeFeedback = ref('')
+let barcodeAccessRequest = 0
 const joinModalOpen = ref(false)
 const guardianLinks = ref<GuardianSummary[]>([])
 const guardianModalOpen = ref(false)
@@ -445,7 +462,12 @@ function expireFeedback(read: () => string, clear: () => void, message: string) 
 }
 watch(guardianMessage, message => { if (!guardianError.value) expireFeedback(() => guardianMessage.value, () => { guardianMessage.value = '' }, message) })
 watch(joinMessage, message => { if (!joinFailed.value) expireFeedback(() => joinMessage.value, () => { joinMessage.value = '' }, message) })
-onBeforeUnmount(() => { feedbackTimers.forEach(clearTimeout); feedbackTimers.clear() })
+watch(barcodeRetakeFeedback, message => { expireFeedback(() => barcodeRetakeFeedback.value, () => { barcodeRetakeFeedback.value = '' }, message) })
+watch([() => user.value?.id, () => profile.value?.role], () => {
+  barcodeAccessRequest++; barcodeRetakeOpen.value = false; barcodeRegistered.value = false; barcodeRetakeAllowed.value = false
+  barcodeAccessReady.value = false; barcodeAccessLoading.value = false; barcodeAccessMessage.value = ''; barcodeRetakeFeedback.value = ''; rawBarcode.value = null
+}, { flush: 'sync' })
+onBeforeUnmount(() => { barcodeAccessRequest++; rawBarcode.value = null; feedbackTimers.forEach(clearTimeout); feedbackTimers.clear() })
 
 const registrationCompleted = computed(() => Boolean(studentProfile.value?.registration_completed_at))
 const barcodeCaptured = computed(() => Boolean(rawBarcode.value))
@@ -514,6 +536,24 @@ async function loadFaceEnrollmentStatus() {
   const status = Array.isArray(data) ? data[0] : data
   faceEnrolled.value = Boolean(status?.is_enrolled ?? status?.enrolled)
   faceRetakeAllowed.value = Boolean(status?.can_retake)
+}
+
+async function loadBarcodeRegistrationAccess() {
+  const request = ++barcodeAccessRequest, actor = user.value?.id
+  if (!actor || profile.value?.role !== 'student') return
+  const current = () => request === barcodeAccessRequest && user.value?.id === actor && profile.value?.role === 'student'
+  barcodeAccessLoading.value = true
+  try {
+    const { data, error } = await supabase.rpc('my_barcode_registration_access')
+    if (!current()) return
+    if (error) throw error
+    const access = Array.isArray(data) ? data[0] : data
+    if (!access || typeof access.is_registered !== 'boolean' || typeof access.can_retake !== 'boolean') throw new Error('School ID access could not be checked. Please try again later.')
+    barcodeRegistered.value = access.is_registered; barcodeRetakeAllowed.value = access.is_registered && access.can_retake
+    barcodeAccessReady.value = true; barcodeAccessMessage.value = ''
+  } catch (error) {
+    if (current()) { barcodeAccessReady.value = false; barcodeRetakeAllowed.value = false; barcodeAccessMessage.value = toUserFacingErrorMessage(error, 'Unable to check school ID access.') }
+  } finally { if (current()) barcodeAccessLoading.value = false }
 }
 
 async function loadAvailableMeetings() {
@@ -596,7 +636,7 @@ async function completeRegistration() {
     // Erase the raw credential from client memory as soon as the secure RPC has used it.
     rawBarcode.value = null
     await Promise.all([loadStudentProfile(), refreshProfile()])
-    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule(), loadGuardianLinks()])
+    await Promise.all([loadAvailableMeetings(), loadCoursesAndSchedule(), loadGuardianLinks(), loadBarcodeRegistrationAccess()])
     faceEnrollmentOpen.value = true
   } catch (error) {
     registrationMessage.value = toUserFacingErrorMessage(error, 'Registration could not be completed.')
@@ -743,6 +783,12 @@ async function handleFaceEnrolled() {
   pageMessage.value = ''
 }
 
+async function handleBarcodeRetaken() {
+  barcodeRetakeOpen.value = false; barcodeRetakeAllowed.value = false
+  barcodeRetakeFeedback.value = 'Your school ID barcode was updated.'
+  await loadBarcodeRegistrationAccess()
+}
+
 function showHistory() { void router.push({ path: '/student', query: { section: 'history' } }) }
 function showSchedule() { void router.push({ path: '/student', query: { section: 'schedule' } }) }
 function openCourseTasks(classId: string) { void router.push({ path: '/student/tasks', query: { course: classId } }) }
@@ -770,6 +816,7 @@ async function loadStudentDashboard(promptForFaceEnrollment = false) {
         loadAvailableMeetings(),
         loadCoursesAndSchedule(),
         loadFaceEnrollmentStatus(),
+        loadBarcodeRegistrationAccess(),
         loadGuardianLinks(),
       ])
       if (promptForFaceEnrollment) faceEnrollmentOpen.value = !faceEnrolled.value
@@ -784,7 +831,7 @@ async function loadStudentDashboard(promptForFaceEnrollment = false) {
 onMounted(() => loadStudentDashboard(true))
 useRealtimeRefresh({ channel: 'student-dashboard', enabled: () => registrationCompleted.value && !savingRegistration.value && !signingOut.value, onChange: () => loadStudentDashboard() })
 onIonViewWillEnter(async () => {
-  if (loading.value || !registrationCompleted.value || refreshing.value || refreshingSchedule.value || signingOut.value || savingRegistration.value || joiningClass.value || faceEnrollmentOpen.value || joinModalOpen.value) return
+  if (loading.value || !registrationCompleted.value || refreshing.value || refreshingSchedule.value || signingOut.value || savingRegistration.value || joiningClass.value || faceEnrollmentOpen.value || barcodeRetakeOpen.value || joinModalOpen.value) return
   await loadStudentDashboard()
 })
 </script>
@@ -1436,7 +1483,8 @@ onIonViewWillEnter(async () => {
 }
 
 .privacy-card,
-.face-setup-card {
+.face-setup-card,
+.barcode-setup-card {
   display: flex;
   gap: 0.8rem;
   padding: 1rem;
@@ -1457,25 +1505,30 @@ onIonViewWillEnter(async () => {
 }
 
 .privacy-card > ion-icon,
-.face-setup-card > ion-icon {
+.face-setup-card > ion-icon,
+.barcode-setup-card > ion-icon {
   flex: 0 0 auto;
   margin-top: 0.08rem;
   font-size: 1.25rem;
 }
 
 .privacy-card strong,
-.face-setup-card strong {
+.face-setup-card strong,
+.barcode-setup-card strong {
   color: var(--campus-text);
   font-size: 0.82rem;
 }
 
 .privacy-card p,
-.face-setup-card p {
+.face-setup-card p,
+.barcode-setup-card p {
   margin: 0.3rem 0 0;
   color: var(--campus-muted);
   font-size: 0.75rem;
   line-height: 1.45;
 }
+.barcode-setup-card [role="alert"] { color: var(--campus-danger); }
+.barcode-setup-card .guardian-success { color: var(--campus-success); }
 
 .message-box {
   display: flex;
